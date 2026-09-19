@@ -1,0 +1,24 @@
+system:
+  name: "AgentTrust Security Framework"
+  version: "1.0.0"
+  environment: "production"
+
+cryptography:
+  key_size: 2048
+  cert_valid_days: 365
+  hash_algorithm: "SHA256"
+  ca_common_name: "AgentTrust Root Security Authority"
+
+replay_protection:
+  timestamp_window_seconds: 120
+  clean_interval_seconds: 300
+
+gateway:
+  require_signed_requests: true
+  allow_direct_api_access: false
+  gateway_secret_token: "AGT-GATEWAY-INTERNAL-SECRET-KEY-98765"
+
+blockchain:
+  org_name: "AgentTrustOrg"
+  channel_name: "agenttrust-channel"
+  chaincode_name: "agenttrust-cc"

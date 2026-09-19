@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentTrust — Research-Grade AI Governance & Blockchain Console</title>
+  
+  <!-- Modern Typography: Plus Jakarta Sans, Outfit, Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+  <div class="app-layout">
+    
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo-container">
+          <div class="brand-icon-glow"></div>
+          <div class="brand-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path d="m9 12 2 2 4-4"/>
+            </svg>
+          </div>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">AgentTrust</span>
+          <span class="brand-subtitle">VERIFIABLE AI GOVERNANCE</span>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <div class="nav-section-label">EXECUTIVE OVERVIEW</div>
+        <button class="nav-item active" data-tab="tab-overview">
+          <i data-lucide="layout-dashboard"></i> <span>Security Overview</span>
+        </button>
+
+        <div class="nav-section-label">AGENT GOVERNANCE</div>
+        <button class="nav-item" data-tab="tab-agents">
+          <i data-lucide="users"></i> <span>Agent Registry & Policies</span>
+        </button>
+        <button class="nav-item" data-tab="tab-approvals">
+          <i data-lucide="user-check"></i> <span>Human Approval Queue</span> 
+          <span class="badge badge-warning count-pill" id="pending-count-badge">0</span>
+        </button>
+
+        <div class="nav-section-label">SECURITY OPERATIONS</div>
+        <button class="nav-item" data-tab="tab-scenarios">
+          <i data-lucide="shield-alert"></i> <span>Attack Lab (20 Threats)</span>
+        </button>
+        <button class="nav-item" data-tab="tab-gateway">
+          <i data-lucide="git-commit"></i> <span>13-Stage Pipeline Inspector</span>
+        </button>
+
+        <div class="nav-section-label">BLOCKCHAIN & EVIDENCE</div>
+        <button class="nav-item" data-tab="tab-blockchain">
+          <i data-lucide="blocks"></i> <span>Hyperledger Explorer</span>
+        </button>
+        <button class="nav-item" data-tab="tab-audit">
+          <i data-lucide="file-text"></i> <span>Audit Trail & Ledger</span>
+        </button>
+        <button class="nav-item" data-tab="tab-tamper">
+          <i data-lucide="fingerprint"></i> <span>Evidence & Tamper Lab</span>
+        </button>
+
+        <div class="nav-section-label">RESEARCH & BENCHMARKS</div>
+        <button class="nav-item" data-tab="tab-research">
+          <i data-lucide="bar-chart-3"></i> <span>Benchmarks & Modes</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="network-badge">
+          <span class="pulse-dot"></span>
+          <span>Hyperledger Fabric Active</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Container -->
+    <main class="main-content">
+      <!-- Top Navigation Header -->
+      <header class="top-header">
+        <div class="header-title">
+          <div class="title-with-badge">
+            <h1 id="page-heading">Executive Security Overview</h1>
+            <span class="system-status-chip"><span class="chip-dot"></span> Live Governance Active</span>
+          </div>
+          <p id="page-subheading">Real-time telemetry monitoring of autonomous AI agent identities, policy enforcement, and blockchain immutability.</p>
+        </div>
+        <div class="header-actions">
+          <div class="mode-pill-box">
+            <span class="mode-pill-label">MODE:</span>
+            <span id="active-mode-badge" class="badge badge-purple">MODE_D_AGENTTRUST_FABRIC</span>
+          </div>
+          <button class="btn btn-gradient" onclick="runAllScenarios()">
+            <i data-lucide="shield-check"></i> <span>Run 20 Attack Matrix</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="content-body">
+
+        <!-- TAB 1: Executive Overview -->
+        <section id="tab-overview" class="tab-pane active">
+          
+          <!-- Hyperledger Fabric Network Status Card -->
+          <div class="glass-card network-status-card margin-bottom">
+            <div class="card-header">
+              <div class="header-title-flex">
+                <div class="icon-avatar icon-purple"><i data-lucide="network"></i></div>
+                <div>
+                  <h3>Hyperledger Fabric Network Topology</h3>
+                  <p class="card-subtitle">Permissioned Multi-Org Consortium & Raft Consensus Cluster</p>
+                </div>
+              </div>
+              <span class="badge badge-emerald" id="fabric-net-status">● HEALTHY (Org1MSP + Org2MSP)</span>
+            </div>
+            <div class="card-body">
+              <div class="net-grid">
+                <div class="net-card">
+                  <div class="net-title"><i data-lucide="building-2"></i> Org1MSP (Finance Org)</div>
+                  <div class="net-status text-emerald">● Healthy</div>
+                  <div class="net-meta font-mono">peer0.org1.agenttrust.net</div>
+                </div>
+                <div class="net-card">
+                  <div class="net-title"><i data-lucide="building"></i> Org2MSP (Audit Org)</div>
+                  <div class="net-status text-emerald">● Healthy</div>
+                  <div class="net-meta font-mono">peer0.org2.agenttrust.net</div>
+                </div>
+                <div class="net-card">
+                  <div class="net-title"><i data-lucide="cpu"></i> Orderer Node Cluster</div>
+                  <div class="net-status text-cyan">● Raft Consensus</div>
+                  <div class="net-meta font-mono">orderer.agenttrust.net:7050</div>
+                </div>
+                <div class="net-card">
+                  <div class="net-title"><i data-lucide="file-code-2"></i> Chaincode Contract</div>
+                  <div class="net-status text-violet">● Active v2.0</div>
+                  <div class="net-meta font-mono">agent_trust_cc</div>
+                </div>
+              </div>
+              <div class="net-ledger-meta">
+                <div class="meta-chip"><span>Block Height:</span> <strong id="net-block-height" class="text-cyan">1</strong></div>
+                <div class="meta-chip"><span>Latest Transaction ID:</span> <code id="net-latest-txid" class="font-mono text-purple">tx-genesis-000</code></div>
+                <div class="meta-chip"><span>Commit Validation:</span> <span class="badge badge-cyan">100% VALIDATED</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- KPI Metric Stat Cards Grid -->
+          <div class="metrics-grid">
+            <div class="metric-card metric-purple">
+              <div class="metric-header">
+                <span class="metric-title">Registered Agents</span>
+                <div class="metric-icon-box"><i data-lucide="bot"></i></div>
+              </div>
+              <div class="metric-value" id="kpi-agents-count">1</div>
+              <div class="metric-status text-emerald">X.509 Cryptographic Certs Active</div>
+            </div>
+
+            <div class="metric-card metric-cyan">
+              <div class="metric-header">
+                <span class="metric-title">Total Gateway Requests</span>
+                <div class="metric-icon-box"><i data-lucide="activity"></i></div>
+              </div>
+              <div class="metric-value" id="kpi-total-requests">0</div>
+              <div class="metric-status text-muted">Processed through 13-Stage Pipeline</div>
+            </div>
+
+            <div class="metric-card metric-emerald">
+              <div class="metric-header">
+                <span class="metric-title">Allowed Actions</span>
+                <div class="metric-icon-box"><i data-lucide="check-circle-2"></i></div>
+              </div>
+              <div class="metric-value text-emerald" id="kpi-allowed-count">0</div>
+              <div class="metric-status text-emerald">Within Authority Limits</div>
+            </div>
+
+            <div class="metric-card metric-rose">
+              <div class="metric-header">
+                <span class="metric-title">Attack Mitigation Rate</span>
+                <div class="metric-icon-box"><i data-lucide="shield-check"></i></div>
+              </div>
+              <div class="metric-value text-rose" id="kpi-mitigation-rate">20/20</div>
+              <div class="metric-status text-rose">Implemented Scenarios Mitigated</div>
+            </div>
+
+            <div class="metric-card metric-amber">
+              <div class="metric-header">
+                <span class="metric-title">Pending Approvals</span>
+                <div class="metric-icon-box"><i data-lucide="clock"></i></div>
+              </div>
+              <div class="metric-value text-amber" id="kpi-pending-count">0</div>
+              <div class="metric-status text-amber">High-Value Threshold (> ₹10k)</div>
+            </div>
+
+            <div class="metric-card metric-violet">
+              <div class="metric-header">
+                <span class="metric-title">Hyperledger Fabric Blocks</span>
+                <div class="metric-icon-box"><i data-lucide="box"></i></div>
+              </div>
+              <div class="metric-value text-violet" id="kpi-block-height">1</div>
+              <div class="metric-status text-cyan">SHA-256 Ledger Height</div>
+            </div>
+          </div>
+
+          <!-- Interactive 13-Stage Pipeline Visual Flow Banner -->
+          <div class="glass-card margin-top">
+            <div class="card-header">
+              <div class="header-title-flex">
+                <div class="icon-avatar icon-cyan"><i data-lucide="git-pull-request"></i></div>
+                <div>
+                  <h3>Interactive 13-Stage Action Gateway Architecture</h3>
+                  <p class="card-subtitle">Non-bypassable zero-trust pipeline enforcing identity, authorization, risk, and immutable auditability</p>
+                </div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="pipeline-stepper-container">
+                <div class="stepper-track"></div>
+                <div class="stepper-grid">
+                  <div class="stepper-item active" title="1. Format & Schema Validation">
+                    <div class="step-circle">1</div>
+                    <span class="step-label">Format</span>
+                  </div>
+                  <div class="stepper-item" title="2. Certificate Check">
+                    <div class="step-circle">2</div>
+                    <span class="step-label">X.509 Cert</span>
+                  </div>
+                  <div class="stepper-item" title="3. RSA Signature Verification">
+                    <div class="step-circle">3</div>
+                    <span class="step-label">Signature</span>
+                  </div>
+                  <div class="stepper-item" title="4. Agent Status & Key Version">
+                    <div class="step-circle">4</div>
+                    <span class="step-label">Key Ver</span>
+                  </div>
+                  <div class="stepper-item" title="5. Replay & Idempotency">
+                    <div class="step-circle">5</div>
+                    <span class="step-label">Replay</span>
+                  </div>
+                  <div class="stepper-item" title="6. Trusted Risk Engine">
+                    <div class="step-circle">6</div>
+                    <span class="step-label">Risk Eval</span>
+                  </div>
+                  <div class="stepper-item" title="7. Policy Engine">
+                    <div class="step-circle">7</div>
+                    <span class="step-label">Policy</span>
+                  </div>
+                  <div class="stepper-item" title="8. Decision Branch">
+                    <div class="step-circle">8</div>
+                    <span class="step-label">Branch</span>
+                  </div>
+                  <div class="stepper-item" title="9. Protected API Execution">
+                    <div class="step-circle">9</div>
+                    <span class="step-label">API Exec</span>
+                  </div>
+                  <div class="stepper-item" title="10. Evidence Generation">
+                    <div class="step-circle">10</div>
+                    <span class="step-label">Evidence</span>
+                  </div>
+                  <div class="stepper-item" title="11. Local Hash Chain">
+                    <div class="step-circle">11</div>
+                    <span class="step-label">Hash Chain</span>
+                  </div>
+                  <div class="stepper-item" title="12. Fabric Commit">
+                    <div class="step-circle">12</div>
+                    <span class="step-label">Fabric Commit</span>
+                  </div>
+                  <div class="stepper-item" title="13. Response">
+                    <div class="step-circle">13</div>
+                    <span class="step-label">Response</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Demonstration Controls Grid -->
+          <div class="glass-card margin-top">
+            <div class="card-header">
+              <div class="header-title-flex">
+                <div class="icon-avatar icon-amber"><i data-lucide="zap"></i></div>
+                <div>
+                  <h3>Interactive Cyber Demonstration Controls</h3>
+                  <p class="card-subtitle">Click any control to launch real-time 13-stage gateway request processing telemetry</p>
+                </div>
+              </div>
+            </div>
+            <div class="card-body btn-grid-6">
+              <button class="btn btn-scenario btn-valid" onclick="triggerInteractiveScenario(1)">
+                <div class="btn-sc-icon"><i data-lucide="check-circle-2"></i></div>
+                <div class="btn-sc-text">
+                  <span class="btn-sc-title">1. Submit Valid</span>
+                  <span class="btn-sc-sub">₹7,500 PO (ALLOWED)</span>
+                </div>
+              </button>
+              
+              <button class="btn btn-scenario btn-danger" onclick="triggerInteractiveScenario(2)">
+                <div class="btn-sc-icon"><i data-lucide="alert-octagon"></i></div>
+                <div class="btn-sc-text">
+                  <span class="btn-sc-title">2. Excessive Amount</span>
+                  <span class="btn-sc-sub">₹80,000 (BLOCKED)</span>
+                </div>
+              </button>
+              
+              <button class="btn btn-scenario btn-danger" onclick="triggerInteractiveScenario(3)">
+                <div class="btn-sc-icon"><i data-lucide="key-round"></i></div>
+                <div class="btn-sc-text">
+                  <span class="btn-sc-title">3. Forged Signature</span>
+                  <span class="btn-sc-sub">Fake Sig (BLOCKED)</span>
+                </div>
+              </button>
+              
+              <button class="btn btn-scenario btn-danger" onclick="triggerInteractiveScenario(7)">
+                <div class="btn-sc-icon"><i data-lucide="repeat"></i></div>
+                <div class="btn-sc-text">
+                  <span class="btn-sc-title">7. Replay Attack</span>
+                  <span class="btn-sc-sub">Duplicate Nonce (BLOCKED)</span>
+                </div>
+              </button>
+              
+              <button class="btn btn-scenario btn-warning" onclick="triggerInteractiveScenario(8)">
+                <div class="btn-sc-icon"><i data-lucide="dollar-sign"></i></div>
+                <div class="btn-sc-text">
+                  <span class="btn-sc-title">8. High Value PO</span>
+                  <span class="btn-sc-sub">₹25,000 (PENDING)</span>
+                </div>
+              </button>
+
+              <button class="btn btn-scenario btn-danger" onclick="triggerInteractiveScenario(10)">
+                <div class="btn-sc-icon"><i data-lucide="sliders"></i></div>
+                <div class="btn-sc-text">
+                  <span class="btn-sc-title">10. Client Risk Override</span>
+                  <span class="btn-sc-sub">Risk Manipulation (HELD)</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Live Gateway Security Activity Stream Table -->
+          <div class="glass-card margin-top">
+            <div class="card-header">
+              <div class="header-title-flex">
+                <div class="icon-avatar icon-purple"><i data-lucide="activity"></i></div>
+                <div>
+                  <h3>Recent Gateway Telemetry Activity Stream</h3>
+                  <p class="card-subtitle">Real-time audit log of authenticated agent requests, decisions, and Fabric transaction metadata</p>
+                </div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="table-container">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Request ID</th>
+                      <th>Agent ID</th>
+                      <th>Action</th>
+                      <th>Amount</th>
+                      <th>Decision</th>
+                      <th>Reason</th>
+                      <th>Block #</th>
+                      <th>Fabric Transaction ID</th>
+                      <th>Status</th>
+                      <th>Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody id="overview-audit-tbody">
+                    <tr><td colspan="10" class="text-center text-muted">No audit events recorded yet. Click "Run 20 Attack Matrix" above.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 2: Agent Registry & Policies -->
+        <section id="tab-agents" class="tab-pane">
+          <div class="grid-2-col">
+            <div class="glass-card">
+              <div class="card-header">
+                <div class="header-title-flex">
+                  <div class="icon-avatar icon-purple"><i data-lucide="users"></i></div>
+                  <div>
+                    <h3>Registered Autonomous AI Agents</h3>
+                    <p class="card-subtitle">X.509 certificate identities & key versioning</p>
+                  </div>
+                </div>
+                <button class="btn btn-gradient btn-sm" onclick="showRegisterModal()">+ Register Agent</button>
+              </div>
+              <div class="card-body">
+                <div class="table-container">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Agent ID</th>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Key Version</th>
+                        <th>Cert Fingerprint</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="agents-tbody">
+                      <tr><td colspan="6" class="text-center text-muted">Loading registered agents...</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="glass-card">
+              <div class="card-header">
+                <div class="header-title-flex">
+                  <div class="icon-avatar icon-cyan"><i data-lucide="file-cog"></i></div>
+                  <div>
+                    <h3>Fine-Grained Authorization Policies</h3>
+                    <p class="card-subtitle">Versioned authority limits and human approval thresholds</p>
+                  </div>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="table-container">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Policy ID</th>
+                        <th>Agent ID</th>
+                        <th>Max Limit</th>
+                        <th>Approval Threshold</th>
+                        <th>Version</th>
+                      </tr>
+                    </thead>
+                    <tbody id="policies-tbody">
+                      <tr><td colspan="5" class="text-center text-muted">Loading policies...</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 3: Human Approval Queue -->
+        <section id="tab-approvals" class="tab-pane">
+          <div class="glass-card">
+            <div class="card-header">
+              <div class="header-title-flex">
+                <div class="icon-avatar icon-amber"><i data-lucide="user-check"></i></div>
+                <div>
+                  <h3>High-Risk Pending Human Approval Queue</h3>
+                  <p class="card-subtitle">Supervisor queue holding transactions exceeding maximum authority limits</p>
+                </div>
+              </div>
+              <button class="btn btn-outline btn-sm" onclick="loadPendingApprovals()"><i data-lucide="refresh-cw"></i> Refresh</button>
+            </div>
+            <div class="card-body">
+              <div class="table-container">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Approval ID</th>
+                      <th>Request ID</th>
+                      <th>Agent ID</th>
+                      <th>Action</th>
+                      <th>Amount</th>
+                      <th>Risk Reason</th>
+                      <th>Created At</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="approvals-tbody">
+                    <tr><td colspan="8" class="text-center text-muted">No pending human approvals in queue.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 4: 20 Security Attack Lab -->
+        <section id="tab-scenarios" class="tab-pane">
+          <div class="glass-card">
+            <div class="card-header">
+              <div class="header-title-flex">
+                <div class="icon-avatar icon-rose"><i data-lucide="shield-alert"></i></div>
+                <div>
+                  <h3>Security Attack Lab (20 Threat Scenarios)</h3>
+                  <p class="card-subtitle">Empirical test suite evaluating identity, authorization, replay, risk override, and ledger security</p>
+                </div>
+              </div>
+              <button class="btn btn-gradient btn-sm" onclick="runAllScenarios()"><i data-lucide="play"></i> Run All 20 Scenarios</button>
+            </div>
+            <div class="card-body">
+              <div id="scenarios-grid-container" class="scenario-buttons-grid">
+                <!-- Dynamically populated 20 attack scenarios -->
+              </div>
+
+              <!-- Output Console -->
+              <div class="console-box margin-top">
+                <div class="console-header">
+                  <span class="console-title"><i data-lucide="terminal"></i> Threat Lab Execution Log & Output Console</span>
+                  <button class="btn-text" onclick="clearConsole()">Clear Log</button>
+                </div>
+                <pre id="scenario-output-code" class="console-body">Select any threat scenario above to execute and inspect gateway enforcement telemetry...</pre>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 5: 13-Stage Gateway Inspector -->
+        <section id="tab-gateway" class="tab-pane">
+          <div class="glass-card">
+            <div class="card-header">
+              <div class="header-title-flex">
+                <div class="icon-avatar icon-cyan"><i data-lucide="git-commit"></i></div>
+                <div>
+                  <h3>13-Stage Action Gateway Pipeline Inspector</h3>
+                  <p class="card-subtitle">Comprehensive micro-stage breakdown of AgentTrust pipeline execution logic</p>
+                </div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div id="pipeline-13-stages-container" class="pipeline-accordion-list margin-top">
+                <!-- Dynamically rendered 13 stages -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 6: Hyperledger Explorer -->
+        <section id="tab-blockchain" class="tab-pane">
+          <div class="glass-card">
+            <div class="card-header">
+              <div class="header-title-flex">
+                <div class="icon-avatar icon-violet"><i data-lucide="blocks"></i></div>
+                <div>
+                  <h3>Hyperledger Fabric Block Explorer</h3>
+                  <p class="card-subtitle">Inspect Raft blocks, transaction hashes, state changes, and Merkle tree digests</p>
+                </div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div id="blockchain-blocks-list" class="blocks-container">
+                <!-- Dynamic Blocks -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 7: Audit Trail & Ledger -->
+        <section id="tab-audit" class="tab-pane">
+          <div class="glass-card">
+            <div class="card-header">
+              <div class="header-title-flex">
+                <div class="icon-avatar icon-emerald"><i data-lucide="file-text"></i></div>
+                <div>
+                  <h3>Cryptographic Immutable Audit Trail</h3>
+                  <p class="card-subtitle">Verifiable local SHA-256 hash chain and Hyperledger Fabric ledger audit entries</p>
+                </div>
+              </div>
+              <div class="filter-controls">
+                <select id="audit-filter-decision" class="select-input" onchange="refreshAuditTable()">
+                  <option value="ALL">All Decisions</option>
+                  <option value="ALLOWED">ALLOWED</option>
+                  <option value="BLOCKED">BLOCKED</option>
+                  <option value="PENDING_HUMAN_APPROVAL">PENDING_HUMAN_APPROVAL</option>
+                  <option value="ALLOWED_AFTER_APPROVAL">ALLOWED_AFTER_APPROVAL</option>
+                </select>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="table-container">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Seq #</th>
+                      <th>Request ID</th>
+                      <th>Agent ID</th>
+                      <th>Action</th>
+                      <th>Decision</th>
+                      <th>Reason</th>
+                      <th>Block #</th>
+                      <th>Fabric Transaction ID</th>
+                      <th>Status</th>
+                      <th>Evidence SHA-256</th>
+                    </tr>
+                  </thead>
+                  <tbody id="full-audit-tbody">
+                    <tr><td colspan="10" class="text-center text-muted">Loading audit records...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 8: Evidence & Tamper Detection -->
+        <section id="tab-tamper" class="tab-pane">
+          <div class="glass-card">
+            <div class="card-header">
+              <div class="header-title-flex">
+                <div class="icon-avatar icon-rose"><i data-lucide="fingerprint"></i></div>
+                <div>
+                  <h3>Off-Chain Evidence & SHA-256 Tamper Verification Lab</h3>
+                  <p class="card-subtitle">Demonstrates immediate detection of off-chain database tampering via Hyperledger Fabric hash comparison</p>
+                </div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="grid-2-col">
+                <div>
+                  <label class="form-label">Select Evidence Record to Inspect:</label>
+                  <select id="evidence-select-dropdown" class="select-input full-width" onchange="loadSelectedEvidenceDetails()">
+                    <option value="">-- Select Evidence --</option>
+                  </select>
+
+                  <div class="tamper-box margin-top">
+                    <h4>Simulate Off-Chain Evidence Tampering</h4>
+                    <p class="text-sm text-muted">Alter off-chain values in database (e.g., raise reimbursement from ₹7,500 to ₹75,000):</p>
+                    <div class="form-group margin-top">
+                      <label>New Amount (₹):</label>
+                      <input type="number" id="tamper-amount-input" class="text-input" value="75000">
+                    </div>
+                    <button class="btn btn-rose margin-top" onclick="triggerEvidenceTampering()">
+                      <i data-lucide="flame"></i> Tamper Evidence & Verify
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <h4>Verification Status Output</h4>
+                  <div id="tamper-verification-status-box" class="verification-status-card text-center margin-top">
+                    <i data-lucide="shield-check" class="status-icon text-emerald"></i>
+                    <h3 class="status-text">Select evidence record to verify</h3>
+                  </div>
+
+                  <div class="console-box margin-top">
+                    <div class="console-header"><span>Evidence JSON Payload Inspector</span></div>
+                    <pre id="evidence-json-viewer" class="console-body">{"status": "No evidence selected"}</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 9: Research Benchmarks & Modes -->
+        <section id="tab-research" class="tab-pane">
+          <!-- Operational Mode Selector Card -->
+          <div class="glass-card margin-bottom">
+            <div class="card-header">
+              <div class="header-title-flex">
+                <div class="icon-avatar icon-cyan"><i data-lucide="sliders"></i></div>
+                <div>
+                  <h3>Operational Mode Configuration Switcher</h3>
+                  <p class="card-subtitle">Switch active runtime mode to measure latency vs security trade-offs</p>
+                </div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="mode-buttons-grid">
+                <button class="mode-btn" onclick="switchMode('MODE_A_DIRECT_API')">
+                  <div class="mode-name">Mode A: Direct API</div>
+                  <div class="mode-desc">Bypasses Action Gateway & signature checks. Zero overhead, Critical Risk.</div>
+                </button>
+                <button class="mode-btn" onclick="switchMode('MODE_B_AUTH_RBAC')">
+                  <div class="mode-name">Mode B: Auth + RBAC</div>
+                  <div class="mode-desc">Basic signature & role checks. No Risk Engine or Fabric logging.</div>
+                </button>
+                <button class="mode-btn" onclick="switchMode('MODE_C_AGENTTRUST_NO_FABRIC')">
+                  <div class="mode-name">Mode C: AgentTrust w/o Fabric</div>
+                  <div class="mode-desc">Full 13-stage gateway pipeline with local hash chain; suppresses Fabric commit.</div>
+                </button>
+                <button class="mode-btn active" onclick="switchMode('MODE_D_AGENTTRUST_FABRIC')">
+                  <div class="mode-name">Mode D: Full AgentTrust w/ Fabric</div>
+                  <div class="mode-desc">Complete zero-trust governance with Hyperledger Fabric blockchain commits.</div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Comparative Benchmarks Table Card -->
+          <div class="glass-card margin-bottom">
+            <div class="card-header">
+              <div class="header-title-flex">
+                <div class="icon-avatar icon-violet"><i data-lucide="scale"></i></div>
+                <div>
+                  <h3>Architectural Research Comparative Benchmark</h3>
+                  <p class="card-subtitle">Proves the performance and security contribution of the Hyperledger Fabric layer</p>
+                </div>
+              </div>
+              <button class="btn btn-gradient btn-sm" onclick="runLiveBenchmark()"><i data-lucide="play"></i> Run Performance Benchmarks</button>
+            </div>
+            <div class="card-body">
+              <div class="table-container">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Configuration</th>
+                      <th>Gateway Pipeline</th>
+                      <th>Risk Engine</th>
+                      <th>Audit Chain</th>
+                      <th>Fabric Commit</th>
+                      <th>Mean Latency</th>
+                      <th>Security Rating</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><strong>Mode A: Direct API</strong></td>
+                      <td><span class="text-muted">Disabled</span></td>
+                      <td><span class="text-muted">Disabled</span></td>
+                      <td><span class="text-muted">Disabled</span></td>
+                      <td><span class="text-muted">Disabled</span></td>
+                      <td>0.10 ms</td>
+                      <td><span class="badge badge-rose">CRITICAL RISK</span></td>
+                    </tr>
+                    <tr>
+                      <td><strong>Mode B: Auth + RBAC</strong></td>
+                      <td>Basic Cert/Sig</td>
+                      <td><span class="text-muted">Disabled</span></td>
+                      <td><span class="text-muted">Disabled</span></td>
+                      <td><span class="text-muted">Disabled</span></td>
+                      <td>0.35 ms</td>
+                      <td><span class="badge badge-amber">MEDIUM RISK</span></td>
+                    </tr>
+                    <tr>
+                      <td><strong>Mode C: AgentTrust (No Fabric)</strong></td>
+                      <td>Full 13-Stage</td>
+                      <td>Enabled</td>
+                      <td>Enabled</td>
+                      <td><span class="text-muted">Disabled</span></td>
+                      <td>30.42 ms</td>
+                      <td><span class="badge badge-cyan">HIGH PROTECTION</span></td>
+                    </tr>
+                    <tr class="highlight-row">
+                      <td><strong>Mode D: Full AgentTrust (Fabric)</strong></td>
+                      <td>Full 13-Stage</td>
+                      <td>Enabled</td>
+                      <td>Enabled</td>
+                      <td>Enabled</td>
+                      <td>30.46 ms</td>
+                      <td><span class="badge badge-emerald">100% PROTECTION</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Micro-Stage Latency & Concurrency Scale Cards -->
+          <div class="grid-2-col">
+            <div class="glass-card">
+              <div class="card-header">
+                <div class="header-title-flex">
+                  <div class="icon-avatar icon-purple"><i data-lucide="clock"></i></div>
+                  <div>
+                    <h3>Micro-Stage Latency Breakdown</h3>
+                    <p class="card-subtitle">Per-stage execution percentiles (ms)</p>
+                  </div>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="table-container">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Pipeline Stage</th>
+                        <th>P50 (ms)</th>
+                        <th>P95 (ms)</th>
+                        <th>P99 (ms)</th>
+                      </tr>
+                    </thead>
+                    <tbody id="stage-latencies-tbody">
+                      <tr><td>RSA Signature Generation</td><td>28.98 ms</td><td>34.02 ms</td><td>34.07 ms</td></tr>
+                      <tr><td>RSA Signature Verification</td><td>0.076 ms</td><td>0.112 ms</td><td>0.116 ms</td></tr>
+                      <tr><td>X.509 Cert Validation</td><td>0.126 ms</td><td>0.175 ms</td><td>0.245 ms</td></tr>
+                      <tr><td>Replay Protection Check</td><td>0.011 ms</td><td>0.015 ms</td><td>0.017 ms</td></tr>
+                      <tr><td>Trusted Risk Evaluator</td><td>0.010 ms</td><td>0.013 ms</td><td>0.014 ms</td></tr>
+                      <tr><td>Policy Engine Evaluator</td><td>0.037 ms</td><td>0.047 ms</td><td>0.048 ms</td></tr>
+                      <tr><td>Fabric Ledger Commit</td><td>0.036 ms</td><td>0.046 ms</td><td>0.059 ms</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="glass-card">
+              <div class="card-header">
+                <div class="header-title-flex">
+                  <div class="icon-avatar icon-cyan"><i data-lucide="gauge"></i></div>
+                  <div>
+                    <h3>Concurrency Scaling (1–100 Agents)</h3>
+                    <p class="card-subtitle">Throughput (RPS) & transaction reliability</p>
+                  </div>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="table-container">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Concurrent Agents</th>
+                        <th>Throughput (RPS)</th>
+                        <th>Mean Latency</th>
+                        <th>Failures</th>
+                      </tr>
+                    </thead>
+                    <tbody id="concurrency-scale-tbody">
+                      <tr><td>1 Agent</td><td>16.5 RPS</td><td>30.46 ms</td><td><span class="badge badge-emerald">0.0%</span></td></tr>
+                      <tr><td>10 Agents</td><td>15.5 RPS</td><td>135.44 ms</td><td><span class="badge badge-emerald">0.0%</span></td></tr>
+                      <tr><td>50 Agents</td><td>4.4 RPS</td><td>1010.89 ms</td><td><span class="badge badge-emerald">0.0%</span></td></tr>
+                      <tr><td>100 Agents</td><td>4.6 RPS</td><td>1922.30 ms</td><td><span class="badge badge-emerald">0.0%</span></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- Interactive Scenario Execution Inspector Modal -->
+  <div id="interactive-scenario-modal" class="modal-backdrop hidden">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div>
+          <h3 id="modal-scenario-title">Scenario Execution Inspector</h3>
+          <p id="modal-scenario-subtitle" class="text-sm text-muted">Real-time 13-stage Action Gateway processing telemetry</p>
+        </div>
+        <button class="close-btn" onclick="closeInteractiveModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Request Metadata Box -->
+        <div class="req-meta-box">
+          <div class="meta-item"><span>Request ID:</span> <code id="modal-req-id" class="font-mono text-cyan">-</code></div>
+          <div class="meta-item"><span>Agent ID:</span> <code id="modal-agent-id" class="font-mono text-purple">-</code></div>
+          <div class="meta-item"><span>Action:</span> <strong id="modal-action">-</strong></div>
+          <div class="meta-item"><span>Amount:</span> <strong id="modal-amount" class="text-emerald">-</strong></div>
+          <div class="meta-item"><span>Risk Score:</span> <span id="modal-risk-score" class="badge badge-amber">-</span></div>
+          <div class="meta-item"><span>Policy Limit:</span> <span id="modal-policy-limit" class="badge badge-cyan">-</span></div>
+        </div>
+
+        <!-- Animated Stage Pipeline Grid -->
+        <h4 class="margin-top title-flex"><i data-lucide="git-commit"></i> 13-Stage Pipeline Execution Progress</h4>
+        <div id="modal-pipeline-stages" class="modal-stages-grid margin-top">
+          <!-- 13 stages rendered live -->
+        </div>
+
+        <!-- Outcome Card -->
+        <div class="modal-outcome-card margin-top">
+          <div class="outcome-header">
+            <h4>Decision Outcome: <span id="modal-decision-badge" class="badge badge-emerald">ALLOWED</span></h4>
+            <span id="modal-decision-reason" class="text-sm text-muted">WITHIN_AUTHORITY_LIMIT</span>
+          </div>
+          <div class="outcome-body">
+            <div class="outcome-row"><span>Off-Chain Evidence SHA-256:</span> <code id="modal-evidence-hash" class="font-mono text-cyan">-</code></div>
+            <div class="outcome-row"><span>Fabric Block Number:</span> <strong id="modal-block-num" class="text-violet">-</strong></div>
+            <div class="outcome-row"><span>Fabric Transaction ID:</span> <code id="modal-tx-id" class="font-mono text-purple">-</code></div>
+            <div class="outcome-row"><span>Commit Status:</span> <span id="modal-commit-status" class="badge badge-emerald">VALIDATED</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Register Agent Modal -->
+  <div id="register-agent-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Register New Autonomous AI Agent</h3>
+        <button class="close-btn" onclick="closeRegisterModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="register-agent-form">
+          <div class="form-group">
+            <label>Agent ID:</label>
+            <input type="text" id="reg-agent-id" class="text-input" value="FINANCE-AGENT-002" required>
+          </div>
+          <div class="form-group">
+            <label>Agent Name:</label>
+            <input type="text" id="reg-agent-name" class="text-input" value="AuditingBot" required>
+          </div>
+          <div class="form-group">
+            <label>Owner / Department:</label>
+            <input type="text" id="reg-owner" class="text-input" value="Finance Operations" required>
+          </div>
+          <div class="form-group">
+            <label>Assigned Policy ID:</label>
+            <input type="text" id="reg-policy-id" class="text-input" value="FIN-POLICY-001" required>
+          </div>
+          <button type="submit" class="btn btn-gradient full-width margin-top">Generate X.509 Cert & Register</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
