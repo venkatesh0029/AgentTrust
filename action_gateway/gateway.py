@@ -70,65 +70,6 @@ class ActionGateway:
         action = request_payload["action"]
         resource = request_payload["resource"]
         parameters = request_payload.get("parameters", {})
-
-        # Step 1.5: Strict Input Validation & Canonicalization (#4, #5, #6, #14)
-        top_amount = request_payload.get("amount")
-        param_amount = parameters.get("amount")
-
-        if top_amount is not None and param_amount is not None:
-            try:
-                top_f = float(top_amount)
-                param_f = float(param_amount)
-                if math.isnan(top_f) or math.isnan(param_f) or math.isinf(top_f) or math.isinf(param_f):
-                    return self._finalize_gateway_outcome(
-                        request_id=request_id, agent_id=agent_id, action=action, resource=resource,
-                        parameters=parameters, decision=PolicyDecision.BLOCKED.value,
-                        reason="INVALID_AMOUNT_NAN_OR_INF", policy_id="NONE", policy_version="1.0", agent_version="1.0",
-                        api_result="NOT_EXECUTED", nonce=request_payload.get("nonce", "")
-                    )
-                if abs(top_f - param_f) > 1e-6:
-                    return self._finalize_gateway_outcome(
-                        request_id=request_id, agent_id=agent_id, action=action, resource=resource,
-                        parameters=parameters, decision=PolicyDecision.BLOCKED.value,
-                        reason="AMOUNT_MISMATCH", policy_id="NONE", policy_version="1.0", agent_version="1.0",
-                        api_result="NOT_EXECUTED", nonce=request_payload.get("nonce", "")
-                    )
-            except Exception:
-                return self._finalize_gateway_outcome(
-                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
-                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
-                    reason="INVALID_AMOUNT_FORMAT", policy_id="NONE", policy_version="1.0", agent_version="1.0",
-                    api_result="NOT_EXECUTED", nonce=request_payload.get("nonce", "")
-                )
-
-        try:
-            raw_amt = top_amount if top_amount is not None else (param_amount if param_amount is not None else 0)
-            amount = float(raw_amt)
-            if math.isnan(amount) or math.isinf(amount):
-                return self._finalize_gateway_outcome(
-                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
-                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
-                    reason="INVALID_AMOUNT_NAN_OR_INF", policy_id="NONE", policy_version="1.0", agent_version="1.0",
-                    api_result="NOT_EXECUTED", nonce=request_payload.get("nonce", "")
-                )
-            if amount < 0:
-                return self._finalize_gateway_outcome(
-                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
-                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
-                    reason="NON_POSITIVE_AMOUNT", policy_id="NONE", policy_version="1.0", agent_version="1.0",
-                    api_result="NOT_EXECUTED", nonce=request_payload.get("nonce", "")
-                )
-        except Exception:
-            return self._finalize_gateway_outcome(
-                request_id=request_id, agent_id=agent_id, action=action, resource=resource,
-                parameters=parameters, decision=PolicyDecision.BLOCKED.value,
-                reason="INVALID_AMOUNT_FORMAT", policy_id="NONE", policy_version="1.0", agent_version="1.0",
-                api_result="NOT_EXECUTED", nonce=request_payload.get("nonce", "")
-            )
-
-        request_payload["amount"] = amount
-        parameters["amount"] = amount
-
         nonce = request_payload["nonce"]
         timestamp = request_payload["timestamp"]
         expires_at = request_payload.get("expires_at", "")
@@ -139,117 +80,145 @@ class ActionGateway:
         # Step 2: Verify Agent Identity & Registration
         agent_record = self.registry.get_agent(agent_id)
         if not agent_record:
-            return self._finalize_gateway_outcome(
+            return self._build_immediate_rejection(
                 request_id=request_id,
                 agent_id=agent_id,
                 action=action,
                 resource=resource,
-                parameters=parameters,
                 decision=PolicyDecision.BLOCKED.value,
-                reason=DecisionReason.UNKNOWN_AGENT.value,
-                policy_id="NONE",
-                policy_version="1.0",
-                agent_version="1.0",
-                api_result="NOT_EXECUTED",
-                nonce=nonce
+                reason=DecisionReason.UNKNOWN_AGENT.value
             )
 
+        # Step 3: Verify Certificate Status & Revocation
         agent_status = agent_record["status"]
         if agent_status == "REVOKED":
-            return self._finalize_gateway_outcome(
+            return self._build_immediate_rejection(
                 request_id=request_id,
                 agent_id=agent_id,
                 action=action,
                 resource=resource,
-                parameters=parameters,
                 decision=PolicyDecision.BLOCKED.value,
-                reason=DecisionReason.CERTIFICATE_REVOKED.value,
-                policy_id=agent_record.get("policy_id", "NONE"),
-                policy_version="1.0",
-                agent_version=agent_record.get("agent_version", "1.0"),
-                api_result="NOT_EXECUTED",
-                cert_fingerprint=agent_record.get("certificate_fingerprint", ""),
-                nonce=nonce
+                reason=DecisionReason.CERTIFICATE_REVOKED.value
             )
         elif agent_status == "SUSPENDED":
-            return self._finalize_gateway_outcome(
+            return self._build_immediate_rejection(
                 request_id=request_id,
                 agent_id=agent_id,
                 action=action,
                 resource=resource,
-                parameters=parameters,
                 decision=PolicyDecision.BLOCKED.value,
-                reason=DecisionReason.AGENT_SUSPENDED.value,
-                policy_id=agent_record.get("policy_id", "NONE"),
-                policy_version="1.0",
-                agent_version=agent_record.get("agent_version", "1.0"),
-                api_result="NOT_EXECUTED",
-                cert_fingerprint=agent_record.get("certificate_fingerprint", ""),
-                nonce=nonce
+                reason=DecisionReason.AGENT_SUSPENDED.value
             )
 
-        # Step 3: Validate Certificate Validity & Expiration
+        # Step 4: Validate Certificate Validity & Expiration
         if agent_record.get("certificate"):
             cert_val = self.cert_manager.verify_agent_certificate(agent_record["certificate"])
             if not cert_val.get("valid"):
-                return self._finalize_gateway_outcome(
+                return self._build_immediate_rejection(
                     request_id=request_id,
                     agent_id=agent_id,
                     action=action,
                     resource=resource,
-                    parameters=parameters,
                     decision=PolicyDecision.BLOCKED.value,
-                    reason=cert_val.get("reason", "INVALID_CERTIFICATE"),
-                    policy_id=agent_record.get("policy_id", "NONE"),
-                    policy_version="1.0",
-                    agent_version=agent_record.get("agent_version", "1.0"),
-                    api_result="DENIED",
-                    cert_fingerprint=agent_record.get("certificate_fingerprint", ""),
-                    nonce=nonce
+                    reason=cert_val.get("reason", "INVALID_CERTIFICATE")
                 )
 
-        # Step 4: Validate Key Version (if provided)
+        # Step 5: Validate Key Version (if provided)
         if key_version is not None:
             expected_key_ver = agent_record.get("key_version", 1)
             if int(key_version) != int(expected_key_ver):
-                return self._finalize_gateway_outcome(
+                return self._build_immediate_rejection(
                     request_id=request_id,
                     agent_id=agent_id,
                     action=action,
                     resource=resource,
-                    parameters=parameters,
                     decision=PolicyDecision.BLOCKED.value,
-                    reason="INVALID_KEY_VERSION",
-                    policy_id=agent_record.get("policy_id", "NONE"),
-                    policy_version="1.0",
-                    agent_version=agent_record.get("agent_version", "1.0"),
-                    api_result="DENIED",
-                    cert_fingerprint=agent_record.get("certificate_fingerprint", ""),
-                    nonce=nonce
+                    reason="INVALID_KEY_VERSION"
                 )
 
-        # Step 5: Verify Digital Signature on original payload
+        # Step 6: Verify Digital Signature BEFORE processing business parameters
         payload_to_verify = raw_payload_for_sig.copy()
         payload_to_verify.pop("signature", None)
 
         public_key_pem = agent_record["public_key"]
         sig_valid = SignatureManager.verify_signature(payload_to_verify, signature_b64, public_key_pem)
         if not sig_valid:
-            return self._finalize_gateway_outcome(
+            return self._build_immediate_rejection(
                 request_id=request_id,
                 agent_id=agent_id,
                 action=action,
                 resource=resource,
-                parameters=parameters,
                 decision=PolicyDecision.BLOCKED.value,
                 reason=DecisionReason.INVALID_SIGNATURE.value,
-                policy_id=agent_record.get("policy_id", "NONE"),
-                policy_version="1.0",
-                agent_version=agent_record.get("agent_version", "1.0"),
-                api_result="DENIED",
-                cert_fingerprint=agent_record.get("certificate_fingerprint", ""),
-                nonce=nonce
+                api_result="DENIED"
             )
+
+        # Step 7: Strict Input Validation & Canonicalization for Authenticated Requests
+        top_amount = request_payload.get("amount")
+        param_amount = parameters.get("amount")
+
+        # Reject boolean amounts or string amounts
+        if isinstance(top_amount, bool) or isinstance(param_amount, bool):
+            return self._finalize_gateway_outcome(
+                request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                reason="INVALID_AMOUNT_FORMAT", policy_id=agent_record.get("policy_id", "NONE"), policy_version="1.0", agent_version="1.0",
+                api_result="NOT_EXECUTED", nonce=nonce
+            )
+
+        if top_amount is not None and param_amount is not None:
+            try:
+                top_f = float(top_amount)
+                param_f = float(param_amount)
+                if math.isnan(top_f) or math.isnan(param_f) or math.isinf(top_f) or math.isinf(param_f):
+                    return self._finalize_gateway_outcome(
+                        request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                        parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                        reason="INVALID_AMOUNT_NAN_OR_INF", policy_id="NONE", policy_version="1.0", agent_version="1.0",
+                        api_result="NOT_EXECUTED", nonce=nonce
+                    )
+                if abs(top_f - param_f) > 1e-6:
+                    return self._finalize_gateway_outcome(
+                        request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                        parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                        reason="AMOUNT_MISMATCH", policy_id="NONE", policy_version="1.0", agent_version="1.0",
+                        api_result="NOT_EXECUTED", nonce=nonce
+                    )
+            except Exception:
+                return self._finalize_gateway_outcome(
+                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                    reason="INVALID_AMOUNT_FORMAT", policy_id="NONE", policy_version="1.0", agent_version="1.0",
+                    api_result="NOT_EXECUTED", nonce=nonce
+                )
+
+        try:
+            raw_amt = top_amount if top_amount is not None else (param_amount if param_amount is not None else 0)
+            amount = float(raw_amt)
+            if math.isnan(amount) or math.isinf(amount):
+                return self._finalize_gateway_outcome(
+                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                    reason="INVALID_AMOUNT_NAN_OR_INF", policy_id="NONE", policy_version="1.0", agent_version="1.0",
+                    api_result="NOT_EXECUTED", nonce=nonce
+                )
+            if amount < 0 or (amount == 0 and action in ["CREATE_PURCHASE_ORDER", "TRANSFER_FUNDS", "CREATE_REIMBURSEMENT"]):
+                return self._finalize_gateway_outcome(
+                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                    reason="NON_POSITIVE_AMOUNT", policy_id="NONE", policy_version="1.0", agent_version="1.0",
+                    api_result="NOT_EXECUTED", nonce=nonce
+                )
+        except Exception:
+            return self._finalize_gateway_outcome(
+                request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                reason="INVALID_AMOUNT_FORMAT", policy_id="NONE", policy_version="1.0", agent_version="1.0",
+                api_result="NOT_EXECUTED", nonce=nonce
+            )
+
+        request_payload["amount"] = amount
+        parameters["amount"] = amount
 
         # Step 6: Check Replay Protection & Idempotency
         replay_ok, replay_reason = self.replay_tracker.check_and_track(
@@ -360,9 +329,9 @@ class ActionGateway:
 
     def process_human_approval_resume(self, approval_id: str, approver_id: str) -> Dict[str, Any]:
         """Resumes processing after human supervisor approves a pending request with complete re-validation (#11)."""
-        ok, app_record, msg = self.approval_manager.approve_request(approval_id, approver_id)
-        if not ok or not app_record:
-            return {"success": False, "message": msg}
+        app_record = self.approval_manager.get_approval_by_id(approval_id)
+        if not app_record or app_record.get("status") != "PENDING":
+            return {"success": False, "message": f"Approval ticket '{approval_id}' not found or not pending."}
 
         request_id = app_record["request_id"]
         agent_id = app_record["agent_id"]
@@ -371,8 +340,9 @@ class ActionGateway:
         parameters = app_record["parameters"]
         policy_id = app_record["policy_id"]
         approval_ref = app_record["approval_reference"]
+        amount = float(parameters.get("amount", 0))
 
-        # Re-check Agent Identity & Status
+        # Re-check Agent Identity & Status BEFORE consuming ticket
         agent_record = self.registry.get_agent(agent_id)
         if not agent_record or agent_record.get("status") != "ACTIVE":
             curr_status = agent_record.get("status", "UNKNOWN") if agent_record else "UNREGISTERED"
@@ -389,6 +359,36 @@ class ActionGateway:
                 agent_version="1.0",
                 api_result="NOT_EXECUTED"
             )
+
+        # Re-evaluate Policy against current active policy rules BEFORE consuming ticket
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        dec, rsn, pver, rules = self.policy_evaluator.evaluate(
+            policy_id=policy_id,
+            action=action,
+            resource=resource,
+            amount=amount,
+            request_timestamp_iso=now_iso
+        )
+
+        if dec == PolicyDecision.BLOCKED:
+            return self._finalize_gateway_outcome(
+                request_id=request_id,
+                agent_id=agent_id,
+                action=action,
+                resource=resource,
+                parameters=parameters,
+                decision=PolicyDecision.BLOCKED.value,
+                reason=f"POLICY_RECHECK_FAILED: {rsn.value}",
+                policy_id=policy_id,
+                policy_version=pver,
+                agent_version=agent_record.get("agent_version", "1.0"),
+                api_result="NOT_EXECUTED"
+            )
+
+        # NOW consume and mark ticket as approved
+        ok, app_record, msg = self.approval_manager.approve_request(approval_id, approver_id)
+        if not ok or not app_record:
+            return {"success": False, "message": msg}
 
         auth_headers = self.finance_api.create_gateway_auth_headers(request_id)
         exec_res = self.finance_api.execute_action(
@@ -561,7 +561,7 @@ class ActionGateway:
             }
         }
 
-    def _build_immediate_rejection(self, request_id: str, agent_id: str, action: str, resource: str, decision: str, reason: str) -> Dict[str, Any]:
+    def _build_immediate_rejection(self, request_id: str, agent_id: str, action: str, resource: str, decision: str, reason: str, api_result: str = "NOT_EXECUTED") -> Dict[str, Any]:
         return {
             "gateway_status": "PROCESSED",
             "request_id": request_id,
@@ -572,5 +572,5 @@ class ActionGateway:
             "reason": reason,
             "risk_score": 100.0,
             "risk_level": "HIGH",
-            "protected_api_result": "NOT_EXECUTED"
+            "protected_api_result": api_result
         }

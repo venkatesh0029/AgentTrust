@@ -15,8 +15,8 @@ This document contains visual diagrams, Markdown tables, and layout code designe
                        "Making AI Actions Controlled and Accountable"
 
                Presenter : AI Security & Agentic Systems Research Team
-               Platform  : Cryptographic Gateway + Hyperledger Fabric Ledger
-               Status    : 36/36 Tests Passed | 100% Tamper Detection
+               Platform  : Cryptographic Gateway + Hyperledger Fabric Simulator
+               Status    : 75/75 Tests Passed (55 Core + 20 Attack Lab)
 ====================================================================================
 ```
 
@@ -28,16 +28,16 @@ This document contains visual diagrams, Markdown tables, and layout code designe
 | :--- | :--- | :--- |
 | Static Bearer Tokens / API Keys | Credential Theft & Misuse | **X.509 Cryptographic Certificates + RSA 2048 Signatures** |
 | Unbounded API Access | Hallucinated / High-Value Reqs | **Bounded Multi-Attribute Policy Engine (Deny-by-Default)** |
-| Traditional Database Logs | Log Modification / Deletion | **Hyperledger Fabric Append-Only Blockchain Ledger** |
-| Direct Backend Invocations | Gateway Bypass Attacks | **Service-to-Service Signed Headers (`X-Gateway-Signature`)** |
+| Traditional Database Logs | Log Modification / Deletion | **Hyperledger Fabric Append-Only Ledger Simulator** |
+| Direct Backend Invocations | Gateway Bypass Attacks | **Mandatory RBAC Authorization (`X-Admin-Role`) + Signed Headers** |
 
 ---
 
-## Slide 3: Architecture Diagram
+## Slide 3: Architecture Diagram & 13-Stage Gateway Pipeline
 
 ```
                  ┌───────────────────────┐
-                 │ Admin / Policy Admin  │
+                 │ Admin / Policy Admin  │ (Requires X-Admin-Role Header)
                  └───────────┬───────────┘
                              │
                              v
@@ -54,29 +54,34 @@ This document contains visual diagrams, Markdown tables, and layout code designe
                              │
                              v
                  ┌───────────────────────┐
-                 │ Request Validator     │
+                 │ 1. Identity & Cert    │ (Fail fast at edge if invalid)
                  └───────────┬───────────┘
                              │
                              v
                  ┌───────────────────────┐
-                 │ Identity Verification │
+                 │ 2. RSA-PSS Signature  │ (Signature checked BEFORE ledger write)
                  └───────────┬───────────┘
                              │
                              v
                  ┌───────────────────────┐
-                 │ Replay Protection     │
+                 │ 3. Input & Amount Val │ (Strict numeric & match validation)
                  └───────────┬───────────┘
                              │
                              v
                  ┌───────────────────────┐
-                 │ Policy Engine         │
+                 │ 4. Replay & Idempotent│ (Nonce eviction + per-agent cache)
+                 └───────────┬───────────┘
+                             │
+                             v
+                 ┌───────────────────────┐
+                 │ 5. Risk & Policy Engine│ (Deny-by-default boundary check)
                  └───────────┬───────────┘
                              │
                  ┌───────────┴───────────┐
                  │                       │
                  v                       v
        ┌──────────────────┐   ┌───────────────────┐
-       │ Human Approval   │   │ Audit Event Builder│
+       │ Human Approval   │   │ Provenance Builder│
        └────────┬─────────┘   └─────────┬─────────┘
                 │                       │
                 v                       v
@@ -111,7 +116,7 @@ This document contains visual diagrams, Markdown tables, and layout code designe
                    │
                    ├──► Issues Certificate  : SHA256 Fingerprint
                    ├──► Key Generation      : RSA 2048-bit Keypair
-                   └──► Encrypted Storage   : AES-256-GCM at Rest
+                   └──► Key Storage         : PEM Format Keypair
                                │
                                v
        ┌─────────────────────────────────────────────────────────┐
@@ -183,7 +188,7 @@ This document contains visual diagrams, Markdown tables, and layout code designe
 
 ---
 
-## Slide 7: Human Approval Workflow
+## Slide 7: Human Approval & Re-Validation Workflow
 
 ```
    Agent Request (Amount = ₹25,000 > ₹10,000 Threshold)
@@ -201,7 +206,12 @@ This document contains visual diagrams, Markdown tables, and layout code designe
                            │
                            v
         ┌───────────────────────────────────────┐
-        │ Human Supervisor Sign-Off (CFO Role)  │
+        │ Human Supervisor (FINANCE_APPROVER)   │ (Strict RBAC Gated)
+        └──────────────────┬────────────────────┘
+                           │
+                           v
+        ┌───────────────────────────────────────┐
+        │ Policy & Agent Status Re-Validation   │ (Verify Agent active + policy rules)
         └──────────────────┬────────────────────┘
                            │
                            v
@@ -230,6 +240,85 @@ This document contains visual diagrams, Markdown tables, and layout code designe
               ┌──────────────────────────────────┐
               │ Block #4 Transaction Payload     │
               │ evidence_hash: "6e32f9112776..." │
+              └──────────────────────────────────┘
+                               │
+               [ Malicious DB Tamper: ₹999,999 ]
+                               │
+                               v
+            Recalculated Hash: "662b2892bd24..."
+                               │
+               Compare with Stored On-Chain Hash
+                               │
+                               v
+                  TAMPERING DETECTED (Alert)
+```
+
+---
+
+## Slide 9: Fabric Architecture & Simulation Engine
+
+```
+                       ┌───────────────────────────────┐
+                       │ AgentTrust Action Gateway     │
+                       └───────────────┬───────────────┘
+                                       │
+                ┌──────────────────────┴──────────────────────┐
+                │                                             │
+                v                                             v
+  ┌───────────────────────────┐                 ┌───────────────────────────┐
+  │ Fabric Simulator Engine   │                 │ Production Fabric Spec    │
+  │ (In-Memory Ledger)        │                 │ (Docker Test Network)     │
+  ├───────────────────────────┤                 ├───────────────────────────┤
+  │ • LevelDB World State     │                 │ • Orderer Node (Raft)     │
+  │ • SHA-256 Block Chaining  │                 │ • Peer0 Org1 & Peer0 Org2 │
+  │ • Fabric Client Wrapper   │                 │ • Go Chaincode (cc.go)    │
+  └───────────────────────────┘                 └───────────────────────────┘
+```
+
+---
+
+## Slide 10: 20-Scenario Attack Lab & Security Matrix
+
+| # | Demo Scenario Name | Threat Vector | Expected Gateway Result | Ledger Audit Result |
+| :-: | :--- | :--- | :--- | :--- |
+| **1** | Valid Reimbursement | Low-value policy compliance | **ALLOWED (200 OK)** | Block Committed |
+| **2** | Excessive Amount | Boundary limit breach | **BLOCKED (Limit Exceeded)** | Block Committed |
+| **3** | Invalid Signature | Signature forgery | **BLOCKED (Invalid Sig)** | Fast Edge Denial |
+| **4** | Revoked Agent | Certificate revocation | **BLOCKED (Cert Revoked)** | Fast Edge Denial |
+| **5** | Replay Attack | Nonce & Req ID reuse | **BLOCKED (Replay Detected)** | Fast Edge Denial |
+| **6** | High-Value Approval | Policy human-in-loop hold | **PENDING -> ALLOWED** | Block Committed |
+| **7** | Evidence Tampering | Off-chain data modification | **TAMPERING DETECTED** | Hash Mismatch |
+| **8** | Unauthenticated Transfer | Missing RBAC authorization | **401 UNAUTHORIZED** | Fast Edge Denial |
+
+---
+
+## Slide 11: Benchmark Results & Latency Percentiles
+
+```
+   Latency Percentiles Comparison (Milliseconds)
+
+   Signing (RSA)    : [========================] 115.86 ms (P95: 134.1 ms)
+   Auth Verification: [=] 0.58 ms (P95: 0.81 ms)
+   Policy Engine    : [=] 0.08 ms (P95: 0.12 ms)
+   Fabric Commit    : [=] 0.13 ms (P95: 0.19 ms)
+   Gateway E2E      : [============] 57.47 ms (P95: 71.20 ms)
+   Total Roundtrip  : [=============================] 173.33 ms (P95: 205.10 ms)
+```
+
+---
+
+## Slide 12: Conclusion & Future Scope
+
+### Key Empirical Achievements
+- 20/20 modeled adversarial attack scenarios mitigated in Attack Lab.
+- Fast edge rejection for unauthenticated and forged requests.
+- 75/75 passing automated unit, integration, and adversarial tests.
+
+### Future Architectural Enhancements
+- Hardware Security Module (HSM) private key isolation and encryption at rest.
+- SQLite/PostgreSQL persistent storage for CA certificates and ledger blocks.
+- Real multi-peer Docker network deployment for Hyperledger Fabric Go chaincode.
+" │
               └──────────────────────────────────┘
                                │
                [ Malicious DB Tamper: ₹999,999 ]

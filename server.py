@@ -106,9 +106,12 @@ app.add_middleware(
 )
 
 # --- RBAC Helper Dependency ---
-def check_admin_permission(required_permission: str, x_admin_role: Optional[str] = "SYSTEM_ADMIN"):
+def check_admin_permission(required_permission: str, x_admin_role: Optional[str] = None):
     if not x_admin_role:
-        x_admin_role = "SYSTEM_ADMIN"
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication Required: Missing 'X-Admin-Role' header."
+        )
     try:
         role = AdminRole(x_admin_role)
     except Exception:
@@ -125,7 +128,7 @@ def check_admin_permission(required_permission: str, x_admin_role: Optional[str]
     return role
 
 def check_admin_permission_dep(required_permission: str):
-    def _dependency(x_admin_role: Optional[str] = Header(default="SYSTEM_ADMIN", alias="X-Admin-Role")) -> AdminRole:
+    def _dependency(x_admin_role: Optional[str] = Header(default=None, alias="X-Admin-Role")) -> AdminRole:
         return check_admin_permission(required_permission, x_admin_role)
     return _dependency
 
@@ -220,12 +223,14 @@ def process_request_with_mode(payload: Dict[str, Any]) -> Dict[str, Any]:
     global CURRENT_MODE
     if CURRENT_MODE == "MODE_A_DIRECT_API":
         # Mode A: Direct API (bypasses Gateway, signature checks, policy, and audit log)
+        headers = finance_api.create_gateway_auth_headers(payload["request_id"])
         exec_res = finance_api.execute_action(
             action=payload["action"],
             parameters=payload.get("parameters", {}),
             gateway_token=ProtectedFinanceAPI.GATEWAY_SECRET,
             request_id=payload["request_id"],
-            agent_id=payload["agent_id"]
+            agent_id=payload["agent_id"],
+            auth_headers=headers
         )
         return {
             "mode": "MODE_A_DIRECT_API",
@@ -410,7 +415,7 @@ def delete_agent(agent_id: str, role: AdminRole = Depends(check_admin_permission
 
 # 2. Procurement & Helper Domain APIs
 @app.post("/purchase-orders")
-def create_purchase_order(req: PurchaseOrderRequest):
+def create_purchase_order(req: PurchaseOrderRequest, role: AdminRole = Depends(check_admin_permission_dep("initiate_transfer"))):
     agent_rec = agent_registry.get_agent(req.agent_id)
     if not agent_rec:
         raise HTTPException(status_code=404, detail=f"Agent '{req.agent_id}' not registered.")
@@ -444,7 +449,7 @@ def create_purchase_order(req: PurchaseOrderRequest):
     return process_request_with_mode(payload)
 
 @app.post("/fund-transfers")
-def create_fund_transfer(req: FundTransferRequest):
+def create_fund_transfer(req: FundTransferRequest, role: AdminRole = Depends(check_admin_permission_dep("initiate_transfer"))):
     agent_rec = agent_registry.get_agent(req.agent_id)
     if not agent_rec:
         raise HTTPException(status_code=404, detail=f"Agent '{req.agent_id}' not registered.")
@@ -777,7 +782,7 @@ def run_single_attack_scenario(scenario_id: int):
 def run_performance_benchmarks():
     engine = BenchmarkEngine()
     stage_latencies = engine.measure_stage_latencies(num_samples=50)
-    concurrency_scaling = engine.run_concurrency_scale_test(agent_counts=[1, 10, 50, 100], reqs_per_agent=2)
+    concurrency_scaling = engine.run_concurrency_scale_test(num_agents_list=[1, 10, 50, 100], reqs_per_agent=2)
     ablation_study = engine.run_ablation_study(num_requests=25)
 
     return {

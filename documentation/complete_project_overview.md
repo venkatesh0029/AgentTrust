@@ -204,7 +204,7 @@ AgentTrust provides two plug-and-play ledger operating modes:
 ```
 
 1. **Local Prototype Mode (Default):**
-   * High-performance, pure Python in-memory ledger engine (`fabric/ledger.py`).
+   * High-performance, pure Python in-memory ledger engine (`fabric/ledger_service.py`).
    * Implements LevelDB/CouchDB key-value state abstractions, SHA-256 block hash chaining, MSP certificate verification, and Smart Contract chaincode functions (`RegisterAgent`, `RegisterPolicy`, `RecordActionEvent`, `VerifyEvidenceReference`).
 2. **Production Hyperledger Fabric Mode:**
    * Enterprise gRPC Gateway client (`fabric/fabric_client.py`) connecting to a real multi-peer Hyperledger Fabric network (`agenttrust-channel` and Go chaincode `agenttrust-cc`).

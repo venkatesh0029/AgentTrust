@@ -152,7 +152,7 @@ AgentTrust enforces **6 strict security invariants**:
 AgentTrust supports two deployment operating modes:
 
 1. **Local Prototype Mode (Default)**:
-   - In-memory/local Fabric-compatible ledger engine located in `fabric/ledger.py`.
+   - In-memory/local Fabric-compatible ledger engine located in `fabric/ledger_service.py`.
    - Features LevelDB/CouchDB state abstractions, SHA-256 block hash chaining, MSP certificate verification, and Smart Contract chaincode execution (`RegisterAgent`, `RegisterPolicy`, `RecordActionEvent`, `VerifyEvidenceReference`).
    - Zero external setup required — runs out-of-the-box in pure Python.
 
@@ -166,20 +166,20 @@ AgentTrust supports two deployment operating modes:
 
 | Directory / Module | Role & Responsibility |
 | :--- | :--- |
-| [`identity_manager/`](file:///d:/OneDrive/Desktop/AgentTrust/identity_manager/) | X.509 Root CA, RSA key pair issuance, AES-256 key encryption, RSA-PSS signature verification. |
-| [`agent_registry/`](file:///d:/OneDrive/Desktop/AgentTrust/agent_registry/) | Agent identity storage, certificate revocation lists (CRL), status management, RBAC enforcement. |
-| [`policy_engine/`](file:///d:/OneDrive/Desktop/AgentTrust/policy_engine/) | Policy JSON parser, multi-attribute rule evaluator, versioning history, policy rollback engine. |
-| [`replay_protection/`](file:///d:/OneDrive/Desktop/AgentTrust/replay_protection/) | Nonce tracker, timestamp drift checking (300s window), replay attack prevention. |
-| [`action_gateway/`](file:///d:/OneDrive/Desktop/AgentTrust/action_gateway/) | Central enforcement gateway, request router, durable retry queue & Dead-Letter Queue (DLQ). |
-| [`protected_api/`](file:///d:/OneDrive/Desktop/AgentTrust/protected_api/) | Mock enterprise financial API enforcing mandatory gateway service-to-service signed headers. |
-| [`human_approval/`](file:///d:/OneDrive/Desktop/AgentTrust/human_approval/) | Holding queue & manager for high-value/high-risk transactions requiring supervisor review. |
-| [`evidence_manager/`](file:///d:/OneDrive/Desktop/AgentTrust/evidence_manager/) | Canonical Provenance Schema v2.0 generator & SHA-256 payload integrity manager. |
-| [`fabric/`](file:///d:/OneDrive/Desktop/AgentTrust/fabric/) | Permissioned ledger engine, chaincode contracts, and Hyperledger Fabric gRPC Gateway SDK client. |
-| [`dashboard/`](file:///d:/OneDrive/Desktop/AgentTrust/dashboard/) | Glassmorphism UI single-page web app with Attack Lab, Tamper Simulator, and Block Explorer. |
-| [`server.py`](file:///d:/OneDrive/Desktop/AgentTrust/server.py) | FastAPI backend server powering the dashboard UI and REST API endpoints. |
-| [`live_demo.py`](file:///d:/OneDrive/Desktop/AgentTrust/live_demo.py) | CLI narration runner executing 8 core security and failure scenarios in sequence. |
-| [`benchmark.py`](file:///d:/OneDrive/Desktop/AgentTrust/benchmark.py) | Latency percentile (P50/P90/P95/P99) and system throughput benchmarking harness. |
-| [`tests/`](file:///d:/OneDrive/Desktop/AgentTrust/tests/) | 36 automated unit, integration, adversarial, invariant, and recovery tests. |
+| [`identity_manager/`](../identity_manager/) | X.509 Root CA, RSA key pair issuance, PEM key encoding, RSA-PSS signature verification. |
+| [`agent_registry/`](../agent_registry/) | Agent identity storage, status management, RBAC authorization enforcement. |
+| [`policy_engine/`](../policy_engine/) | Policy JSON parser, multi-attribute rule evaluator, versioning history, policy rollback engine. |
+| [`replay_protection/`](../replay_protection/) | Nonce tracker, timestamp drift checking (300s window), replay attack prevention. |
+| [`action_gateway/`](../action_gateway/) | Central enforcement gateway, signature-first pipeline, durable retry queue & Dead-Letter Queue (DLQ). |
+| [`protected_api/`](../protected_api/) | Mock enterprise financial API enforcing mandatory gateway service-to-service signed headers. |
+| [`human_approval/`](../human_approval/) | Holding queue & manager for high-value/high-risk transactions requiring supervisor review. |
+| [`evidence_manager/`](../evidence_manager/) | Canonical Provenance Schema v2.0 generator & SHA-256 payload integrity manager. |
+| [`fabric/`](../fabric/) | Permissioned ledger engine simulator, chaincode contracts, and Fabric client wrapper. |
+| [`dashboard/`](../dashboard/) | Glassmorphism UI single-page web app with Attack Lab, Tamper Simulator, and Block Explorer. |
+| [`server.py`](../server.py) | FastAPI backend server powering the dashboard UI and REST API endpoints. |
+| [`live_demo.py`](../live_demo.py) | CLI narration runner executing 8 core security and failure scenarios in sequence. |
+| [`benchmark.py`](../benchmark.py) | Latency percentile (P50/P90/P95/P99) and system throughput benchmarking harness. |
+| [`tests/`](../tests/) | 75 automated unit, integration, adversarial, invariant, and attack lab tests. |
 
 ---
 
@@ -388,9 +388,9 @@ When you open `http://127.0.0.1:8000` in your web browser, you are presented wit
 
 ## 📚 Related Documentation
 
-- [`README.md`](file:///d:/OneDrive/Desktop/AgentTrust/README.md) — Main Repository Technical Overview.
-- [`documentation/final_project_report.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/final_project_report.md) — Complete Academic Project Report.
-- [`documentation/architecture.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/architecture.md) — In-Depth System Architecture & Design.
-- [`documentation/security_model.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/security_model.md) — Security Guarantees & 6 Invariants Specification.
-- [`documentation/api_specification.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/api_specification.md) — REST API Endpoints & Gateway Schema.
-- [`fabric/production_deployment_guide.md`](file:///d:/OneDrive/Desktop/AgentTrust/fabric/production_deployment_guide.md) — Production Hyperledger Fabric Guide.
+- [`README.md`](../README.md) — Main Repository Technical Overview.
+- [`documentation/final_project_report.md`](final_project_report.md) — Complete Academic Project Report.
+- [`documentation/architecture.md`](architecture.md) — In-Depth System Architecture & Design.
+- [`documentation/security_model.md`](security_model.md) — Security Guarantees & 6 Invariants Specification.
+- [`documentation/api_specification.md`](api_specification.md) — REST API Endpoints & Gateway Schema.
+- [`fabric/production_deployment_guide.md`](../fabric/production_deployment_guide.md) — Production Hyperledger Fabric Guide.

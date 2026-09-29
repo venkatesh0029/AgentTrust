@@ -1,3 +1,4 @@
+import datetime
 import threading
 from typing import Tuple, Set, Dict, Any, Optional
 from replay_protection.nonce_manager import NonceManager
@@ -47,7 +48,7 @@ class RequestTracker:
                 return False, reason
 
             # Register request ID and nonce upon successful verification
-            now_ts = datetime.datetime.now(datetime.timezone.utc).timestamp() if 'datetime' in globals() else 0
+            now_ts = datetime.datetime.now(datetime.timezone.utc).timestamp()
             self._processed_request_ids[request_id] = now_ts
             self.nonce_manager.register_nonce(nonce)
 
@@ -56,7 +57,6 @@ class RequestTracker:
     def _evict_expired_entries(self) -> None:
         """Evicts expired nonces and request IDs outside the timestamp window."""
         self.nonce_manager.evict_expired(self.timestamp_window)
-        import datetime
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
         expired_reqs = [r for r, ts in self._processed_request_ids.items() if ts > 0 and now - ts > self.timestamp_window]
         for r in expired_reqs:

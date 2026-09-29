@@ -1,11 +1,11 @@
 # AgentTrust: A Permissioned Blockchain Framework for Verifiable Identity, Bounded Authorization, and Accountability of Autonomous AI Agents
 
-[![Build Status](https://img.shields.io/badge/Build-Passing-10b981?style=for-the-badge&logo=github)](file:///d:/OneDrive/Desktop/AgentTrust)
-[![Tests](https://img.shields.io/badge/Tests-63%2F63%20Passed%20(100%25)-8b5cf6?style=for-the-badge&logo=pytest)](file:///d:/OneDrive/Desktop/AgentTrust/tests)
-[![Attack Matrix](https://img.shields.io/badge/Threat%20Matrix-20%2F20%20Scenarios%20Mitigated-06b6d4?style=for-the-badge&logo=shield)](file:///d:/OneDrive/Desktop/AgentTrust/attack_lab)
-[![Blockchain](https://img.shields.io/badge/Blockchain-Hyperledger%20Fabric%20v2.0-a855f7?style=for-the-badge&logo=hyperledger)](file:///d:/OneDrive/Desktop/AgentTrust/fabric)
-[![Architecture](https://img.shields.io/badge/Gateway-13--Stage%20Zero--Trust-10b981?style=for-the-badge)](file:///d:/OneDrive/Desktop/AgentTrust/action_gateway)
-[![License](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](file:///d:/OneDrive/Desktop/AgentTrust/LICENSE)
+[![Build Status](https://img.shields.io/badge/Build-Passing-10b981?style=for-the-badge&logo=github)](.)
+[![Tests](https://img.shields.io/badge/Tests-75%2F75%20Passed%20(100%25)-8b5cf6?style=for-the-badge&logo=pytest)](tests)
+[![Attack Matrix](https://img.shields.io/badge/Threat%20Matrix-20%2F20%20Scenarios%20Mitigated-06b6d4?style=for-the-badge&logo=shield)](attack_lab)
+[![Blockchain](https://img.shields.io/badge/Blockchain-Hyperledger%20Fabric%20Simulator-a855f7?style=for-the-badge&logo=hyperledger)](fabric)
+[![Architecture](https://img.shields.io/badge/Gateway-13--Stage%20Zero--Trust-10b981?style=for-the-badge)](action_gateway)
+[![License](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
 > **Core Research Objective**: AgentTrust provides cryptographic identity, bounded policy authorization, replay protection, controlled gateway execution, human-in-the-loop approvals, off-chain SHA-256 evidence integrity hashing, and independently verifiable Hyperledger Fabric ledger auditability for autonomous AI agents.
 
@@ -13,14 +13,14 @@
 
 ## 🚀 Key Highlights & Research Contributions
 
-- **Cryptographic Agent Identity Lifecycle**: X.509 certificate issuance, RSA-2048 keypair generation with AES-256 encryption at rest, key versioning counters, status management (`ACTIVE`, `SUSPENDED`, `REVOKED`), and seamless key rotation.
+- **Cryptographic Agent Identity Lifecycle**: X.509 certificate issuance, RSA-2048 keypair generation, key versioning counters, status management (`ACTIVE`, `SUSPENDED`, `REVOKED`), and key rotation.
 - **13-Stage Non-Bypassable Action Gateway**: A zero-trust pipeline enforcing canonical JSON schema validation, RSA SHA-256 request signature verification, replay protection, server-side risk scoring, versioned policy limits, human approval tickets, and atomic ledger commits.
 - **Dual-Ledger Hyperledger Fabric Architecture**:
-  - **Permissioned Ledger Engine (Local Baseline)**: Python-native engine implementing LevelDB/CouchDB World State abstraction, SHA-256 block hash chaining, MSP certificate validation, and smart contract chaincode execution (`RegisterAgent`, `RegisterPolicy`, `RecordActionEvent`, `VerifyEvidenceReference`).
-  - **Hyperledger Fabric SDK Bridge (Production Blueprint)**: gRPC gateway client connecting to external multi-peer Hyperledger Fabric consortiums (`Org1MSP`, `Org2MSP`, Raft Orderer).
+  - **Permissioned Ledger Engine (`fabric/ledger_service.py`)**: Python-native simulator engine implementing LevelDB/CouchDB World State abstraction, SHA-256 block hash chaining, MSP certificate validation, and smart contract chaincode execution (`RegisterAgent`, `RegisterPolicy`, `RecordActionEvent`, `VerifyEvidenceReference`).
+  - **Hyperledger Fabric Gateway Client (`fabric/fabric_client.py`)**: Gateway client connecting to the ledger service or external multi-peer Hyperledger Fabric consortiums (`Org1MSP`, `Org2MSP`, Raft Orderer).
 - **Off-Chain Evidence Provenance & SHA-256 Tamper Detection**: Privacy-preserving off-chain storage linked to on-chain SHA-256 state tree digests, enabling instant detection of database tampering (`TAMPERING_DETECTED`).
 - **20 Threat Scenarios Security Attack Lab**: Empirical evaluation suite covering signature forgery, payload tampering, replay attacks, timestamp window expiration, idempotency, certificate revocation, unauthorized actions, policy bypass, client risk manipulation, approval token substitution, direct API bypass, evidence tampering, and concurrency atomicity.
-- **State-of-the-Art Multi-Page Security Dashboard**: 9 dedicated, standalone page views (`Executive Overview`, `Agent Governance`, `Human Approvals`, `Attack Lab`, `13-Stage Gateway Inspector`, `Hyperledger Explorer`, `Audit Trail`, `Evidence Tamper Lab`, `Research Benchmarks`).
+- **State-of-the-Art Multi-Page Security Dashboard**: Dedicated page views (`Executive Overview`, `Agent Governance`, `Human Approvals`, `Attack Lab`, `13-Stage Gateway Inspector`, `Hyperledger Explorer`, `Audit Trail`, `Evidence Tamper Lab`, `Research Benchmarks`).
 
 ---
 
