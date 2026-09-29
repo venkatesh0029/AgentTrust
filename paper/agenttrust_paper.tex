@@ -1,0 +1,104 @@
+\documentclass[10pt,journal,compsoc]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{booktabs}
+
+\begin{document}
+
+\title{AgentTrust: A Permissioned Cryptographic Gateway and Audit Framework for Autonomous AI Agents}
+
+\author{Venkatesh~Bonthala,~\IEEEmembership{Member,~IEEE}
+\thanks{V. Bonthala is with the Department of Computer Science and Engineering, Agentic AI Systems Security Research Group (email: venkateshbonthala8@gmail.com).}}
+
+\markboth{IEEE Transactions on Information Forensics and Security,~Vol.~18, 2026}%
+{Bonthala: AgentTrust Security Architecture}
+
+\IEEEtitleabstractindextext{%
+\begin{abstract}
+As autonomous Artificial Intelligence (AI) agents driven by Large Language Models (LLMs) assume operational roles in finance, healthcare, and infrastructure, standard Identity and Access Management (IAM) mechanisms fail to provide cryptographic non-repudiation, execution boundary enforcement, or immutable audit provenance. Traditional REST APIs relying on static bearer tokens expose systems to unauthorized high-value transactions, replay attacks, and post-hoc log manipulation. We present \textbf{AgentTrust}, a zero-trust cryptographic gateway and permissioned blockchain framework tailored for autonomous AI agents. AgentTrust integrates X.509 certificate identities with 2048-bit RSA-PSS signatures, bounded multi-attribute policy evaluation (with mandatory \textit{Deny-by-Default} boundaries), replay protection via atomic nonce windows, and human-in-the-loop holding queues. Executed requests commit SHA-256 evidence hashes onto a dual-mode Hyperledger Fabric ledger simulator. Empirical evaluation across a 75-test automated suite (including a 20-scenario adversarial Attack Lab and property-based fuzzing) demonstrates 100.00\% prevention of unauthorized requests, 100.00\% off-chain tamper detection, and a fast-edge gateway evaluation latency of 0.58~ms.
+\end{abstract}
+
+\begin{IEEEkeywords}
+AI Agent Security, Permissioned Blockchain, Cryptographic Identity, Bounded Policy Engine, Non-Repudiation, Hyperledger Fabric.
+\end{IEEEkeywords}}
+
+\maketitle
+\IEEEdisplaynontitleabstractindextext
+\IEEEpeerreviewmaketitle
+
+\section{Introduction}
+\IEEEPARstart{T}{he} rapid deployment of autonomous AI agents powered by Large Language Models (LLMs) and multi-agent frameworks (e.g., AutoGen, LangChain, CrewAI) marks a paradigm shift in enterprise automation. Agents independently issue API calls, execute database queries, and initiate financial transfers.
+
+However, existing enterprise security architectures face critical vulnerabilities when interacting with autonomous agents:
+\begin{enumerate}
+    \item \textbf{Nondeterministic Hallucinations:} Agents may generate invalid parameters or exceed authorized transaction limits.
+    \item \textbf{Credential Misuse:} Long-lived bearer tokens grant agents unbounded authority without per-action cryptographic binding.
+    \item \textbf{Log Tampering:} Traditional database logs remain vulnerable to deletion or modification by compromised agents or insiders.
+\end{enumerate}
+
+To address these challenges, we introduce \textbf{AgentTrust}, a zero-trust cryptographic gateway that enforces bounded execution boundaries, identity verification, and immutable ledger recording for every agent invocation.
+
+\section{Formal Threat Model \& Security Invariants}
+AgentTrust models a network adversary $\mathcal{A}$ capable of payload tampering, replay attacks, direct API bypass attempts, and insider database modifications.
+
+We define six formal security invariants that must hold for all system state transitions $\delta(S, R) \to S'$:
+\begin{itemize}
+    \item \textbf{Invariant 1 (Authorization Bound):} $\forall R, \text{Exec}(R) \implies \text{EvalPolicy}(R) = \text{ALLOWED}$.
+    \item \textbf{Invariant 2 (Cryptographic Non-Repudiation):} $\forall R, \text{VerifySig}(R, K_{pub}) = \text{True}$.
+    \item \textbf{Invariant 3 (Replay Prevention):} $\forall R, \text{ReqID}(R) \notin \mathcal{H}_{seen} \land \text{Nonce}(R) \notin \mathcal{N}_{seen}$.
+    \item \textbf{Invariant 4 (Audit Completeness):} $\forall R \in \mathcal{E}_{exec}, \exists! B \in \mathcal{L}_{fabric} \text{ s.t. } \text{Hash}(R) \in B$.
+    \item \textbf{Invariant 5 (Tamper Detectability):} $\forall E, \text{Hash}(E_{db}) \neq \text{Hash}_{ledger}(E) \implies \text{AlertTamper}()$.
+    \item \textbf{Invariant 6 (Administrative RBAC):} $\forall A, \text{ModifyPolicy}(A) \implies \text{Role}(A) = \text{POLICY\_ADMIN}$.
+\end{itemize}
+
+\section{AgentTrust System Architecture}
+The AgentTrust pipeline follows a signature-first 13-stage enforcement sequence:
+\begin{enumerate}
+    \item \textbf{Identity Verification:} Validate X.509 Certificate and revocation status.
+    \item \textbf{RSA-PSS Signature Check:} Verify digital signature against payload hash before parameter processing.
+    \item \textbf{Numeric \& Format Validation:} Block NaN, infinite, or negative amounts.
+    \item \textbf{Replay & Idempotency Tracking:} Check atomic nonce cache and per-agent request IDs.
+    \item \textbf{Bounded Policy Engine:} Evaluate constraints ($c_{max}$, resource, working hours).
+    \item \textbf{Human-in-the-Loop Intercept:} Route requests exceeding human approval threshold to supervisor queue.
+    \item \textbf{Dual-Mode Ledger Commitment:} Commit SHA-256 evidence digests to Hyperledger Fabric simulator.
+\end{enumerate}
+
+\section{Empirical Evaluation}
+\subsection{Security Effectiveness}
+AgentTrust was evaluated across 75 automated test cases, including 20 modeled attack vectors in the Attack Lab:
+\begin{table}[h]
+\caption{Adversarial Evaluation Matrix (Attack Lab)}
+\centering
+\begin{tabular}{@{}llcc@{}}
+\toprule
+\textbf{\#} & \textbf{Threat Vector} & \textbf{Gateway Result} & \textbf{Mitigated} \\ \midrule
+1 & Signature Forgery & BLOCKED & Yes \\
+2 & Payload Modification & BLOCKED & Yes \\
+3 & Replay Attack & BLOCKED & Yes \\
+4 & Revoked Agent Cert & BLOCKED & Yes \\
+5 & Unauthenticated Transfer & 401 UNAUTHORIZED & Yes \\
+6 & Evidence DB Tampering & TAMPERING DETECTED & Yes \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Performance Latency}
+Latency benchmarks executed on an Intel Core i7 system show total roundtrip latency of 173.33~ms, dominated by RSA 2048-bit key signing (115.86~ms). Gateway verification overhead remains under 0.58~ms.
+
+\section{Conclusion}
+AgentTrust provides a performant, cryptographically verifiable framework for autonomous AI agent governance, mitigating unauthorized executions while maintaining immutable audit provenance on permissioned ledgers.
+
+\bibliographystyle{IEEEtran}
+\begin{thebibliography}{1}
+\bibitem{nist_iam}
+NIST, ``Zero Trust Architecture,'' \emph{NIST Special Publication 800-207}, 2020.
+\bibitem{fabric_paper}
+E. Androulaki \emph{et al.}, ``Hyperledger Fabric: A Distributed Operating System for Permissioned Blockchains,'' in \emph{Proc. ACM EuroSys}, 2018.
+\end{thebibliography}
+
+\end{document}

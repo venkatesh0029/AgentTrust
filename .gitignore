@@ -49,3 +49,6 @@ Thumbs.db
 
 # System generated logs / temporary files
 *.log
+.hypothesis/
+*.db
+
