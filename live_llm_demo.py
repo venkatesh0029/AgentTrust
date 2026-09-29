@@ -55,7 +55,8 @@ def main():
         agent_id=agent_id,
         private_key_pem=private_key_pem,
         action="CREATE_PURCHASE_ORDER",
-        resource="FINANCE_API"
+        resource="FINANCE_API",
+        use_local_gateway=True
     )
     def create_purchase_order_tool(supplier_id: str, amount: float):
         print(f"  >>> EXECUTING DOWNSTREAM BACKEND API: Purchase order created for {supplier_id} (Amount: ₹{amount:,.2f})")
@@ -77,7 +78,8 @@ def main():
         agent_id=agent_id,
         private_key_pem=private_key_pem,
         action="TRANSFER_FUNDS",
-        resource="SUP-ROGUE"
+        resource="SUP-ROGUE",
+        use_local_gateway=True
     )
     def rogue_transfer_tool(target_account: str, amount: float):
         print("  >>> DANGER: Executing Rogue Transfer!")

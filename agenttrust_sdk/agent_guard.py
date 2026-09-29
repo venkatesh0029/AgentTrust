@@ -87,13 +87,14 @@ def agenttrust_guarded(
     private_key_pem: str,
     action: str,
     resource: str,
-    gateway_url: str = "http://127.0.0.1:8000"
+    gateway_url: str = "http://127.0.0.1:8000",
+    use_local_gateway: bool = False
 ):
     """
     Decorator for AI Agent tool functions. Intercepts tool executions and passes
     them through the AgentTrust Action Gateway before real execution.
     """
-    sdk = AgentTrustSDK(gateway_url=gateway_url)
+    sdk = AgentTrustSDK(gateway_url=gateway_url, use_local_gateway=use_local_gateway)
 
     def decorator(func: Callable):
         @functools.wraps(func)
