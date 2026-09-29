@@ -565,6 +565,13 @@ async function fetchPendingApprovals() {
     if (!res.ok) return;
     const data = await res.json();
     const pending = data.pending_approvals || [];
+
+    // Update pending badge counters across the UI
+    const badgeSidebar = document.getElementById('badge-pending-approvals');
+    if (badgeSidebar) badgeSidebar.innerText = pending.length;
+    const badgeOverview = document.getElementById('kpi-pending-approvals');
+    if (badgeOverview) badgeOverview.innerText = pending.length;
+
     const tbody = document.getElementById('approvals-tbody');
     if (!tbody) return;
 
@@ -579,7 +586,7 @@ async function fetchPendingApprovals() {
         <td class="font-mono text-sm text-cyan">${a.request_id}</td>
         <td class="font-mono text-sm text-purple">${a.agent_id}</td>
         <td><strong>${a.action}</strong></td>
-        <td>₹${a.parameters ? a.parameters.amount : 'N/A'}</td>
+        <td>₹${a.parameters ? (a.parameters.amount || a.parameters.total_amount || 'N/A') : 'N/A'}</td>
         <td><span class="badge badge-amber">${a.reason}</span></td>
         <td class="text-muted text-sm">${formatTime(a.created_at)}</td>
         <td>
@@ -595,8 +602,14 @@ async function fetchPendingApprovals() {
 
 async function approveRequest(approvalId) {
   try {
-    await fetch(`/approvals/${approvalId}/approve`, { method: 'POST' });
-    refreshAllDashboardData();
+    const res = await fetch(`/approvals/${approvalId}/approve`, {
+      method: 'POST',
+      headers: { 'X-Admin-Role': 'SYSTEM_ADMIN' }
+    });
+    if (!res.ok) {
+      console.error('Approval failed:', await res.text());
+    }
+    await refreshAllDashboardData();
   } catch (err) {
     console.error('Error approving request:', err);
   }
@@ -604,8 +617,14 @@ async function approveRequest(approvalId) {
 
 async function rejectRequest(approvalId) {
   try {
-    await fetch(`/approvals/${approvalId}/reject`, { method: 'POST' });
-    refreshAllDashboardData();
+    const res = await fetch(`/approvals/${approvalId}/reject`, {
+      method: 'POST',
+      headers: { 'X-Admin-Role': 'SYSTEM_ADMIN' }
+    });
+    if (!res.ok) {
+      console.error('Rejection failed:', await res.text());
+    }
+    await refreshAllDashboardData();
   } catch (err) {
     console.error('Error rejecting request:', err);
   }
@@ -693,26 +712,52 @@ function populateEvidenceDropdown(events) {
   const dropdown = document.getElementById('evidence-select-dropdown');
   if (!dropdown) return;
 
-  dropdown.innerHTML = `<option value="">-- Select Evidence --</option>` + events.map(e => `
-    <option value="${e.evidence_reference || e.request_id}">${e.request_id} - ${e.action} (${e.decision})</option>
-  `).join('');
+  const currentVal = dropdown.value;
+  const optionsHtml = `<option value="">-- Select Evidence --</option>` + events.map(e => {
+    const refVal = e.evidence_reference || (e.request_id ? `EVIDENCE-${e.request_id}` : e.request_id);
+    return `<option value="${refVal}">${e.request_id} - ${e.action} (${e.decision})</option>`;
+  }).join('');
+
+  dropdown.innerHTML = optionsHtml;
+
+  // Auto-select first evidence item if none currently selected
+  if (!currentVal && events.length > 0) {
+    const firstRef = events[0].evidence_reference || (events[0].request_id ? `EVIDENCE-${events[0].request_id}` : events[0].request_id);
+    if (firstRef) {
+      dropdown.value = firstRef;
+      loadSelectedEvidenceDetails();
+    }
+  } else if (currentVal) {
+    dropdown.value = currentVal;
+  }
 }
 
 async function loadSelectedEvidenceDetails() {
   const dropdown = document.getElementById('evidence-select-dropdown');
   if (!dropdown) return;
   const evId = dropdown.value;
-  if (!evId) return;
+  const viewer = document.getElementById('evidence-json-viewer');
+  if (!viewer) return;
+
+  if (!evId) {
+    viewer.innerText = JSON.stringify({ status: "No evidence selected" }, null, 2);
+    return;
+  }
 
   try {
-    const res = await fetch(`/actions/${evId}`);
+    let res = await fetch(`/evidence/${evId}`);
+    if (!res.ok) {
+      res = await fetch(`/actions/${evId}`);
+    }
     if (res.ok) {
       const data = await res.json();
-      const viewer = document.getElementById('evidence-json-viewer');
-      if (viewer) viewer.innerText = JSON.stringify(data.evidence, null, 2);
+      viewer.innerText = JSON.stringify(data.evidence || data, null, 2);
+    } else {
+      viewer.innerText = JSON.stringify({ error: "Failed to fetch evidence record", status: res.status }, null, 2);
     }
   } catch (err) {
     console.error('Error loading evidence details:', err);
+    viewer.innerText = JSON.stringify({ error: err.message }, null, 2);
   }
 }
 
@@ -721,12 +766,16 @@ async function triggerEvidenceTampering() {
   const input = document.getElementById('tamper-amount-input');
   if (!dropdown || !input) return;
 
-  const evId = dropdown.value;
-  const newAmt = parseFloat(input.value);
+  let evId = dropdown.value;
+  const newAmt = parseFloat(input.value) || 75000;
 
   if (!evId) {
     alert('Please select an evidence record first!');
     return;
+  }
+
+  if (!evId.startsWith('EVIDENCE-')) {
+    evId = `EVIDENCE-${evId}`;
   }
 
   try {
@@ -743,7 +792,7 @@ async function triggerEvidenceTampering() {
       statusBox.innerHTML = `
         <i data-lucide="shield-alert" class="status-icon text-rose"></i>
         <h3 class="status-text text-rose">TAMPERING DETECTED!</h3>
-        <p class="text-sm text-muted">Off-chain evidence hash does not match Hyperledger Fabric ledger record.</p>
+        <p class="text-sm text-muted">Off-chain evidence hash mismatch vs Hyperledger Fabric ledger record.</p>
       `;
       initLucideIcons();
     }
@@ -792,3 +841,19 @@ document.getElementById('register-agent-form')?.addEventListener('submit', async
     console.error('Failed registering agent:', err);
   }
 });
+
+// Explicitly bind all window callbacks for inline event handlers
+window.approveRequest = approveRequest;
+window.rejectRequest = rejectRequest;
+window.loadPendingApprovals = fetchPendingApprovals;
+window.loadSelectedEvidenceDetails = loadSelectedEvidenceDetails;
+window.triggerEvidenceTampering = triggerEvidenceTampering;
+window.triggerInteractiveScenario = triggerInteractiveScenario;
+window.runAllScenarios = runAllScenarios;
+window.showRegisterModal = showRegisterModal;
+window.closeRegisterModal = closeRegisterModal;
+window.closeInteractiveModal = closeInteractiveModal;
+window.clearConsole = clearConsole;
+window.switchMode = switchMode;
+window.runLiveBenchmark = runLiveBenchmark;
+window.rotateAgentKey = rotateAgentKey;

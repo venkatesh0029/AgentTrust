@@ -13,7 +13,13 @@ class RBACManager:
     """
 
     ROLE_PERMISSIONS = {
-        AdminRole.SYSTEM_ADMIN: ["register_agent", "revoke_agent", "suspend_agent", "reactivate_agent", "view_audit"],
+        AdminRole.SYSTEM_ADMIN: [
+            "register_agent", "revoke_agent", "suspend_agent", "reactivate_agent",
+            "create_policy", "update_policy", "rollback_policy", "view_policy",
+            "approve_transaction", "reject_transaction", "view_pending_approvals",
+            "view_audit", "view_evidence", "verify_evidence", "view_blockchain",
+            "view_agents", "view_policies", "switch_mode", "simulate_tamper"
+        ],
         AdminRole.POLICY_ADMIN: ["create_policy", "update_policy", "rollback_policy", "view_policy", "view_audit"],
         AdminRole.FINANCE_APPROVER: ["approve_transaction", "reject_transaction", "view_pending_approvals", "view_audit"],
         AdminRole.AUDITOR: ["view_audit", "view_evidence", "verify_evidence", "view_blockchain", "view_agents", "view_policies"]

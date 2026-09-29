@@ -1,4 +1,5 @@
 import os
+from functools import lru_cache
 from typing import Optional
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
@@ -6,7 +7,7 @@ from cryptography.hazmat.primitives import serialization
 class KeyManager:
     """
     Manages RSA private and public keys for AI Agents, Root CA, and Gateway.
-    Supports Private Key Encryption at Rest.
+    Supports Private Key Encryption at Rest and LRU-cached key loading for performance.
     """
 
     @staticmethod
@@ -36,8 +37,9 @@ class KeyManager:
         return pem.decode('utf-8')
 
     @staticmethod
+    @lru_cache(maxsize=1024)
     def pem_to_private_key(pem_str: str, password: Optional[str] = None):
-        """Loads RSA private key object from PEM string (supports encrypted PEMs)."""
+        """Loads RSA private key object from PEM string (supports encrypted PEMs). Cached for performance."""
         pass_bytes = password.encode('utf-8') if password else None
         return serialization.load_pem_private_key(
             pem_str.encode('utf-8'),
@@ -53,8 +55,10 @@ class KeyManager:
         ).decode('utf-8')
 
     @staticmethod
+    @lru_cache(maxsize=1024)
     def pem_to_public_key(pem_str: str):
-        """Loads RSA public key object from PEM string."""
+        """Loads RSA public key object from PEM string. Cached for performance."""
         return serialization.load_pem_public_key(
             pem_str.encode('utf-8')
         )
+

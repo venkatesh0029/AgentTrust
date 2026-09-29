@@ -197,7 +197,8 @@ Open your browser at **`http://127.0.0.1:8000`** to interact with the multi-page
 
 ## 📚 Complete Documentation Index
 
-- [`documentation/getting_started.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/getting_started.md) — **Getting Started & Operational Guide** (Architecture, 13-Stage Pipeline, CLI Commands & Usage).
+- [`documentation/complete_project_overview.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/complete_project_overview.md) — **Definitive End-to-End Technical Manual** (Architecture, 10-Step Pipeline, Invariants, REST APIs, UI, Benchmarks & Terminal Commands).
+- [`documentation/getting_started.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/getting_started.md) — **Getting Started & Operational Guide** (Architecture, Pipeline, CLI Commands & Usage).
 - [`documentation/final_project_report.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/final_project_report.md) — **Academic Project Report** (Abstract, Literature Review, Formal Security Proofs, Benchmark Tables & Results).
 - [`documentation/presentation_visuals.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/presentation_visuals.md) — **Presentation Visuals & Diagrams** (ASCII Schematics, Diagrams, Slide Content).
 - [`documentation/deployment_readiness.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/deployment_readiness.md) — **Enterprise Production Roadmap** (OAuth2/mTLS, HSM Key Storage, Multi-Org Fabric Deployment).
@@ -208,6 +209,8 @@ Open your browser at **`http://127.0.0.1:8000`** to interact with the multi-page
 - [`documentation/api_specification.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/api_specification.md) — Gateway & REST API Specifications.
 - [`documentation/test_report.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/test_report.md) — Automated Test Suite Results & Breakdown.
 - [`documentation/baseline_comparison.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/baseline_comparison.md) — Comparative Analysis vs Traditional IAM & Centralized Logging.
+- [`documentation/research_methodology.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/research_methodology.md) — Research Objectives, Attack Matrix & Ablation Study.
+- [`documentation/limitations.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/limitations.md) — System Trade-offs, Constraints & Future Roadmap.
 
 ---
 

@@ -116,6 +116,7 @@ def test_attack_02_modified_signed_payload(test_setup):
     gw = test_setup["gw"]
     payload = build_signed_payload("PROCUREMENT-AGENT-001", "CREATE_PURCHASE_ORDER", "SUPPLIER-101", 5000.0, test_setup["priv_key"])
     payload["amount"] = 95000.0  # Tampered amount after signing!
+    payload["parameters"]["amount"] = 95000.0
 
     res = gw.process_request(payload)
     assert res["decision"] == "BLOCKED"

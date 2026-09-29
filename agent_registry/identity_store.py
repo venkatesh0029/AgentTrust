@@ -24,9 +24,17 @@ class IdentityStore:
         return list(self._agents.values())
 
     def update_status(self, agent_id: str, new_status: AgentStatus, reason: str = "") -> bool:
-        """Updates status of an agent."""
+        """Updates status of an agent following formal transition constraints."""
         agent = self.get_agent(agent_id)
         if not agent:
+            return False
+
+        try:
+            curr_status = AgentStatus(agent.get("status", "ACTIVE"))
+        except Exception:
+            curr_status = AgentStatus.ACTIVE
+
+        if not StatusManager.can_transition(curr_status, new_status):
             return False
 
         agent["status"] = new_status.value

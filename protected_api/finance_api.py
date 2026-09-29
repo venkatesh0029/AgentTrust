@@ -132,33 +132,40 @@ class ProtectedFinanceAPI:
                 "message": "Direct access forbidden. Requests must originate from authorized AgentTrust Gateway."
             }
 
-        # 2. Service Signature Verification
-        if auth_headers:
-            gw_service = auth_headers.get("X-Gateway-Service")
-            gw_ts = auth_headers.get("X-Gateway-Timestamp")
-            gw_sig = auth_headers.get("X-Gateway-Signature")
-
-            if gw_service != "AgentTrust-ActionGateway-Service" or not gw_sig:
-                return {
-                    "success": False,
-                    "error": "DIRECT_ACCESS_DENIED",
-                    "message": "Invalid Gateway Service Identity."
-                }
-
-            payload = {
-                "gateway_service": gw_service,
-                "request_id": request_id,
-                "timestamp": gw_ts
+        # 2. Service Signature Verification (Mandatory Signed Headers Required)
+        if not auth_headers or not isinstance(auth_headers, dict):
+            return {
+                "success": False,
+                "error": "DIRECT_ACCESS_DENIED",
+                "message": "Missing mandatory Gateway Service Auth Headers."
             }
-            if not SignatureManager.verify_signature(payload, gw_sig, self.gateway_service_public_key_pem):
-                return {
-                    "success": False,
-                    "error": "DIRECT_ACCESS_DENIED",
-                    "message": "Gateway Service Signature Verification Failed."
-                }
 
-        # 3. Idempotency Check
-        cache_key = idempotency_key or request_id
+        gw_service = auth_headers.get("X-Gateway-Service")
+        gw_ts = auth_headers.get("X-Gateway-Timestamp")
+        gw_sig = auth_headers.get("X-Gateway-Signature")
+
+        if gw_service != "AgentTrust-ActionGateway-Service" or not gw_sig or not gw_ts:
+            return {
+                "success": False,
+                "error": "DIRECT_ACCESS_DENIED",
+                "message": "Invalid Gateway Service Identity."
+            }
+
+        payload = {
+            "gateway_service": gw_service,
+            "request_id": request_id,
+            "timestamp": gw_ts
+        }
+        if not SignatureManager.verify_signature(payload, gw_sig, self.gateway_service_public_key_pem):
+            return {
+                "success": False,
+                "error": "DIRECT_ACCESS_DENIED",
+                "message": "Gateway Service Signature Verification Failed."
+            }
+
+        # 3. Scoped Idempotency Check per (agent_id, idempotency_key)
+        raw_key = idempotency_key or request_id
+        cache_key = f"{agent_id}:{raw_key}"
         if cache_key in self._idempotency_cache:
             cached_res = self._idempotency_cache[cache_key].copy()
             cached_res["idempotent_replay"] = True

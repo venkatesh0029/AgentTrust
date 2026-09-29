@@ -106,11 +106,16 @@ app.add_middleware(
 )
 
 # --- RBAC Helper Dependency ---
-def check_admin_permission(required_permission: str, x_admin_role: Optional[str] = Header("SYSTEM_ADMIN")):
+def check_admin_permission(required_permission: str, x_admin_role: Optional[str] = "SYSTEM_ADMIN"):
+    if not x_admin_role:
+        x_admin_role = "SYSTEM_ADMIN"
     try:
         role = AdminRole(x_admin_role)
     except Exception:
-        role = AdminRole.SYSTEM_ADMIN
+        raise HTTPException(
+            status_code=403,
+            detail=f"RBAC Denial: Invalid Admin Role '{x_admin_role}'."
+        )
 
     if not RBACManager.is_action_allowed(role, required_permission):
         raise HTTPException(
@@ -118,6 +123,11 @@ def check_admin_permission(required_permission: str, x_admin_role: Optional[str]
             detail=f"RBAC Denial: Role '{role.value}' does not have permission '{required_permission}'."
         )
     return role
+
+def check_admin_permission_dep(required_permission: str):
+    def _dependency(x_admin_role: Optional[str] = Header(default="SYSTEM_ADMIN", alias="X-Admin-Role")) -> AdminRole:
+        return check_admin_permission(required_permission, x_admin_role)
+    return _dependency
 
 # --- Pydantic API Models ---
 class ModeRequest(BaseModel):
@@ -316,17 +326,17 @@ def get_current_mode():
     }
 
 @app.post("/mode")
-def set_operational_mode(req: ModeRequest):
+def set_operational_mode(req: ModeRequest, role: AdminRole = Depends(check_admin_permission_dep("switch_mode"))):
     global CURRENT_MODE
     valid_modes = ["MODE_A_DIRECT_API", "MODE_B_AUTH_RBAC", "MODE_C_AGENTTRUST_NO_FABRIC", "MODE_D_AGENTTRUST_FABRIC"]
     if req.mode not in valid_modes:
         raise HTTPException(status_code=400, detail=f"Invalid mode. Must be one of {valid_modes}")
     CURRENT_MODE = req.mode
-    return {"success": True, "current_mode": CURRENT_MODE}
+    return {"success": True, "current_mode": CURRENT_MODE, "authorized_by": role.value}
 
 # 1. Agent Registry APIs
 @app.post("/agents/register")
-def register_agent(req: RegisterAgentRequest, role: AdminRole = Depends(lambda: check_admin_permission("register_agent"))):
+def register_agent(req: RegisterAgentRequest, role: AdminRole = Depends(check_admin_permission_dep("register_agent"))):
     record = agent_registry.register_agent(
         agent_id=req.agent_id,
         agent_name=req.agent_name,
@@ -352,7 +362,7 @@ def get_agent(agent_id: str):
     return {"agent": agent}
 
 @app.patch("/agents/{agent_id}/status")
-def update_agent_status(agent_id: str, req: UpdateStatusRequest, role: AdminRole = Depends(lambda: check_admin_permission("suspend_agent"))):
+def update_agent_status(agent_id: str, req: UpdateStatusRequest, role: AdminRole = Depends(check_admin_permission_dep("suspend_agent"))):
     ok = agent_registry.update_agent_status(agent_id, req.status, req.reason)
     if not ok:
         raise HTTPException(status_code=400, detail="Invalid status transition or agent not found")
@@ -360,7 +370,7 @@ def update_agent_status(agent_id: str, req: UpdateStatusRequest, role: AdminRole
     return {"success": True, "status": req.status, "authorized_by": role.value}
 
 @app.post("/agents/{agent_id}/suspend")
-def suspend_agent(agent_id: str, reason: str = "ADMIN_SUSPENSION", role: AdminRole = Depends(lambda: check_admin_permission("suspend_agent"))):
+def suspend_agent(agent_id: str, reason: str = "ADMIN_SUSPENSION", role: AdminRole = Depends(check_admin_permission_dep("suspend_agent"))):
     ok = agent_registry.suspend_agent(agent_id, reason)
     if not ok:
         raise HTTPException(status_code=400, detail="Agent not found or invalid status transition")
@@ -368,7 +378,7 @@ def suspend_agent(agent_id: str, reason: str = "ADMIN_SUSPENSION", role: AdminRo
     return {"success": True, "agent_id": agent_id, "status": "SUSPENDED", "authorized_by": role.value}
 
 @app.post("/agents/{agent_id}/reactivate")
-def reactivate_agent(agent_id: str, role: AdminRole = Depends(lambda: check_admin_permission("suspend_agent"))):
+def reactivate_agent(agent_id: str, role: AdminRole = Depends(check_admin_permission_dep("suspend_agent"))):
     ok = agent_registry.reactivate_agent(agent_id)
     if not ok:
         raise HTTPException(status_code=400, detail="Agent not found or invalid status transition")
@@ -376,7 +386,7 @@ def reactivate_agent(agent_id: str, role: AdminRole = Depends(lambda: check_admi
     return {"success": True, "agent_id": agent_id, "status": "ACTIVE", "authorized_by": role.value}
 
 @app.post("/agents/{agent_id}/revoke")
-def revoke_agent(agent_id: str, role: AdminRole = Depends(lambda: check_admin_permission("revoke_agent"))):
+def revoke_agent(agent_id: str, role: AdminRole = Depends(check_admin_permission_dep("revoke_agent"))):
     ok = agent_registry.revoke_agent(agent_id, f"REVOKED_VIA_API_BY_{role.value}")
     if not ok:
         raise HTTPException(status_code=400, detail="Agent not found or already revoked")
@@ -384,7 +394,7 @@ def revoke_agent(agent_id: str, role: AdminRole = Depends(lambda: check_admin_pe
     return {"success": True, "status": "REVOKED", "authorized_by": role.value}
 
 @app.post("/agents/{agent_id}/rotate-key")
-def rotate_agent_key(agent_id: str, role: AdminRole = Depends(lambda: check_admin_permission("register_agent"))):
+def rotate_agent_key(agent_id: str, role: AdminRole = Depends(check_admin_permission_dep("register_agent"))):
     record = agent_registry.rotate_key(agent_id)
     if not record:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -392,7 +402,7 @@ def rotate_agent_key(agent_id: str, role: AdminRole = Depends(lambda: check_admi
     return {"success": True, "agent": record, "key_version": record["key_version"], "authorized_by": role.value}
 
 @app.delete("/agents/{agent_id}")
-def delete_agent(agent_id: str, role: AdminRole = Depends(lambda: check_admin_permission("revoke_agent"))):
+def delete_agent(agent_id: str, role: AdminRole = Depends(check_admin_permission_dep("revoke_agent"))):
     ok = agent_registry.delete_agent(agent_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -468,7 +478,7 @@ def create_fund_transfer(req: FundTransferRequest):
 
 # 3. Policy APIs
 @app.post("/policies")
-def create_policy(req: CreatePolicyRequest, role: AdminRole = Depends(lambda: check_admin_permission("create_policy"))):
+def create_policy(req: CreatePolicyRequest, role: AdminRole = Depends(check_admin_permission_dep("create_policy"))):
     policy = PolicyRecord(
         policy_id=req.policy_id,
         agent_id=req.agent_id,
@@ -485,7 +495,7 @@ def create_policy(req: CreatePolicyRequest, role: AdminRole = Depends(lambda: ch
     return {"success": True, "policy": policy.model_dump(), "authorized_by": role.value}
 
 @app.post("/policies/rollback")
-def rollback_policy(req: RollbackPolicyRequest, role: AdminRole = Depends(lambda: check_admin_permission("rollback_policy"))):
+def rollback_policy(req: RollbackPolicyRequest, role: AdminRole = Depends(check_admin_permission_dep("rollback_policy"))):
     res = policy_loader.rollback_policy(req.policy_id, req.target_version, author=role.value)
     if not res:
         raise HTTPException(status_code=400, detail=f"Rollback failed. Policy or version '{req.target_version}' not found.")
@@ -521,17 +531,17 @@ def list_pending_approvals():
     return {"pending_approvals": approval_manager.list_pending()}
 
 @app.post("/approvals/{approval_id}/approve")
-def approve_request(approval_id: str, role: AdminRole = Depends(lambda: check_admin_permission("approve_transaction"))):
+def approve_request(approval_id: str, role: AdminRole = Depends(check_admin_permission_dep("approve_transaction"))):
     res = action_gateway.process_human_approval_resume(approval_id, approver_id=role.value)
     return res
 
 @app.post("/approvals/grant")
-def grant_approval(req: GrantApprovalRequest, role: AdminRole = Depends(lambda: check_admin_permission("approve_transaction"))):
+def grant_approval(req: GrantApprovalRequest, role: AdminRole = Depends(check_admin_permission_dep("approve_transaction"))):
     res = action_gateway.process_human_approval_resume(req.approval_id, approver_id=req.approver_id or role.value)
     return res
 
 @app.post("/approvals/{approval_id}/reject")
-def reject_request(approval_id: str, reason: str = "REJECTED_BY_HUMAN", role: AdminRole = Depends(lambda: check_admin_permission("reject_transaction"))):
+def reject_request(approval_id: str, reason: str = "REJECTED_BY_HUMAN", role: AdminRole = Depends(check_admin_permission_dep("reject_transaction"))):
     ok, record, msg = approval_manager.reject_request(approval_id, approver_id=role.value, reason=reason)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
@@ -561,7 +571,7 @@ def verify_evidence(evidence_id: str):
     }
 
 @app.post("/evidence/{evidence_id}/simulate-tamper")
-def simulate_evidence_tamper(evidence_id: str, req: TamperTestRequest):
+def simulate_evidence_tamper(evidence_id: str, req: TamperTestRequest, role: AdminRole = Depends(check_admin_permission_dep("simulate_tamper"))):
     ok = evidence_store.simulate_tamper(evidence_id, req.field_name, req.new_value)
     if not ok:
         raise HTTPException(status_code=404, detail="Evidence not found")
@@ -587,7 +597,7 @@ def verify_audit_chain_integrity():
     return chain_writer.verify_chain_integrity()
 
 @app.post("/audit/chain/simulate-tamper")
-def simulate_chain_tamper(req: ChainTamperRequest):
+def simulate_chain_tamper(req: ChainTamperRequest, role: AdminRole = Depends(check_admin_permission_dep("simulate_tamper"))):
     ok = chain_writer.simulate_tamper_record(req.sequence_number, req.field_name, req.new_value)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Audit chain record sequence #{req.sequence_number} not found.")

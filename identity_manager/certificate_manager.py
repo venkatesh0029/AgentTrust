@@ -1,10 +1,15 @@
 import datetime
 import hashlib
+from functools import lru_cache
 from typing import Tuple, Dict, Any, Optional
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from identity_manager.key_manager import KeyManager
+
+@lru_cache(maxsize=1024)
+def _parse_cert_cached(cert_pem: str) -> x509.Certificate:
+    return x509.load_pem_x509_certificate(cert_pem.encode('utf-8'))
 
 class CertificateManager:
     """
@@ -15,6 +20,7 @@ class CertificateManager:
         self.ca_common_name = ca_common_name
         self.ca_private_key = KeyManager.generate_key_pair(2048)
         self.ca_certificate = self._generate_root_ca_certificate()
+        self.ca_public_key = self.ca_certificate.public_key()
 
     def _generate_root_ca_certificate(self) -> x509.Certificate:
         """Generates self-signed X.509 Root CA certificate."""
@@ -89,7 +95,7 @@ class CertificateManager:
         Returns dict with status and reason.
         """
         try:
-            cert = x509.load_pem_x509_certificate(cert_pem.encode('utf-8'))
+            cert = _parse_cert_cached(cert_pem)
             now = datetime.datetime.now(datetime.timezone.utc)
 
             if now < cert.not_valid_before_utc or now > cert.not_valid_after_utc:
@@ -97,8 +103,7 @@ class CertificateManager:
 
             # Verify Root CA Signature
             from cryptography.hazmat.primitives.asymmetric import padding
-            ca_public_key = self.ca_certificate.public_key()
-            ca_public_key.verify(
+            self.ca_public_key.verify(
                 cert.signature,
                 cert.tbs_certificate_bytes,
                 padding.PKCS1v15(),
@@ -119,3 +124,4 @@ class CertificateManager:
             }
         except Exception as e:
             return {"valid": False, "reason": f"INVALID_CERTIFICATE: {str(e)}"}
+
