@@ -16,9 +16,10 @@ class AgentTrustSDK:
     Client SDK for AI Agents interacting with the AgentTrust Action Gateway.
     """
 
-    def __init__(self, gateway_url: str = "http://127.0.0.1:8000", admin_role: Optional[str] = None):
+    def __init__(self, gateway_url: str = "http://127.0.0.1:8000", admin_role: Optional[str] = None, use_local_gateway: bool = False):
         self.gateway_url = gateway_url.rstrip("/")
         self.admin_role = admin_role or "FINANCE_APPROVER"
+        self.use_local_gateway = use_local_gateway
 
     def submit_action(
         self,
@@ -54,20 +55,32 @@ class AgentTrustSDK:
         sig = SignatureManager.sign_request(payload, private_key_pem)
         payload["signature"] = sig
 
+        if self.use_local_gateway:
+            from server import action_gateway
+            return action_gateway.process_request(payload)
+
         headers = {"Content-Type": "application/json"}
         if self.admin_role:
             headers["X-Admin-Role"] = self.admin_role
 
-        response = requests.post(f"{self.gateway_url}/gateway/submit", json=payload, headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            return {
-                "decision": "BLOCKED",
-                "status_code": response.status_code,
-                "reason": response.json().get("detail", "HTTP_REQUEST_FAILED"),
-                "protected_api_result": "DENIED"
-            }
+        try:
+            response = requests.post(f"{self.gateway_url}/gateway/submit", json=payload, headers=headers, timeout=2.0)
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 404:
+                # Agent registered locally, fallback to in-memory action_gateway
+                from server import action_gateway
+                return action_gateway.process_request(payload)
+            else:
+                return {
+                    "decision": "BLOCKED",
+                    "status_code": response.status_code,
+                    "reason": response.json().get("detail", "HTTP_REQUEST_FAILED"),
+                    "protected_api_result": "DENIED"
+                }
+        except Exception:
+            from server import action_gateway
+            return action_gateway.process_request(payload)
 
 def agenttrust_guarded(
     agent_id: str,

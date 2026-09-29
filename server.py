@@ -520,6 +520,7 @@ def get_policy(policy_id: str):
 
 # 4. Action Gateway APIs
 @app.post("/actions/submit")
+@app.post("/gateway/submit")
 def submit_action(payload: SubmitActionPayload):
     return process_request_with_mode(payload.model_dump())
 
