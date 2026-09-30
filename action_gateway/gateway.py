@@ -56,13 +56,14 @@ class ActionGateway:
         # Step 1: Validate payload format & schema
         valid_struct, struct_msg = RequestValidator.validate_structure(request_payload)
         if not valid_struct:
+            reason_code = struct_msg if not struct_msg.startswith("MISSING_REQUIRED_FIELD") else "INVALID_REQUEST_FORMAT"
             return self._build_immediate_rejection(
                 request_id=request_payload.get("request_id", "REQ-UNKNOWN"),
                 agent_id=request_payload.get("agent_id", "UNKNOWN-AGENT"),
                 action=request_payload.get("action", "UNKNOWN"),
                 resource=request_payload.get("resource", "UNKNOWN"),
                 decision=PolicyDecision.BLOCKED.value,
-                reason="INVALID_REQUEST_FORMAT"
+                reason=reason_code
             )
 
         request_id = request_payload["request_id"]

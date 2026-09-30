@@ -21,6 +21,7 @@ class CertificateManager:
         self.ca_private_key = KeyManager.generate_key_pair(2048)
         self.ca_certificate = self._generate_root_ca_certificate()
         self.ca_public_key = self.ca_certificate.public_key()
+        self.revoked_fingerprints = set()
 
     def _generate_root_ca_certificate(self) -> x509.Certificate:
         """Generates self-signed X.509 Root CA certificate."""
@@ -43,6 +44,52 @@ class CertificateManager:
             .sign(self.ca_private_key, hashes.SHA256())
         )
         return cert
+
+    def revoke_certificate(self, fingerprint: str) -> bool:
+        """Adds a certificate fingerprint to the Certificate Revocation List (CRL)."""
+        self.revoked_fingerprints.add(fingerprint.upper())
+        return True
+
+    def is_revoked(self, fingerprint: str) -> bool:
+        """Checks whether a certificate fingerprint is on the CRL."""
+        return fingerprint.upper() in self.revoked_fingerprints
+
+    def issue_agent_certificate_from_pubkey(
+        self, agent_id: str, agent_name: str, public_key_pem: str, validity_days: int = 365
+    ) -> Tuple[str, str]:
+        """
+        Issues X.509 certificate for an AI agent using an externally provided public key.
+        The private key remains strictly on the client/agent side and is never handled by the server.
+        Returns: (agent_pem_cert, cert_fingerprint)
+        """
+        agent_public_key = KeyManager.pem_to_public_key(public_key_pem)
+
+        subject = x509.Name([
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AgentTrust Managed Agent"),
+            x509.NameAttribute(NameOID.COMMON_NAME, agent_id),
+            x509.NameAttribute(NameOID.GIVEN_NAME, agent_name)
+        ])
+
+        start_time = datetime.datetime.now(datetime.timezone.utc)
+        end_time = start_time + datetime.timedelta(days=validity_days)
+
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(self.ca_certificate.subject)
+            .public_key(agent_public_key)
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(start_time)
+            .not_valid_after(end_time)
+            .add_extension(
+                x509.BasicConstraints(ca=False, path_length=None), critical=True
+            )
+            .sign(self.ca_private_key, hashes.SHA256())
+        )
+
+        cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode('utf-8')
+        fingerprint = self.calculate_fingerprint(cert_pem)
+        return cert_pem, fingerprint
 
     def issue_agent_certificate(
         self, agent_id: str, agent_name: str, validity_days: int = 365, start_offset_days: int = 0
@@ -91,10 +138,14 @@ class CertificateManager:
 
     def verify_agent_certificate(self, cert_pem: str) -> Dict[str, Any]:
         """
-        Verifies certificate validity against Root CA signature and expiration.
+        Verifies certificate validity against Root CA signature, CRL, and expiration.
         Returns dict with status and reason.
         """
         try:
+            fingerprint = self.calculate_fingerprint(cert_pem)
+            if self.is_revoked(fingerprint):
+                return {"valid": False, "reason": "CERTIFICATE_REVOKED"}
+
             cert = _parse_cert_cached(cert_pem)
             now = datetime.datetime.now(datetime.timezone.utc)
 
@@ -120,8 +171,10 @@ class CertificateManager:
             return {
                 "valid": True,
                 "agent_id": common_name,
+                "fingerprint": fingerprint,
                 "reason": "CERTIFICATE_VALID"
             }
         except Exception as e:
             return {"valid": False, "reason": f"INVALID_CERTIFICATE: {str(e)}"}
+
 

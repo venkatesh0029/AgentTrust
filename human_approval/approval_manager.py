@@ -82,6 +82,7 @@ class HumanApprovalManager:
     ) -> Tuple[bool, Optional[Dict[str, Any]], str]:
         """
         Human approver signs off on request using single-use bound approval token.
+        Prohibits self-approval where approver_id equals requesting agent_id.
         Returns: (success, approval_record, message)
         """
         record = self.get_approval_by_id(approval_id)
@@ -90,6 +91,10 @@ class HumanApprovalManager:
 
         if record["status"] != "PENDING":
             return False, None, f"REQUEST_ALREADY_{record['status']}"
+
+        # Prevent Self-Approval (Approver == Requester Agent)
+        if approver_id == record.get("agent_id"):
+            return False, None, "SELF_APPROVAL_PROHIBITED: Requester agent cannot self-approve requests"
 
         token = record["approval_token"]
         if token in self._used_approval_tokens:
@@ -110,6 +115,7 @@ class HumanApprovalManager:
         ref_id = f"APPROVAL-2026-{self._approval_counter:03d}"
         record["status"] = "APPROVED"
         record["approver_id"] = approver_id
+        record["approved_by"] = approver_id
         record["approval_reference"] = ref_id
         record["decision_timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 

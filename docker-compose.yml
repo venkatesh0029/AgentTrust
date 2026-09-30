@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  agenttrust-server:
+    build: .
+    container_name: agenttrust-gateway-server
+    ports:
+      - "8000:8000"
+    environment:
+      - AGENTTRUST_MODE=MODE_D_AGENTTRUST_FABRIC
+      - GATEWAY_SECRET=AGENTTRUST_GATEWAY_HMAC_SECRET_v2_2026
+      - AGENTTRUST_DEMO_MODE=false
+      - AGENTTRUST_ALLOW_MODE_CHANGE=false
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3

@@ -22,10 +22,11 @@ class KeyManager:
     def private_key_to_pem(private_key, password: Optional[str] = None) -> str:
         """
         Converts private key object to PEM string.
-        Encrypts with BestAvailableEncryption (AES-256) if passphrase provided.
+        Encrypts with BestAvailableEncryption (AES-256) using provided password or environment key storage passphrase.
         """
-        if password:
-            encryption = serialization.BestAvailableEncryption(password.encode('utf-8'))
+        passphrase = password or os.environ.get("KEY_STORAGE_PASSPHRASE", "agenttrust_default_aes256_passphrase_2026")
+        if passphrase:
+            encryption = serialization.BestAvailableEncryption(passphrase.encode('utf-8'))
         else:
             encryption = serialization.NoEncryption()
 
@@ -39,12 +40,20 @@ class KeyManager:
     @staticmethod
     @lru_cache(maxsize=1024)
     def pem_to_private_key(pem_str: str, password: Optional[str] = None):
-        """Loads RSA private key object from PEM string (supports encrypted PEMs). Cached for performance."""
-        pass_bytes = password.encode('utf-8') if password else None
-        return serialization.load_pem_private_key(
-            pem_str.encode('utf-8'),
-            password=pass_bytes
-        )
+        """Loads RSA private key object from PEM string (supports AES-256 encrypted PEMs). Cached for performance."""
+        passphrase = password or os.environ.get("KEY_STORAGE_PASSPHRASE", "agenttrust_default_aes256_passphrase_2026")
+        pass_bytes = passphrase.encode('utf-8') if passphrase else None
+        try:
+            return serialization.load_pem_private_key(
+                pem_str.encode('utf-8'),
+                password=pass_bytes
+            )
+        except TypeError:
+            # Fallback if unencrypted PEM passed
+            return serialization.load_pem_private_key(
+                pem_str.encode('utf-8'),
+                password=None
+            )
 
     @staticmethod
     def public_key_to_pem(public_key) -> str:

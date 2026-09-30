@@ -90,6 +90,9 @@ class AgentTrustChaincode:
         evidence_hash: str
     ) -> Dict[str, Any]:
         key = f"EVENT_{event_id}"
+        if self._get_state(key):
+            raise ValueError(f"Immutability Violation: Action event '{event_id}' already committed to ledger.")
+
         event_record = {
             "docType": "action_event",
             "event_id": event_id,
@@ -149,6 +152,9 @@ class AgentTrustChaincode:
             raise PermissionError(f"Fabric Authorization Failure: MSP '{caller_org}' unauthorized to record evidence.")
 
         key = f"EVID_{request_id}"
+        if self._get_state(key):
+            raise ValueError(f"Immutability Violation: Evidence record for request '{request_id}' already committed to ledger.")
+
         tx_id = f"FAB-TX-{hashlib.sha256(f'{request_id}:{datetime.datetime.now()}'.encode()).hexdigest()[:12]}"
         
         record = {
@@ -194,6 +200,34 @@ class AgentTrustChaincode:
                 return tx
         return None
 
+    def EvaluateTransactionPolicy(self, agent_id: str, action: str, amount: float = 0.0, policy_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        On-chain smart contract policy verification.
+        Ensures that even if the gateway is bypassed or compromised, the ledger smart contract
+        evaluates agent status, allowed actions, and maximum transaction limits.
+        """
+        agent = self.GetAgent(agent_id)
+        if not agent:
+            return {"allowed": False, "reason": "CHAINCODE_POLICY_VIOLATION: Agent not registered on ledger"}
+
+        if agent.get("status") != "ACTIVE":
+            return {"allowed": False, "reason": f"CHAINCODE_POLICY_VIOLATION: Agent status is '{agent.get('status')}'"}
+
+        target_policy_id = policy_id or f"POLICY_{agent_id}"
+        policy_rec = self.GetPolicy(target_policy_id) or self.GetPolicy("FIN-POLICY-001")
+        if policy_rec and "policy_data" in policy_rec:
+            pdata = policy_rec["policy_data"]
+            allowed_actions = pdata.get("allowed_actions", [])
+            max_amount = float(pdata.get("maximum_amount", 100000.0))
+
+            if action not in allowed_actions:
+                return {"allowed": False, "reason": f"CHAINCODE_POLICY_VIOLATION: Action '{action}' not permitted by chaincode policy"}
+
+            if amount > max_amount:
+                return {"allowed": False, "reason": f"CHAINCODE_POLICY_VIOLATION: Amount {amount} exceeds chaincode limit {max_amount}"}
+
+        return {"allowed": True, "reason": "CHAINCODE_APPROVED"}
+
     def GetEvidenceHash(self, request_id: str) -> Optional[str]:
         record = self.getEvidence(request_id)
         if record:
@@ -220,3 +254,4 @@ class AgentTrustChaincode:
                         "status": "VERIFIED" if is_valid else "TAMPERING_DETECTED"
                     }
         return {"found": False, "verified": False, "status": "NOT_FOUND"}
+

@@ -30,9 +30,13 @@ from action_gateway.gateway import ActionGateway
 from risk_engine.risk_evaluator import RiskEvaluator
 from benchmarks.benchmark_engine import BenchmarkEngine
 
-# Operational Mode Configuration
-# Options: "MODE_A_DIRECT_API", "MODE_B_AUTH_RBAC", "MODE_C_AGENTTRUST_NO_FABRIC", "MODE_D_AGENTTRUST_FABRIC"
+from identity_manager.jwt_auth import JWTAuthManager
+
+# Operational Mode & Environment Configuration
 CURRENT_MODE = os.environ.get("AGENTTRUST_MODE", "MODE_D_AGENTTRUST_FABRIC")
+GATEWAY_SECRET = os.environ.get("GATEWAY_SECRET", "AGENTTRUST_GATEWAY_HMAC_SECRET_v2_2026")
+DEMO_MODE = os.environ.get("AGENTTRUST_DEMO_MODE", "true").lower() in ("true", "1", "yes")
+ALLOW_RUNTIME_MODE_CHANGE = os.environ.get("AGENTTRUST_ALLOW_MODE_CHANGE", "true").lower() in ("true", "1", "yes")
 
 # Initialize Core Services
 cert_manager = CertificateManager(ca_common_name="AgentTrust Root CA")
@@ -93,7 +97,7 @@ fabric_client.chaincode.RegisterAgent("FINANCE-AGENT-001", "Finance Department",
 # FastAPI App setup
 app = FastAPI(
     title="AgentTrust Framework API",
-    description="A Permissioned Blockchain Framework for Verifiable Identity, Bounded Authorization, and Accountability of Autonomous AI Agents",
+    description="A Permissioned Ledger Simulator Framework for Verifiable Identity, Bounded Authorization, and Accountability of Autonomous AI Agents",
     version="2.0.0"
 )
 
@@ -105,19 +109,48 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- RBAC Helper Dependency ---
-def check_admin_permission(required_permission: str, x_admin_role: Optional[str] = None):
-    if not x_admin_role:
+# --- RBAC & JWT Helper Dependency ---
+def check_admin_permission(required_permission: str, x_admin_role: Optional[str] = None, authorization: Optional[str] = None):
+    role_str = None
+
+    # First check JWT Authorization header
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split("Bearer ", 1)[1].strip()
+        try:
+            payload = JWTAuthManager.verify_token(token)
+            role_str = payload.get("role")
+        except Exception as e:
+            raise HTTPException(
+                status_code=401,
+                detail=f"JWT Authentication Failure: {str(e)}"
+            )
+
+    # Fallback to X-Admin-Role header
+    if not role_str and x_admin_role:
+        if x_admin_role.startswith("eyJ"): # Standard JWT header prefix
+            try:
+                payload = JWTAuthManager.verify_token(x_admin_role)
+                role_str = payload.get("role")
+            except Exception as e:
+                raise HTTPException(
+                    status_code=401,
+                    detail=f"JWT Header Authentication Failure: {str(e)}"
+                )
+        else:
+            role_str = x_admin_role
+
+    if not role_str:
         raise HTTPException(
             status_code=401,
-            detail="Authentication Required: Missing 'X-Admin-Role' header."
+            detail="Authentication Required: Missing 'Authorization: Bearer <JWT>' or 'X-Admin-Role' header."
         )
+
     try:
-        role = AdminRole(x_admin_role)
+        role = AdminRole(role_str)
     except Exception:
         raise HTTPException(
             status_code=403,
-            detail=f"RBAC Denial: Invalid Admin Role '{x_admin_role}'."
+            detail=f"RBAC Denial: Invalid Admin Role '{role_str}'."
         )
 
     if not RBACManager.is_action_allowed(role, required_permission):
@@ -128,8 +161,11 @@ def check_admin_permission(required_permission: str, x_admin_role: Optional[str]
     return role
 
 def check_admin_permission_dep(required_permission: str):
-    def _dependency(x_admin_role: Optional[str] = Header(default=None, alias="X-Admin-Role")) -> AdminRole:
-        return check_admin_permission(required_permission, x_admin_role)
+    def _dependency(
+        x_admin_role: Optional[str] = Header(default=None, alias="X-Admin-Role"),
+        authorization: Optional[str] = Header(default=None, alias="Authorization")
+    ) -> AdminRole:
+        return check_admin_permission(required_permission, x_admin_role, authorization)
     return _dependency
 
 # --- Pydantic API Models ---
@@ -145,6 +181,7 @@ class RegisterAgentRequest(BaseModel):
     agent_version: str = "1.0"
     organization: str = "FinanceOrg"
     role: str = "procurement_agent"
+    public_key: Optional[str] = None
 
 class UpdateStatusRequest(BaseModel):
     status: str
@@ -350,7 +387,8 @@ def register_agent(req: RegisterAgentRequest, role: AdminRole = Depends(check_ad
         policy_id=req.policy_id,
         agent_version=req.agent_version,
         organization=req.organization,
-        role=req.role
+        role=req.role,
+        public_key_pem=req.public_key
     )
     fabric_client.chaincode.RegisterAgent(req.agent_id, req.owner, record["certificate_fingerprint"])
     return {"success": True, "agent": record, "authorized_by": role.value}
@@ -578,6 +616,11 @@ def verify_evidence(evidence_id: str):
 
 @app.post("/evidence/{evidence_id}/simulate-tamper")
 def simulate_evidence_tamper(evidence_id: str, req: TamperTestRequest, role: AdminRole = Depends(check_admin_permission_dep("simulate_tamper"))):
+    if not DEMO_MODE:
+        raise HTTPException(
+            status_code=403,
+            detail="Simulate tamper endpoints are strictly disabled in production mode. Set AGENTTRUST_DEMO_MODE=true to enable sandbox tamper testing."
+        )
     ok = evidence_store.simulate_tamper(evidence_id, req.field_name, req.new_value)
     if not ok:
         raise HTTPException(status_code=404, detail="Evidence not found")
@@ -604,6 +647,11 @@ def verify_audit_chain_integrity():
 
 @app.post("/audit/chain/simulate-tamper")
 def simulate_chain_tamper(req: ChainTamperRequest, role: AdminRole = Depends(check_admin_permission_dep("simulate_tamper"))):
+    if not DEMO_MODE:
+        raise HTTPException(
+            status_code=403,
+            detail="Simulate tamper endpoints are strictly disabled in production mode. Set AGENTTRUST_DEMO_MODE=true to enable sandbox tamper testing."
+        )
     ok = chain_writer.simulate_tamper_record(req.sequence_number, req.field_name, req.new_value)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Audit chain record sequence #{req.sequence_number} not found.")
@@ -656,21 +704,21 @@ def get_fabric_network_status():
     latest_tx_id = txs[0].get("tx_id", "tx-genesis-000") if txs else "tx-genesis-000"
     
     return {
-        "network": "Hyperledger Fabric v2.5 Permissioned Network",
+        "network": "Fabric-Compatible Permissioned Ledger Simulator",
         "channel": "agenttrust-channel",
-        "chaincode": "agent_trust_cc:v2.0",
-        "consensus": "Raft (Crash Fault Tolerant)",
+        "chaincode": "agent_trust_cc:v2.0 (Python Chaincode Simulator & Go CC Reference)",
+        "consensus": "In-Memory / SQLite Persistent Ledger Simulator",
         "status": "HEALTHY",
         "msps": {
-            "Org1MSP": {"name": "FinanceOrg MSP", "status": "HEALTHY", "peer": "peer0.org1.agenttrust.net"},
-            "Org2MSP": {"name": "AuditOrg MSP", "status": "HEALTHY", "peer": "peer0.org2.agenttrust.net"}
+            "Org1MSP": {"name": "FinanceOrg MSP Simulator", "status": "HEALTHY", "peer": "peer0.org1.agenttrust.net"},
+            "Org2MSP": {"name": "AuditOrg MSP Simulator", "status": "HEALTHY", "peer": "peer0.org2.agenttrust.net"}
         },
         "peers": [
             {"id": "peer0.org1", "org": "Org1MSP", "status": "CONNECTED", "latency_ms": 1.2},
             {"id": "peer0.org2", "org": "Org2MSP", "status": "CONNECTED", "latency_ms": 1.5}
         ],
         "orderers": [
-            {"id": "orderer.agenttrust.net", "type": "Raft", "status": "CONNECTED"}
+            {"id": "orderer.agenttrust.net", "type": "Raft (Simulated)", "status": "CONNECTED"}
         ],
         "ledger_summary": {
             "latest_block_number": total_blocks - 1,

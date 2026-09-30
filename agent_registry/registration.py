@@ -23,21 +23,32 @@ class AgentRegistry:
         organization: str = "OrgA",
         role: str = "procurement_agent",
         agent_version: str = "1.0",
-        validity_days: int = 365
+        validity_days: int = 365,
+        public_key_pem: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Registers a new AI Agent:
-        1. Issues X.509 cert and RSA keypair.
+        1. Issues X.509 cert using client public key (if provided) or server-generated key pair.
         2. Calculates cert fingerprint & serial.
         3. Stores identity record.
-        Returns complete agent registration payload including private key.
+        Returns agent registration record. Private key is NEVER returned if public_key_pem is supplied.
         """
         capabilities = capabilities or ["CREATE_PURCHASE_ORDER", "CREATE_REIMBURSEMENT", "TRANSFER_FUNDS"]
-        cert_pem, priv_key_pem, fingerprint = self.cert_manager.issue_agent_certificate(
-            agent_id=agent_id,
-            agent_name=agent_name,
-            validity_days=validity_days
-        )
+        
+        if public_key_pem:
+            cert_pem, fingerprint = self.cert_manager.issue_agent_certificate_from_pubkey(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                public_key_pem=public_key_pem,
+                validity_days=validity_days
+            )
+            priv_key_pem = None
+        else:
+            cert_pem, priv_key_pem, fingerprint = self.cert_manager.issue_agent_certificate(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                validity_days=validity_days
+            )
 
         serial_str = self._extract_serial_from_cert(cert_pem)
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -64,7 +75,8 @@ class AgentRegistry:
         self.store.save_agent(record)
 
         result = record.copy()
-        result["private_key"] = priv_key_pem
+        if priv_key_pem is not None:
+            result["private_key"] = priv_key_pem
         return result
 
     @staticmethod
@@ -86,23 +98,29 @@ class AgentRegistry:
         cert = x509.load_pem_x509_certificate(cert_pem.encode('utf-8'))
         return str(cert.serial_number)
 
-    def rotate_key(self, agent_id: str, validity_days: int = 365) -> Optional[Dict[str, Any]]:
+    def rotate_key(self, agent_id: str, validity_days: int = 365, public_key_pem: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
-        Rotates an agent's RSA keypair and X.509 Certificate:
-        1. Issues a new X.509 cert and RSA keypair.
-        2. Increments key_version.
-        3. Updates agent record in store.
-        Returns updated agent payload including new private key.
+        Rotates an agent's RSA keypair and X.509 Certificate.
         """
         agent = self.get_agent(agent_id)
         if not agent:
             return None
 
-        cert_pem, priv_key_pem, fingerprint = self.cert_manager.issue_agent_certificate(
-            agent_id=agent_id,
-            agent_name=agent["agent_name"],
-            validity_days=validity_days
-        )
+        if public_key_pem:
+            cert_pem, fingerprint = self.cert_manager.issue_agent_certificate_from_pubkey(
+                agent_id=agent_id,
+                agent_name=agent["agent_name"],
+                public_key_pem=public_key_pem,
+                validity_days=validity_days
+            )
+            priv_key_pem = None
+        else:
+            cert_pem, priv_key_pem, fingerprint = self.cert_manager.issue_agent_certificate(
+                agent_id=agent_id,
+                agent_name=agent["agent_name"],
+                validity_days=validity_days
+            )
+
         serial_str = self._extract_serial_from_cert(cert_pem)
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -116,7 +134,8 @@ class AgentRegistry:
         self.store.save_agent(agent)
 
         res = agent.copy()
-        res["private_key"] = priv_key_pem
+        if priv_key_pem is not None:
+            res["private_key"] = priv_key_pem
         return res
 
     def get_agent(self, agent_id: str) -> Optional[Dict[str, Any]]:
@@ -129,6 +148,9 @@ class AgentRegistry:
         return self.store.update_status(agent_id, AgentStatus(new_status), reason)
 
     def revoke_agent(self, agent_id: str, reason: str = "REVOKED_BY_ADMIN") -> bool:
+        agent = self.get_agent(agent_id)
+        if agent and agent.get("certificate_fingerprint"):
+            self.cert_manager.revoke_certificate(agent["certificate_fingerprint"])
         return self.store.update_status(agent_id, AgentStatus.REVOKED, reason)
 
     def suspend_agent(self, agent_id: str, reason: str = "SUSPENDED_BY_ADMIN") -> bool:

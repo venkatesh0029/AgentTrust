@@ -18,7 +18,7 @@ class AgentTrustSDK:
 
     def __init__(self, gateway_url: str = "http://127.0.0.1:8000", admin_role: Optional[str] = None, use_local_gateway: bool = False):
         self.gateway_url = gateway_url.rstrip("/")
-        self.admin_role = admin_role or "FINANCE_APPROVER"
+        self.admin_role = admin_role
         self.use_local_gateway = use_local_gateway
 
     def submit_action(
@@ -32,6 +32,7 @@ class AgentTrustSDK:
     ) -> Dict[str, Any]:
         """
         Constructs a cryptographically signed payload and submits it to the AgentTrust Gateway.
+        Fails closed on network failures when remote gateway mode is enabled.
         """
         request_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
         nonce = f"N-{uuid.uuid4().hex[:8].upper()}"
@@ -67,20 +68,20 @@ class AgentTrustSDK:
             response = requests.post(f"{self.gateway_url}/gateway/submit", json=payload, headers=headers, timeout=2.0)
             if response.status_code == 200:
                 return response.json()
-            elif response.status_code == 404:
-                # Agent registered locally, fallback to in-memory action_gateway
-                from server import action_gateway
-                return action_gateway.process_request(payload)
             else:
                 return {
                     "decision": "BLOCKED",
                     "status_code": response.status_code,
-                    "reason": response.json().get("detail", "HTTP_REQUEST_FAILED"),
+                    "reason": response.json().get("detail", "HTTP_REQUEST_FAILED") if response.headers.get("content-type") == "application/json" else "HTTP_REQUEST_FAILED",
                     "protected_api_result": "DENIED"
                 }
-        except Exception:
-            from server import action_gateway
-            return action_gateway.process_request(payload)
+        except Exception as e:
+            # Fail Closed: Return BLOCKED decision and log network failure error
+            return {
+                "decision": "BLOCKED",
+                "reason": f"SDK_NETWORK_ERROR: Unable to reach AgentTrust Gateway ({str(e)})",
+                "protected_api_result": "DENIED"
+            }
 
 def agenttrust_guarded(
     agent_id: str,

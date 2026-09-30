@@ -7,7 +7,7 @@ def test_root_ca_and_cert_issuance():
     cert_pem, priv_pem, fp = cm.issue_agent_certificate("AGENT-TEST-001", "TestAgent")
 
     assert "BEGIN CERTIFICATE" in cert_pem
-    assert "BEGIN PRIVATE KEY" in priv_pem
+    assert "BEGIN PRIVATE KEY" in priv_pem or "BEGIN ENCRYPTED PRIVATE KEY" in priv_pem
     assert fp.startswith("SHA256:")
 
     val_res = cm.verify_agent_certificate(cert_pem)

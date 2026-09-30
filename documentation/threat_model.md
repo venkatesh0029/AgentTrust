@@ -1,19 +1,41 @@
-# AgentTrust Threat Model & Threat-to-Control Evaluation Matrix
+# AgentTrust Threat Model & Security Architecture
 
-AgentTrust defines a systematic threat model addressing autonomous AI agent security threats in enterprise environments.
+## 1. Trust Boundaries & System Assets
 
-## Threat-to-Control Mapping Matrix
+### Assets
+- **Agent Identity & Private Keys**: Cryptographic identities (X.509 certs, RSA/ECDSA private keys).
+- **Authorization Policies**: Fine-grained maximum transfer amounts, allowed actions, resource rules.
+- **Financial & API Operations**: Protected financial endpoints (`/purchase-orders`, `/fund-transfers`).
+- **Audit Evidence & Block Ledger**: SHA-256 evidence records, atomic hash chains, block ledger transactions.
 
-| Threat ID | Threat / Attack Vector | Defense / Security Control | Verified Test Evidence | Status |
-| :--- | :--- | :--- | :--- | :--- |
-| **TH-01** | **Forged Signature**: Attacker alters request payload or creates fake signature. | RSA 2048 RSA-PSS Canonical Signature Verification | `test_scenario_3_invalid_signature` & `test_adv_2_modified_request_parameters` | **PASSED** |
-| **TH-02** | **Unknown / Rogue Agent**: Unregistered agent attempts access. | Agent Registry lookup & X.509 cert validation | `test_scenario_4_unknown_agent` | **PASSED** |
-| **TH-03** | **Revoked Agent Reuse**: Compromised agent continues requesting after revocation. | Lifecycle status check & CRL / cert validation | `test_scenario_5_revoked_agent` & `test_invariant_2` | **PASSED** |
-| **TH-04** | **Excessive Authority**: Agent attempts reimbursement above assigned limit. | Maximum amount policy evaluation in Policy Engine | `test_scenario_2_excessive_amount` | **PASSED** |
-| **TH-05** | **Unauthorized Resource**: Agent accesses unauthorized service (e.g. Payroll). | Resource-level policy authorization check | `test_scenario_6_unauthorized_resource` | **PASSED** |
-| **TH-06** | **Replay Attack**: Attacker captures valid request and resubmits. | Unique Request ID, Nonce tracking & Timestamp freshness | `test_scenario_7_replay_attack` & `test_invariant_5` | **PASSED** |
-| **TH-07** | **Direct API Bypass**: Agent attempts to call Finance API directly without Gateway. | Direct-access denial via Gateway Service Signed Headers | `test_direct_api_bypass_denial` & `test_adv_6` | **PASSED** |
-| **TH-08** | **Evidence Tampering**: Attacker modifies off-chain audit evidence records. | Deterministic SHA-256 Hashing & Fabric Ledger comparison | `test_scenario_10_evidence_tampering` & `test_canonicalization` | **PASSED** |
-| **TH-09** | **Administrator Misuse**: Non-admin user attempts policy modification or agent revocation. | Role-Based Access Control (RBAC) permission matrix | `test_rbac_negative.py` & `test_adv_7` | **PASSED** |
-| **TH-10** | **Policy Configuration Error**: Misconfigured or conflicting policy rules. | Policy Version History, Rollback & Most Restrictive Conflict Resolver | `test_scenario_11`, `test_policy_conflict_resolution` & `test_policy_version_history_and_rollback` | **PASSED** |
-| **TH-11** | **Ledger Outage / Orderer Failure**: Blockchain peer network goes down during commit. | Durable Failure Retry Queue & DLQ (preserves evidence safely) | `test_ledger_failure_recovery_handling` & `test_complete_8step_failure_recovery_sequence` | **PASSED** |
+### Trust Boundaries
+1. **Client / Agent Boundary**: Autonomous AI Agent process running on external client nodes.
+2. **Gateway Enforcement Boundary**: 13-stage Action Gateway processing signed requests.
+3. **Protected API Boundary**: Internal backend services accessible ONLY via valid Gateway HMAC tokens.
+4. **Ledger Boundary**: Fabric-compatible permissioned ledger storing block transactions and on-chain state.
+
+---
+
+## 2. STRIDE Threat Analysis Matrix
+
+| Threat Category | Potential Attack Vector | Mitigating AgentTrust Control | Verification Test Case |
+| :--- | :--- | :--- | :--- |
+| **Spoofing Identity** | Attacker forging digital signature or impersonating an agent. | RSA-PSS / ECDSA signature verification against registered X.509 certificate. | `test_attack_01_forged_signature` |
+| **Tampering with Data** | Altering transaction amount or recipient after signing. | Canonical JSON payload hashing and digital signature verification. | `test_attack_02_modified_signed_payload` |
+| **Repudiation** | Agent denying having executed an unauthorized purchase. | Cryptographic signature bound to action parameters committed atomically to ledger. | `test_attack_16_tampered_off_chain_evidence` |
+| **Information Disclosure** | Server returning agent private keys in cleartext responses. | CSR / public-key registration (`public_key_pem`) keeping private keys client-side. | `tests/test_audit_findings_regression.py` |
+| **Denial of Service** | Replaying past valid requests or submitting high-frequency nonces. | 300-second freshness window, single-use nonces, and aggregate rate-limiting drop counters. | `test_attack_03_replay_attack` |
+| **Elevation of Privilege** | Agent executing unauthorized action (`DELETE_ACCOUNT`) or self-approving. | Versioned Policy Engine, `approver_id != agent_id` check, and single-use approval tokens. | `test_attack_08_unauthorized_action`, `test_attack_11_approval_flag` |
+
+---
+
+## 3. What We Found and Fixed (Security Hardening Summary)
+
+1. **Unauthenticated Admin Header**: Replaced raw `X-Admin-Role` header checking with PyJWT token verification (`identity_manager/jwt_auth.py`).
+2. **Server-Side Private Key Generation Leak**: Added public key CSR submission (`public_key_pem`) so private keys never touch the server.
+3. **Caller-less Server Signing Endpoints**: Restricted auto-signing `/purchase-orders` and `/fund-transfers` endpoints to require client-side signatures when `DEMO_MODE=False`.
+4. **Unrestricted Operational Mode Switching**: Restricted `/mode` POST endpoint to require admin JWT claims and `ALLOW_RUNTIME_MODE_CHANGE=True`.
+5. **Self-Approval Flaw**: Enforced `approver_id != agent_id` restriction in human approval workflow.
+6. **Loose Monetary Type Parsing**: Added strict Decimal validation in `RequestValidator`, rejecting boolean, NaN, Inf, string literals, and negative values.
+7. **Gateway-Only Policy Checking**: Moved policy limits and agent status checking into smart contract chaincode (`EvaluateTransactionPolicy`).
+8. **SDK Default Admin Privilege**: Removed default admin role fallback and implemented fail-closed network handling (`AgentTrustNetworkError`).

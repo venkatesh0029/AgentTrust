@@ -1,26 +1,26 @@
-# AgentTrust: A Permissioned Blockchain Framework for Verifiable Identity, Bounded Authorization, and Accountability of Autonomous AI Agents
+# AgentTrust: A Fabric-Compatible Permissioned Ledger Simulator for Verifiable Identity, Bounded Authorization, and Accountability of Autonomous AI Agents
 
 [![Build Status](https://img.shields.io/badge/Build-Passing-10b981?style=for-the-badge&logo=github)](.)
-[![Tests](https://img.shields.io/badge/Tests-75%2F75%20Passed%20(100%25)-8b5cf6?style=for-the-badge&logo=pytest)](tests)
+[![Tests](https://img.shields.io/badge/Tests-78%2F78%20Passed%20(100%25)-8b5cf6?style=for-the-badge&logo=pytest)](tests)
 [![Attack Matrix](https://img.shields.io/badge/Threat%20Matrix-20%2F20%20Scenarios%20Mitigated-06b6d4?style=for-the-badge&logo=shield)](attack_lab)
-[![Blockchain](https://img.shields.io/badge/Blockchain-Hyperledger%20Fabric%20Simulator-a855f7?style=for-the-badge&logo=hyperledger)](fabric)
-[![Architecture](https://img.shields.io/badge/Gateway-13--Stage%20Zero--Trust-10b981?style=for-the-badge)](action_gateway)
+[![Blockchain](https://img.shields.io/badge/Blockchain-Fabric--Compatible%20Ledger%20Simulator-a855f7?style=for-the-badge)](fabric)
+[![Architecture](https://img.shields.io/badge/Gateway-13--Stage%20Security%20Pipeline-10b981?style=for-the-badge)](action_gateway)
 [![License](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
-> **Core Research Objective**: AgentTrust provides cryptographic identity, bounded policy authorization, replay protection, controlled gateway execution, human-in-the-loop approvals, off-chain SHA-256 evidence integrity hashing, and independently verifiable Hyperledger Fabric ledger auditability for autonomous AI agents.
+> **Core Research Objective**: AgentTrust provides cryptographic identity, bounded policy authorization, replay protection, controlled gateway execution, human-in-the-loop approvals, off-chain SHA-256 evidence integrity hashing, and verifiable ledger auditability for autonomous AI agents using a Fabric-compatible permissioned ledger simulator.
 
 ---
 
 ## 🚀 Key Highlights & Research Contributions
 
-- **Cryptographic Agent Identity Lifecycle**: X.509 certificate issuance, RSA-2048 keypair generation, key versioning counters, status management (`ACTIVE`, `SUSPENDED`, `REVOKED`), and key rotation.
-- **13-Stage Non-Bypassable Action Gateway**: A zero-trust pipeline enforcing canonical JSON schema validation, RSA SHA-256 request signature verification, replay protection, server-side risk scoring, versioned policy limits, human approval tickets, and atomic ledger commits.
-- **Dual-Ledger Hyperledger Fabric Architecture**:
-  - **Permissioned Ledger Engine (`fabric/ledger_service.py`)**: Python-native simulator engine implementing LevelDB/CouchDB World State abstraction, SHA-256 block hash chaining, MSP certificate validation, and smart contract chaincode execution (`RegisterAgent`, `RegisterPolicy`, `RecordActionEvent`, `VerifyEvidenceReference`).
-  - **Hyperledger Fabric Gateway Client (`fabric/fabric_client.py`)**: Gateway client connecting to the ledger service or external multi-peer Hyperledger Fabric consortiums (`Org1MSP`, `Org2MSP`, Raft Orderer).
+- **Cryptographic Agent Identity Lifecycle**: X.509 certificate issuance, RSA-2048 / ECDSA keypair generation, key versioning counters, status management (`ACTIVE`, `SUSPENDED`, `REVOKED`), Certificate Revocation List (CRL) checking, and key rotation.
+- **13-Stage Action Gateway**: A security pipeline enforcing canonical JSON schema validation, digital request signature verification, JWT role authentication, replay protection, server-side risk scoring, versioned policy limits, human approval tickets, and atomic ledger commits.
+- **Fabric-Compatible Permissioned Ledger Simulator**:
+  - **Permissioned Ledger Engine (`fabric/ledger_service.py`)**: Python-native simulator engine implementing World State key-value store, SHA-256 block hash chaining, on-chain policy enforcement, and smart contract chaincode execution (`RegisterAgent`, `RegisterPolicy`, `RecordActionEvent`, `EvaluateTransactionPolicy`).
+  - **Fabric Gateway Client (`fabric/fabric_client.py`)**: Gateway client connecting to the ledger service and maintaining on-chain evidence audit trails.
 - **Off-Chain Evidence Provenance & SHA-256 Tamper Detection**: Privacy-preserving off-chain storage linked to on-chain SHA-256 state tree digests, enabling instant detection of database tampering (`TAMPERING_DETECTED`).
-- **20 Threat Scenarios Security Attack Lab**: Empirical evaluation suite covering signature forgery, payload tampering, replay attacks, timestamp window expiration, idempotency, certificate revocation, unauthorized actions, policy bypass, client risk manipulation, approval token substitution, direct API bypass, evidence tampering, and concurrency atomicity.
-- **State-of-the-Art Multi-Page Security Dashboard**: Dedicated page views (`Executive Overview`, `Agent Governance`, `Human Approvals`, `Attack Lab`, `13-Stage Gateway Inspector`, `Hyperledger Explorer`, `Audit Trail`, `Evidence Tamper Lab`, `Research Benchmarks`).
+- **20 Threat Scenarios Security Attack Lab**: Empirical evaluation suite covering signature forgery, payload tampering, replay attacks, timestamp window expiration, idempotency, certificate revocation, unauthorized actions, policy limit bypass, client risk manipulation, approval token substitution, direct API bypass, evidence tampering, and concurrency atomicity.
+- **Multi-Page Security Dashboard**: Dedicated page views (`Executive Overview`, `Agent Governance`, `Human Approvals`, `Attack Lab`, `13-Stage Gateway Inspector`, `Ledger Explorer`, `Audit Trail`, `Evidence Tamper Lab`, `Research Benchmarks`).
 
 ---
 
@@ -30,7 +30,7 @@
                                ┌──────────────────────────────────┐
                                │  Autonomous AI Agent (Client)    │
                                │  - X.509 Identity & Cert        │
-                               │  - RSA SHA-256 Request Signer    │
+                               │  - Digital Request Signer        │
                                └────────────────┬─────────────────┘
                                                 │
                                     Signed Action Request JSON
@@ -41,7 +41,7 @@
   │                                                                                          │
   │   [Stage 1] Canonical JSON Schema  ──►  [Stage 2] X.509 Certificate Verification         │
   │                                                                                          │
-  │   [Stage 3] RSA Digital Signature  ──►  [Stage 4] Agent Status & Key-Version Check        │
+  │   [Stage 3] Digital Signature Check──►  [Stage 4] Agent Status & Key-Version Check        │
   │                                                                                          │
   │   [Stage 5] Replay & Idempotency   ──►  [Stage 6] Trusted Server-Side Risk Evaluator      │
   │                                                                                          │
@@ -49,7 +49,7 @@
   │                                                                                          │
   │   [Stage 9] Protected API Execution──►  [Stage 10] Off-Chain SHA-256 Evidence Generator    │
   │                                                                                          │
-  │   [Stage 11] Local Hash-Chain Log ──►  [Stage 12] Hyperledger Fabric Blockchain Commit  │
+  │   [Stage 11] Local Hash-Chain Log ──►  [Stage 12] Fabric Ledger Simulator Commit          │
   │                                                                                          │
   │   [Stage 13] Final Gateway Response Telemetry Payload                                    │
   └─────────────────────────────────────────────┬────────────────────────────────────────────┘
@@ -57,23 +57,23 @@
                  ┌──────────────────────────────┴──────────────────────────────┐
                  ▼                                                             ▼
   ┌─────────────────────────────┐                               ┌─────────────────────────────┐
-  │   Protected Finance API     │                               │  Hyperledger Fabric Ledger  │
-  │   (Signed Gateway Headers)  │                               │  (Org1MSP + Org2MSP Nodes)  │
+  │   Protected Finance API     │                               │  Fabric Ledger Simulator    │
+  │   (Signed Gateway Headers)  │                               │  (On-Chain Policy Engine)   │
   └─────────────────────────────┘                               └─────────────────────────────┘
 ```
 
 ---
 
-## 🛡️ Formal Security Invariants
+## 🛡️ Enforced Security Invariants
 
-AgentTrust guarantees 6 formal security invariants across all operational paths:
+AgentTrust enforces six security invariants across all operational paths:
 
 1. **Invariant 1 (Authorization Boundary)**: A protected API endpoint must never execute an unauthorized request.
 2. **Invariant 2 (Identity Lifecycle Enforcement)**: A revoked (`REVOKED`) or suspended (`SUSPENDED`) agent must never execute an action.
 3. **Invariant 3 (Complete Auditability)**: Every executed action must generate a deterministic audit record and off-chain evidence payload.
 4. **Invariant 4 (Verifiable Cryptographic Proof)**: Every audit record on-chain must reference a SHA-256 digest mathematically matching off-chain evidence.
 5. **Invariant 5 (Strict Replay & Idempotency Protection)**: A replayed request (duplicate request ID, nonce, or expired timestamp window) must be rejected.
-6. **Invariant 6 (Administrative RBAC & Policy Immutability)**: Only authorized administrators with verified RBAC roles (`SYSTEM_ADMIN`, `POLICY_ADMIN`) can alter policies, rotate keys, or change agent statuses.
+6. **Invariant 6 (Administrative RBAC & Policy Immutability)**: Only authorized administrators with verified JWT claims or RBAC roles (`SYSTEM_ADMIN`, `POLICY_ADMIN`) can alter policies, rotate keys, or change agent statuses.
 
 ---
 
@@ -81,32 +81,34 @@ AgentTrust guarantees 6 formal security invariants across all operational paths:
 
 AgentTrust supports 4 configurable operational modes to measure the exact latency vs. security trade-off:
 
-| Operational Mode | Action Gateway | RSA Signature Check | Server Risk Engine | Local Hash Chain | Hyperledger Fabric Commit | Security Level |
+| Operational Mode | Action Gateway | Signature Check | Server Risk Engine | Local Hash Chain | Fabric Commit | Security Level |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Mode A: Direct API** | ❌ Bypassed | ❌ None | ❌ None | ❌ None | ❌ None | 🔴 **Critical Risk** |
 | **Mode B: Auth + RBAC** | ⚠️ Partial | ✅ Verified | ❌ None | ❌ None | ❌ None | 🟡 **Basic Security** |
 | **Mode C: AgentTrust w/o Fabric** | ✅ Full 13-Stage | ✅ Verified | ✅ Active | ✅ Atomic | ❌ Suppressed | 🔵 **High Security** |
-| **Mode D: Full AgentTrust w/ Fabric** | ✅ Full 13-Stage | ✅ Verified | ✅ Active | ✅ Atomic | ✅ **Committed** | 🟢 **10/10 Enterprise Zero-Trust** |
+| **Mode D: Full AgentTrust w/ Fabric** | ✅ Full 13-Stage | ✅ Verified | ✅ Active | ✅ Atomic | ✅ **Committed** | 🟢 **Full Ledger Security** |
 
 ---
 
-## 🧪 63/63 Automated Test Suite Breakdown
+## 🧪 Automated Test Suite (78/78 PASSED)
 
-AgentTrust includes a comprehensive automated test suite with **100% pass rate (63/63 PASSED)**:
+AgentTrust includes a comprehensive automated test suite with **100% pass rate (78/78 PASSED)**:
 
 | Test Module Path | Test Focus | Total Tests | Status |
 | :--- | :--- | :---: | :---: |
-| [`attack_lab/test_attack_lab.py`](file:///d:/OneDrive/Desktop/AgentTrust/attack_lab/test_attack_lab.py) | 20 Attack Threat Matrix Scenarios | 20 | ✅ 20/20 PASSED |
-| [`tests/test_security_invariants.py`](file:///d:/OneDrive/Desktop/AgentTrust/tests/test_security_invariants.py) | Formal Security Invariants 1–6 | 12 | ✅ 12/12 PASSED |
-| [`tests/test_adversarial_security.py`](file:///d:/OneDrive/Desktop/AgentTrust/tests/test_adversarial_security.py) | Adversarial Payloads & Edge Cases | 8 | ✅ 8/8 PASSED |
-| [`tests/test_all_scenarios.py`](file:///d:/OneDrive/Desktop/AgentTrust/tests/test_all_scenarios.py) | End-to-End Gateway Scenarios | 10 | ✅ 10/10 PASSED |
-| [`tests/test_canonicalization.py`](file:///d:/OneDrive/Desktop/AgentTrust/tests/test_canonicalization.py) | RFC 8785 JSON Canonicalization | 2 | ✅ 2/2 PASSED |
-| [`tests/test_failure_recovery_flow.py`](file:///d:/OneDrive/Desktop/AgentTrust/tests/test_failure_recovery_flow.py) | Ledger Outage & Dead-Letter Queue (DLQ) | 1 | ✅ 1/1 PASSED |
-| [`tests/test_identity.py`](file:///d:/OneDrive/Desktop/AgentTrust/tests/test_identity.py) | X.509 Certs & Key Versioning | 1 | ✅ 1/1 PASSED |
-| [`tests/test_rbac_negative.py`](file:///d:/OneDrive/Desktop/AgentTrust/tests/test_rbac_negative.py) | RBAC Role Access Violations | 4 | ✅ 4/4 PASSED |
-| [`tests/test_resilience.py`](file:///d:/OneDrive/Desktop/AgentTrust/tests/test_resilience.py) | Policy Conflicts & Rollbacks | 4 | ✅ 4/4 PASSED |
-| [`tests/test_signature.py`](file:///d:/OneDrive/Desktop/AgentTrust/tests/test_signature.py) | RSA PSS Cryptographic Signatures | 1 | ✅ 1/1 PASSED |
-| **Total Project Test Suite** | **Comprehensive System Validation** | **63** | **✅ 63/63 PASSED (100%)** |
+| [`attack_lab/test_attack_lab.py`](attack_lab/test_attack_lab.py) | 20 Attack Threat Matrix Scenarios | 20 | ✅ 20/20 PASSED |
+| [`tests/test_audit_findings_regression.py`](tests/test_audit_findings_regression.py) | Security Hardening Regression Suite | 12 | ✅ 12/12 PASSED |
+| [`tests/test_security_invariants.py`](tests/test_security_invariants.py) | Security Invariants 1–6 | 12 | ✅ 12/12 PASSED |
+| [`tests/test_all_scenarios.py`](tests/test_all_scenarios.py) | End-to-End Gateway Scenarios | 10 | ✅ 10/10 PASSED |
+| [`tests/test_adversarial_security.py`](tests/test_adversarial_security.py) | Adversarial Payloads & Edge Cases | 8 | ✅ 8/8 PASSED |
+| [`tests/test_rbac_negative.py`](tests/test_rbac_negative.py) | RBAC Role Access Violations | 4 | ✅ 4/4 PASSED |
+| [`tests/test_resilience.py`](tests/test_resilience.py) | Policy Conflicts & Rollbacks | 4 | ✅ 4/4 PASSED |
+| [`tests/test_property_based.py`](tests/test_property_based.py) | Hypothesis Property-Based Invariants | 3 | ✅ 3/3 PASSED |
+| [`tests/test_canonicalization.py`](tests/test_canonicalization.py) | RFC 8785 JSON Canonicalization | 2 | ✅ 2/2 PASSED |
+| [`tests/test_failure_recovery_flow.py`](tests/test_failure_recovery_flow.py) | Ledger Outage & Dead-Letter Queue (DLQ) | 1 | ✅ 1/1 PASSED |
+| [`tests/test_identity.py`](tests/test_identity.py) | X.509 Certs & Key Versioning | 1 | ✅ 1/1 PASSED |
+| [`tests/test_signature.py`](tests/test_signature.py) | RSA PSS Cryptographic Signatures | 1 | ✅ 1/1 PASSED |
+| **Total Project Test Suite** | **Comprehensive System Validation** | **78** | **✅ 78/78 PASSED (100%)** |
 
 ---
 
@@ -137,19 +139,11 @@ AgentTrust includes a comprehensive automated test suite with **100% pass rate (
 
 ---
 
-## 🖥️ Multi-Page Dashboard & Visual Navigation
+## ⚠️ System Limitations & Architectural Assumptions
 
-The dashboard is structured into **9 dedicated standalone page views** accessible via the sidebar navigation menu:
-
-1. **Executive Overview**: High-level telemetry, KPI metric cards, Fabric network status, 13-stage visual pipeline stepper, quick attack launcher, and recent activity stream table.
-2. **Agent Governance & Policies**: Complete agent registry table with X.509 cert fingerprints, key versions, status update controls (`Rotate Key`, `Revoke`), and fine-grained authorization policy rules.
-3. **Human Approval Queue**: Dedicated supervisor queue holding high-value or high-risk requests (> ₹10,000) for CFO approval or rejection.
-4. **Security Attack Lab**: Interactive 20-threat scenario runner with output console log.
-5. **13-Stage Pipeline Inspector**: Stage-by-stage pipeline breakdown with micro-stage latencies and pass/fail telemetry.
-6. **Hyperledger Explorer**: Blockchain block height, Raft consensus cluster status, Merkle roots, and transaction commit details.
-7. **Audit Trail & Ledger**: Filterable, immutable log of all signed agent actions and evidence hashes.
-8. **Evidence & Tamper Lab**: Interactive off-chain database tamper simulator demonstrating real-time hash comparison verification.
-9. **Research Benchmarks & Modes**: Live operational mode switcher (Modes A–D), micro-stage latency percentiles (P50, P95, P99), and concurrency scaling graph (1–100 agents).
+1. **Permissioned Ledger Simulator**: The current default ledger execution engine is an in-memory/SQLite-backed Python simulator mimicking Fabric chaincode semantics. Production deployment requires connecting to a real multi-node Hyperledger Fabric network via `fabric-samples`.
+2. **Single-Node Deployment**: The Gateway and REST APIs run in a single process by default. High-throughput production deployments require a distributed load-balancer and Redis-backed replay tracker.
+3. **Cryptographic Key Storage**: Private keys generated in client mode must be stored in secure Hardware Security Modules (HSM) or secret managers rather than local disk files.
 
 ---
 
@@ -159,12 +153,12 @@ The dashboard is structured into **9 dedicated standalone page views** accessibl
 
 Clone the repository and install dependencies:
 ```bash
-git clone https://github.com/agenttrust/agenttrust.git
+git clone https://github.com/venkatesh0029/AgentTrust.git
 cd AgentTrust
 pip install -r requirements.txt
 ```
 
-### 2. Run Complete 63-Test Suite
+### 2. Run Complete 78-Test Suite
 
 Execute the entire test suite using `pytest`:
 ```bash
@@ -197,23 +191,18 @@ Open your browser at **`http://127.0.0.1:8000`** to interact with the multi-page
 
 ## 📚 Complete Documentation Index
 
-- [`documentation/complete_project_overview.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/complete_project_overview.md) — **Definitive End-to-End Technical Manual** (Architecture, 10-Step Pipeline, Invariants, REST APIs, UI, Benchmarks & Terminal Commands).
-- [`documentation/getting_started.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/getting_started.md) — **Getting Started & Operational Guide** (Architecture, Pipeline, CLI Commands & Usage).
-- [`documentation/final_project_report.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/final_project_report.md) — **Academic Project Report** (Abstract, Literature Review, Formal Security Proofs, Benchmark Tables & Results).
-- [`documentation/presentation_visuals.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/presentation_visuals.md) — **Presentation Visuals & Diagrams** (ASCII Schematics, Diagrams, Slide Content).
-- [`documentation/deployment_readiness.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/deployment_readiness.md) — **Enterprise Production Roadmap** (OAuth2/mTLS, HSM Key Storage, Multi-Org Fabric Deployment).
-- [`fabric/production_deployment_guide.md`](file:///d:/OneDrive/Desktop/AgentTrust/fabric/production_deployment_guide.md) — **Production Hyperledger Fabric Deployment Guide**.
-- [`documentation/architecture.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/architecture.md) — System Design & Pipeline Architecture.
-- [`documentation/security_model.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/security_model.md) — Formal Security Guarantees & 6 Invariants Specification.
-- [`documentation/threat_model.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/threat_model.md) — Threat Vectors & Adversarial Capabilities.
-- [`documentation/api_specification.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/api_specification.md) — Gateway & REST API Specifications.
-- [`documentation/test_report.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/test_report.md) — Automated Test Suite Results & Breakdown.
-- [`documentation/baseline_comparison.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/baseline_comparison.md) — Comparative Analysis vs Traditional IAM & Centralized Logging.
-- [`documentation/research_methodology.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/research_methodology.md) — Research Objectives, Attack Matrix & Ablation Study.
-- [`documentation/limitations.md`](file:///d:/OneDrive/Desktop/AgentTrust/documentation/limitations.md) — System Trade-offs, Constraints & Future Roadmap.
+- [`documentation/complete_project_overview.md`](documentation/complete_project_overview.md) — Technical Architecture Manual.
+- [`documentation/getting_started.md`](documentation/getting_started.md) — Operational Guide.
+- [`documentation/final_project_report.md`](documentation/final_project_report.md) — Academic Project Report & Security Analysis.
+- [`documentation/presentation_visuals.md`](documentation/presentation_visuals.md) — System Diagrams & Presentation Visuals.
+- [`documentation/deployment_readiness.md`](documentation/deployment_readiness.md) — Production Deployment Roadmap.
+- [`fabric/production_deployment_guide.md`](fabric/production_deployment_guide.md) — Hyperledger Fabric Deployment Guide.
+- [`documentation/architecture.md`](documentation/architecture.md) — Architecture Specification.
+- [`documentation/security_model.md`](documentation/security_model.md) — Enforced Invariants Specification.
+- [`documentation/threat_model.md`](documentation/threat_model.md) — Threat Model & STRIDE Table.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the **MIT License** — see the [LICENSE](file:///d:/OneDrive/Desktop/AgentTrust/LICENSE) file for details.
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.

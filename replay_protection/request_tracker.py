@@ -62,16 +62,18 @@ class RequestTracker:
         for r in expired_reqs:
             del self._processed_request_ids[r]
 
-    def get_idempotent_result(self, idempotency_key: str) -> Optional[Dict[str, Any]]:
-        """Returns cached execution result for duplicate idempotency key if present."""
+    def get_idempotent_result(self, agent_id: str, idempotency_key: str) -> Optional[Dict[str, Any]]:
+        """Returns cached execution result for duplicate idempotency key bound to the specific agent_id."""
         if not idempotency_key:
             return None
+        scoped_key = f"{agent_id}:{idempotency_key}"
         with self._lock:
-            return self._idempotency_records.get(idempotency_key)
+            return self._idempotency_records.get(scoped_key)
 
-    def record_idempotent_result(self, idempotency_key: str, result: Dict[str, Any]) -> None:
-        """Stores execution outcome for an idempotency key."""
+    def record_idempotent_result(self, agent_id: str, idempotency_key: str, result: Dict[str, Any]) -> None:
+        """Stores execution outcome for an idempotency key bound strictly to agent_id."""
         if idempotency_key:
+            scoped_key = f"{agent_id}:{idempotency_key}"
             with self._lock:
-                self._idempotency_records[idempotency_key] = result
+                self._idempotency_records[scoped_key] = result
 
