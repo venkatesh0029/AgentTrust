@@ -33,76 +33,47 @@ This document contains visual diagrams, Markdown tables, and layout code designe
 
 ---
 
-## Slide 3: Architecture Diagram & 13-Stage Gateway Pipeline
+## Slide 3: Proposed Private Blockchain Architecture
 
 ```
-                 ┌───────────────────────┐
-                 │ Admin / Policy Admin  │ (Requires X-Admin-Role Header)
-                 └───────────┬───────────┘
-                             │
-                             v
-                 ┌───────────────────────┐
-                 │ Agent Registry & CA   │
-                 └───────────┬───────────┘
-                             │
-                             v
-                 ┌───────────────────────┐
-                 │ Autonomous AI Agent   │
-                 └───────────┬───────────┘
-                             │
-                     Signed Request
-                             │
-                             v
-                 ┌───────────────────────┐
-                 │ 1. Identity & Cert    │ (Fail fast at edge if invalid)
-                 └───────────┬───────────┘
-                             │
-                             v
-                 ┌───────────────────────┐
-                 │ 2. RSA-PSS Signature  │ (Signature checked BEFORE ledger write)
-                 └───────────┬───────────┘
-                             │
-                             v
-                 ┌───────────────────────┐
-                 │ 3. Input & Amount Val │ (Strict numeric & match validation)
-                 └───────────┬───────────┘
-                             │
-                             v
-                 ┌───────────────────────┐
-                 │ 4. Replay & Idempotent│ (Nonce eviction + per-agent cache)
-                 └───────────┬───────────┘
-                             │
-                             v
-                 ┌───────────────────────┐
-                 │ 5. Risk & Policy Engine│ (Deny-by-default boundary check)
-                 └───────────┬───────────┘
-                             │
-                 ┌───────────┴───────────┐
-                 │                       │
-                 v                       v
-       ┌──────────────────┐   ┌───────────────────┐
-       │ Human Approval   │   │ Provenance Builder│
-       └────────┬─────────┘   └─────────┬─────────┘
-                │                       │
-                v                       v
-       ┌──────────────────┐   ┌───────────────────┐
-       │ Action Gateway   │   │ Evidence Manager  │
-       └────────┬─────────┘   └─────────┬─────────┘
-                │                       │
-                v                       v
-       ┌──────────────────┐   ┌───────────────────┐
-       │ Protected API    │   │ SHA-256 Hashing   │
-       └──────────────────┘   └─────────┬─────────┘
-                                        │
-                                        v
-                              ┌───────────────────┐
-                              │ Hyperledger Fabric│
-                              └─────────┬─────────┘
-                                        │
-                                        v
-                              ┌───────────────────┐
-                              │ Audit Dashboard   │
-                              └───────────────────┘
+=============================================================================================================================
+                                      PROPOSED PRIVATE BLOCKCHAIN ARCHITECTURE
+=============================================================================================================================
+
+                                       ┌───────────────────────────────────┐
+                                       │       Autonomous AI Agent         │
+                                       │   (X.509 Identity + RSA SHA-256   │
+                                       │          Signed Request)          │
+                                       └─────────────────┬─────────────────┘
+                                                         │
+                        ┌────────────────────────────────┼────────────────────────────────┐
+                        │                                │                                │
+                        ▼                                ▼                                ▼
+  ┌─────────────────────────────────┐  ┌─────────────────────────────────┐  ┌─────────────────────────────────┐
+  │         IDENTITY PHASE          │  │          POLICY PHASE           │  │    EXECUTION & COMMIT PHASE     │
+  │                                 │  │                                 │  │                                 │
+  │  1. Canonical JSON Validation   │  │  5. Replay & Idempotency Check │  │  9. Protected API Execution     │
+  │                │                │  │                │                │  │                │                │
+  │                ▼                │  │                ▼                │  │                ▼                │
+  │  2. X.509 Certificate Verify    │  │  6. Server-Side Risk Eval      │  │ 10. Off-Chain SHA-256 Evidence │
+  │                │                │  │                │                │  │                │                │
+  │                ▼                │  │                ▼                │  │                ▼                │
+  │  3. RSA Signature Verification  │  │  7. Versioned Policy Engine   │  │ 11. Local Hash-Chain Log       │
+  │                │                │  │                │                │  │                │                │
+  │                ▼                │  │                ▼                │  │                ▼                │
+  │  4. Agent Status & Key-Version  │  │  8. Decision / Human Approval  │  │ 12. Hyperledger Fabric Commit   │
+  │     Check                       │  │     Ticket                      │  │                │                │
+  └─────────────────┬───────────────┘  └────────────────┬────────────────┘  │                ▼                │
+                    │                                   │                   │ 13. Final Gateway Response      │
+                    │                                   │                   │     Telemetry                   │
+                    └───────────────────────────────────┼───────────────────┴────────────────┬────────────────┘
+                                                        │                                    │
+                                        ┌───────────────┴───────────────┐                    │
+                                        ▼                               ▼                    ▼
+                          ┌───────────────────────────┐   ┌───────────────────────────┐
+                          │   Protected Finance API   │   │    Hyperledger Fabric     │
+                          │     (Signed Headers)      │   │        Consortium         │
+                          └───────────────────────────┘   └───────────────────────────┘
 ```
 
 ---

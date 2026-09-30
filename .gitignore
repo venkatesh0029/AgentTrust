@@ -47,8 +47,11 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# System generated logs / temporary files
-*.log
-.hypothesis/
-*.db
+# Node / Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+node_modules/
+.next/
+
 

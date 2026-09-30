@@ -54,57 +54,47 @@ As autonomous AI agents are increasingly entrusted with financial procurement, f
 
 ## 3. High-Level System Architecture
 
-The AgentTrust framework acts as a mandatory sidecar proxy separating Autonomous AI Agents from Protected Enterprise Systems:
+The AgentTrust framework enforces a 3-phase, 13-stage pipeline separating Autonomous AI Agents from Protected Enterprise Systems:
 
 ```
-                                ┌───────────────────────────────────┐
-                                │    Admin / Security Operator      │
-                                └─────────────────┬─────────────────┘
-                                                  │
-                                                  ▼
-                                ┌───────────────────────────────────┐
-                                │ Root Certificate Authority (CA)   │
-                                └─────────────────┬─────────────────┘
-                                                  │ X.509 Cert & RSA-2048 Key
-                                                  ▼
-                                ┌───────────────────────────────────┐
-                                │    Autonomous AI Agent (Client)   │
-                                └─────────────────┬─────────────────┘
-                                                  │
-                                          RSA-PSS Signed Request
-                                                  │
-                                                  ▼
- ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
- │                                    AGENTTRUST ACTION GATEWAY                                     │
- │                                                                                                  │
- │   ┌───────────────────────┐      ┌───────────────────────┐      ┌─────────────────────────────┐  │
- │   │  1. Ingestion & Format│ ───► │ 2. X.509 Identity     │ ───► │ 3. Replay Tracker & Nonce   │  │
- │   └───────────────────────┘      └───────────────────────┘      └─────────────────────────────┘  │
- │                                                                                │                 │
- │                                                                                ▼                 │
- │   ┌───────────────────────┐      ┌───────────────────────┐      ┌─────────────────────────────┐  │
- │   │  6. Human-in-Loop     │ ◄─── │ 5. Trusted Risk       │ ◄─── │ 4. Policy Evaluator         │  │
- │   │     Approval Manager  │      │    Engine (Score 0-100)│      │    (Deny-by-Default)        │  │
- │   └──────────┬────────────┘      └───────────────────────┘      └─────────────────────────────┘  │
- └──────────────│───────────────────────────────────────────────────────────────────────────────────┘
-                │
-                ├───────────────────────────────────────┐
-                ▼ (If Approved / Auto-Allowed)          ▼ (Audit Generation)
- ┌──────────────────────────────┐       ┌─────────────────────────────────┐
- │   Protected Financial API    │       │     Evidence Store & Hashing    │
- │   (Mock Enterprise Backend)  │       │     (Provenance Schema v2.0)    │
- └──────────────────────────────┘       └────────────────┬────────────────┘
+=============================================================================================================================
+                                      PROPOSED PRIVATE BLOCKCHAIN ARCHITECTURE
+=============================================================================================================================
+
+                                       ┌───────────────────────────────────┐
+                                       │       Autonomous AI Agent         │
+                                       │   (X.509 Identity + RSA SHA-256   │
+                                       │          Signed Request)          │
+                                       └─────────────────┬─────────────────┘
                                                          │
-                                                         ▼
-                                        ┌─────────────────────────────────┐
-                                        │  Hyperledger Fabric Ledger      │
-                                        │  (Local Engine / Docker Peer)   │
-                                        └────────────────┬────────────────┘
-                                                         │
-                                                         ▼
-                                        ┌─────────────────────────────────┐
-                                        │  Glassmorphism Web Dashboard    │
-                                        └─────────────────────────────────┘
+                        ┌────────────────────────────────┼────────────────────────────────┐
+                        │                                │                                │
+                        ▼                                ▼                                ▼
+  ┌─────────────────────────────────┐  ┌─────────────────────────────────┐  ┌─────────────────────────────────┐
+  │         IDENTITY PHASE          │  │          POLICY PHASE           │  │    EXECUTION & COMMIT PHASE     │
+  │                                 │  │                                 │  │                                 │
+  │  1. Canonical JSON Validation   │  │  5. Replay & Idempotency Check │  │  9. Protected API Execution     │
+  │                │                │  │                │                │  │                │                │
+  │                ▼                │  │                ▼                │  │                ▼                │
+  │  2. X.509 Certificate Verify    │  │  6. Server-Side Risk Eval      │  │ 10. Off-Chain SHA-256 Evidence │
+  │                │                │  │                │                │  │                │                │
+  │                ▼                │  │                ▼                │  │                ▼                │
+  │  3. RSA Signature Verification  │  │  7. Versioned Policy Engine   │  │ 11. Local Hash-Chain Log       │
+  │                │                │  │                │                │  │                │                │
+  │                ▼                │  │                ▼                │  │                ▼                │
+  │  4. Agent Status & Key-Version  │  │  8. Decision / Human Approval  │  │ 12. Hyperledger Fabric Commit   │
+  │     Check                       │  │     Ticket                      │  │                │                │
+  └─────────────────┬───────────────┘  └────────────────┬────────────────┘  │                ▼                │
+                    │                                   │                   │ 13. Final Gateway Response      │
+                    │                                   │                   │     Telemetry                   │
+                    └───────────────────────────────────┼───────────────────┴────────────────┬────────────────┘
+                                                        │                                    │
+                                        ┌───────────────┴───────────────┐                    │
+                                        ▼                               ▼                    ▼
+                          ┌───────────────────────────┐   ┌───────────────────────────┐
+                          │   Protected Finance API   │   │    Hyperledger Fabric     │
+                          │     (Signed Headers)      │   │        Consortium         │
+                          └───────────────────────────┘   └───────────────────────────┘
 ```
 
 ---

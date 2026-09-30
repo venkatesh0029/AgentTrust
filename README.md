@@ -24,42 +24,43 @@
 
 ---
 
-## 🏗️ System Architecture & 13-Stage Gateway Pipeline
+## 🏗️ Proposed Private Blockchain Architecture & 13-Stage Gateway Pipeline
 
 ```
-                               ┌──────────────────────────────────┐
-                               │  Autonomous AI Agent (Client)    │
-                               │  - X.509 Identity & Cert        │
-                               │  - Digital Request Signer        │
-                               └────────────────┬─────────────────┘
-                                                │
-                                    Signed Action Request JSON
-                                                │
-                                                v
-  ┌──────────────────────────────────────────────────────────────────────────────────────────┐
-  │                         AgentTrust 13-Stage Action Gateway                                │
-  │                                                                                          │
-  │   [Stage 1] Canonical JSON Schema  ──►  [Stage 2] X.509 Certificate Verification         │
-  │                                                                                          │
-  │   [Stage 3] Digital Signature Check──►  [Stage 4] Agent Status & Key-Version Check        │
-  │                                                                                          │
-  │   [Stage 5] Replay & Idempotency   ──►  [Stage 6] Trusted Server-Side Risk Evaluator      │
-  │                                                                                          │
-  │   [Stage 7] Versioned Policy Engine──►  [Stage 8] Decision Branch & Human Approval Ticket │
-  │                                                                                          │
-  │   [Stage 9] Protected API Execution──►  [Stage 10] Off-Chain SHA-256 Evidence Generator    │
-  │                                                                                          │
-  │   [Stage 11] Local Hash-Chain Log ──►  [Stage 12] Fabric Ledger Simulator Commit          │
-  │                                                                                          │
-  │   [Stage 13] Final Gateway Response Telemetry Payload                                    │
-  └─────────────────────────────────────────────┬────────────────────────────────────────────┘
-                                                │
-                 ┌──────────────────────────────┴──────────────────────────────┐
-                 ▼                                                             ▼
-  ┌─────────────────────────────┐                               ┌─────────────────────────────┐
-  │   Protected Finance API     │                               │  Fabric Ledger Simulator    │
-  │   (Signed Gateway Headers)  │                               │  (On-Chain Policy Engine)   │
-  └─────────────────────────────┘                               └─────────────────────────────┘
+                                       ┌───────────────────────────────────┐
+                                       │       Autonomous AI Agent         │
+                                       │   (X.509 Identity + RSA SHA-256   │
+                                       │          Signed Request)          │
+                                       └─────────────────┬─────────────────┘
+                                                         │
+                        ┌────────────────────────────────┼────────────────────────────────┐
+                        │                                │                                │
+                        ▼                                ▼                                ▼
+  ┌─────────────────────────────────┐  ┌─────────────────────────────────┐  ┌─────────────────────────────────┐
+  │         IDENTITY PHASE          │  │          POLICY PHASE           │  │    EXECUTION & COMMIT PHASE     │
+  │                                 │  │                                 │  │                                 │
+  │  1. Canonical JSON Validation   │  │  5. Replay & Idempotency Check │  │  9. Protected API Execution     │
+  │                │                │  │                │                │  │                │                │
+  │                ▼                │  │                ▼                │  │                ▼                │
+  │  2. X.509 Certificate Verify    │  │  6. Server-Side Risk Eval      │  │ 10. Off-Chain SHA-256 Evidence │
+  │                │                │  │                │                │  │                │                │
+  │                ▼                │  │                ▼                │  │                ▼                │
+  │  3. RSA Signature Verification  │  │  7. Versioned Policy Engine   │  │ 11. Local Hash-Chain Log       │
+  │                │                │  │                │                │  │                │                │
+  │                ▼                │  │                ▼                │  │                ▼                │
+  │  4. Agent Status & Key-Version  │  │  8. Decision / Human Approval  │  │ 12. Hyperledger Fabric Commit   │
+  │     Check                       │  │     Ticket                      │  │                │                │
+  └─────────────────┬───────────────┘  └────────────────┬────────────────┘  │                ▼                │
+                    │                                   │                   │ 13. Final Gateway Response      │
+                    │                                   │                   │     Telemetry                   │
+                    └───────────────────────────────────┼───────────────────┴────────────────┬────────────────┘
+                                                        │                                    │
+                                        ┌───────────────┴───────────────┐                    │
+                                        ▼                               ▼                    ▼
+                          ┌───────────────────────────┐   ┌───────────────────────────┐
+                          │   Protected Finance API   │   │    Hyperledger Fabric     │
+                          │     (Signed Headers)      │   │        Consortium         │
+                          └───────────────────────────┘   └───────────────────────────┘
 ```
 
 ---
