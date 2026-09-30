@@ -2,8 +2,9 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, AuditRecord } from "@/lib/api";
+import { api } from "@/lib/api";
 import { Card, Button, Badge, Skeleton } from "@/components/ui/primitives";
 import { DecisionPill, HashText, EmptyState } from "@/components/domain/components";
 import { 
@@ -18,7 +19,10 @@ import {
   Cpu
 } from "lucide-react";
 
+import { useRouter } from "next/navigation";
+
 export default function LedgerPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [verifying, setVerifying] = useState(false);
@@ -35,7 +39,7 @@ export default function LedgerPage() {
     refetchInterval: 3000,
   });
 
-  const { data: fabricStatus, isLoading: isLoadingFabric } = useQuery({
+  const { data: fabricStatus } = useQuery({
     queryKey: ["fabricStatus"],
     queryFn: () => api.fetchFabricStatus(),
   });
@@ -47,7 +51,7 @@ export default function LedgerPage() {
       setVerifyResult(data);
       setVerifying(false);
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       setVerifyResult({
         valid: false,
         status: "VERIFICATION_ERROR",
@@ -217,12 +221,12 @@ export default function LedgerPage() {
             <strong className="text-[var(--fg)]">Honest Ledger Architecture:</strong> Running local Fabric-compatible permissioned ledger simulator. All SHA-256 block hashes are calculated deterministically.
           </span>
         </div>
-        <a 
+        <Link 
           href="/evidence" 
           className="text-[var(--accent)] hover:underline flex items-center gap-1 font-medium"
         >
           Inspect Evidence Storage <ArrowRight className="w-3.5 h-3.5" />
-        </a>
+        </Link>
       </div>
 
       {/* Search Bar */}
@@ -254,7 +258,7 @@ export default function LedgerPage() {
                 : "Submit requests through the Gateway page to populate the ledger."
             }
             actionLabel="Go to Gateway"
-            onAction={() => (window.location.href = "/gateway")}
+            onAction={() => router.push("/gateway")}
           />
         ) : (
           filteredChain.slice().reverse().map((block, idx) => (

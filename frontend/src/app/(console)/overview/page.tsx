@@ -2,32 +2,19 @@
 
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api";
-import { StatCard, DecisionPill, HashText, EmptyState } from "@/components/domain/components";
+import { api, AuditRecord } from "@/lib/api";
+import { StatCard, DecisionPill, EmptyState } from "@/components/domain/components";
 import { Card, Button, Skeleton } from "@/components/ui/primitives";
-import { Activity, ShieldCheck, ShieldAlert, Clock, CheckCircle, Database, RefreshCw } from "lucide-react";
+import { Activity, ShieldCheck, ShieldAlert, Clock, Database, RefreshCw } from "lucide-react";
 import Link from "next/link";
 
 export default function OverviewPage() {
-  const { data: health, isLoading: healthLoading } = useQuery({
-    queryKey: ["health"],
-    queryFn: () => api.fetchHealth(),
-  });
-
   const { data: auditEvents = [], isLoading: eventsLoading, refetch: refetchEvents } = useQuery({
     queryKey: ["auditEvents"],
-    queryFn: () => api.fetchAuditEvents ? api.fetchAuditEvents() : api.fetchAuditChain().then(chain => chain.map(c => ({
-      event_id: c.event_id,
-      request_id: c.request_id,
-      agent_id: c.agent_id,
-      action: c.event_type,
-      decision: c.decision,
-      reason: c.execution_result,
-      timestamp: c.timestamp,
-    }))),
+    queryFn: () => api.fetchAuditChain(),
   });
 
-  const { data: chainVerify, isLoading: verifyLoading } = useQuery({
+  const { data: chainVerify } = useQuery({
     queryKey: ["chainVerify"],
     queryFn: () => api.verifyChain(),
   });
@@ -38,11 +25,11 @@ export default function OverviewPage() {
   });
 
   // Calculate real metrics from audit data
-  const allowedCount = auditEvents.filter((e: any) =>
+  const allowedCount = auditEvents.filter((e: AuditRecord) =>
     (e.decision || "").toUpperCase().includes("ALLOW")
   ).length;
 
-  const blockedCount = auditEvents.filter((e: any) =>
+  const blockedCount = auditEvents.filter((e: AuditRecord) =>
     (e.decision || "").toUpperCase().includes("BLOCK")
   ).length;
 
@@ -146,7 +133,7 @@ export default function OverviewPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)] font-mono">
-                {auditEvents.slice(0, 10).map((ev: any, i: number) => (
+                {auditEvents.slice(0, 10).map((ev: AuditRecord, i: number) => (
                   <tr key={ev.request_id || i} className="hover:bg-white/5 transition-colors">
                     <td className="py-2.5 px-3 text-[var(--fg)] font-medium">
                       {ev.request_id || `REQ-${i}`}
@@ -155,10 +142,10 @@ export default function OverviewPage() {
                       {ev.agent_id || "FINANCE-AGENT-001"}
                     </td>
                     <td className="py-2.5 px-3 text-[var(--muted)]">
-                      {ev.action || ev.event_type || "CREATE_PURCHASE_ORDER"}
+                      {ev.event_type || "CREATE_PURCHASE_ORDER"}
                     </td>
                     <td className="py-2.5 px-3">
-                      <DecisionPill decision={ev.decision} reason={ev.reason} />
+                      <DecisionPill decision={ev.decision} reason={ev.execution_result} />
                     </td>
                     <td className="py-2.5 px-3 text-[var(--subtle)]">
                       {ev.timestamp || new Date().toISOString()}

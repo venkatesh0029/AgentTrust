@@ -4,19 +4,9 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { Card, Button, Badge, Skeleton } from "@/components/ui/primitives";
+import { Card, Button, Badge } from "@/components/ui/primitives";
 import { SandboxBanner } from "@/components/domain/components";
-import { 
-  AlertTriangle, 
-  Flame, 
-  RefreshCw, 
-  Settings2, 
-  ShieldAlert, 
-  CheckCircle2,
-  Lock,
-  Layers,
-  FileCode
-} from "lucide-react";
+import { Flame, Settings2, ShieldAlert } from "lucide-react";
 
 export default function SandboxPage() {
   const queryClient = useQueryClient();
@@ -29,15 +19,15 @@ export default function SandboxPage() {
   const [sequenceNum, setSequenceNum] = useState<number>(1);
   const [tamperField, setTamperField] = useState("decision");
   const [tamperValue, setTamperValue] = useState("FORGED_ALLOWED");
-  const [chainTamperResult, setChainTamperResult] = useState<any>(null);
+  const [chainTamperResult, setChainTamperResult] = useState<Record<string, unknown> | null>(null);
 
   // Evidence Tamper State
   const [evidenceId, setEvidenceId] = useState("REQ-PO-DEMO01");
   const [evField, setEvField] = useState("amount");
   const [evValue, setEvValue] = useState("999999.00");
-  const [evTamperResult, setEvTamperResult] = useState<any>(null);
+  const [evTamperResult, setEvTamperResult] = useState<Record<string, unknown> | null>(null);
 
-  const { data: modeData, isLoading: isLoadingMode } = useQuery({
+  const { data: modeData } = useQuery({
     queryKey: ["mode"],
     queryFn: () => api.fetchMode(),
   });
@@ -49,7 +39,7 @@ export default function SandboxPage() {
       queryClient.invalidateQueries({ queryKey: ["mode"] });
       queryClient.invalidateQueries({ queryKey: ["health"] });
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       setModeFeedback(`Error: ${err.message}`);
     }
   });
@@ -57,10 +47,10 @@ export default function SandboxPage() {
   const chainTamperMutation = useMutation({
     mutationFn: () => api.simulateChainTamper(sequenceNum, tamperField, tamperValue),
     onSuccess: (data) => {
-      setChainTamperResult(data);
+      setChainTamperResult(data as Record<string, unknown>);
       queryClient.invalidateQueries({ queryKey: ["auditChain"] });
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       setChainTamperResult({ error: err.message });
     }
   });
@@ -68,9 +58,9 @@ export default function SandboxPage() {
   const evidenceTamperMutation = useMutation({
     mutationFn: () => api.simulateEvidenceTamper(evidenceId, evField, evValue),
     onSuccess: (data) => {
-      setEvTamperResult(data);
+      setEvTamperResult(data as Record<string, unknown>);
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       setEvTamperResult({ error: err.message });
     }
   });
@@ -214,7 +204,7 @@ export default function SandboxPage() {
                   {chainTamperResult.error ? "Failed" : "Tamper Injected!"}
                 </div>
                 <div className="text-[10px] opacity-80">
-                  {chainTamperResult.message || chainTamperResult.error || "Chain verification now fails."}
+                  {(chainTamperResult.message as string) || (chainTamperResult.error as string) || "Chain verification now fails."}
                 </div>
               </div>
             )}
@@ -286,7 +276,7 @@ export default function SandboxPage() {
                   {evTamperResult.error ? "Failed" : "Evidence Tampered!"}
                 </div>
                 <div className="text-[10px] opacity-80">
-                  {evTamperResult.message || evTamperResult.error || "Evidence digest now mismatches ledger."}
+                  {(evTamperResult.message as string) || (evTamperResult.error as string) || "Evidence digest now mismatches ledger."}
                 </div>
               </div>
             )}

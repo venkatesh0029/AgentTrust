@@ -23,9 +23,8 @@ import {
   User,
   CheckCircle,
   XCircle,
-  Command
 } from "lucide-react";
-import { ModeBadge, HashText } from "@/components/domain/components";
+import { ModeBadge } from "@/components/domain/components";
 import { CommandPalette } from "@/components/ui/primitives";
 import { useTheme } from "next-themes";
 import { useQuery } from "@tanstack/react-query";

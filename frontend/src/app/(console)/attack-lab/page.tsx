@@ -6,23 +6,23 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Card, Button, Badge, Skeleton } from "@/components/ui/primitives";
 import { EmptyState } from "@/components/domain/components";
-import { 
-  ShieldAlert, 
-  ShieldCheck, 
-  Play, 
-  RefreshCw, 
-  Zap, 
-  CheckCircle2, 
-  XCircle, 
-  Lock,
-  Flame,
-  Bug
-} from "lucide-react";
+import { Play, CheckCircle2, XCircle, Flame } from "lucide-react";
+import { AttackScenario } from "@/lib/api";
+
+interface MatrixResultData {
+  summary: {
+    total: number;
+    passed: number;
+    failed: number;
+    pass_rate: string;
+  };
+  details: AttackScenario[];
+}
 
 export default function AttackLabPage() {
-  const [matrixData, setMatrixData] = useState<any>(null);
+  const [matrixData, setMatrixData] = useState<MatrixResultData | null>(null);
 
-  const { isLoading, refetch } = useQuery({
+  const { isLoading } = useQuery({
     queryKey: ["attackMatrix"],
     queryFn: async () => {
       const data = await api.runAttackMatrix();
@@ -151,7 +151,7 @@ export default function AttackLabPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)] font-sans">
-                {scenariosList.map((item: any) => (
+                {scenariosList.map((item: AttackScenario) => (
                   <tr
                     key={item.scenario_id}
                     className="hover:bg-[var(--surface-2)]/40 transition-colors"

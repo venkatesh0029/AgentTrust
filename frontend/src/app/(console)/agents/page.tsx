@@ -3,25 +3,21 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, AgentRecord } from "@/lib/api";
-import { Card, Button, Badge, Skeleton, Dialog } from "@/components/ui/primitives";
+import { api } from "@/lib/api";
+import { Card, Button, Badge, Skeleton } from "@/components/ui/primitives";
 import { HashText, EmptyState } from "@/components/domain/components";
 import { 
   Bot, 
   RefreshCw, 
   ShieldAlert, 
-  ShieldCheck, 
-  Key, 
   UserCheck, 
   UserX, 
   RotateCw,
-  Fingerprint,
-  Plus
+  Fingerprint
 } from "lucide-react";
 
 export default function AgentsPage() {
   const queryClient = useQueryClient();
-  const [selectedAgent, setSelectedAgent] = useState<AgentRecord | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const { data: agents = [], isLoading, refetch } = useQuery({
@@ -33,10 +29,10 @@ export default function AgentsPage() {
   const suspendMutation = useMutation({
     mutationFn: (agentId: string) => api.suspendAgent(agentId, "ADMIN_SUSPENSION"),
     onSuccess: (data) => {
-      setActionMessage({ type: "success", text: data.message || "Agent suspended successfully." });
+      setActionMessage({ type: "success", text: (data.message as string) || "Agent suspended successfully." });
       queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       setActionMessage({ type: "error", text: err.message || "Failed to suspend agent." });
     }
   });
@@ -44,10 +40,10 @@ export default function AgentsPage() {
   const reactivateMutation = useMutation({
     mutationFn: (agentId: string) => api.reactivateAgent(agentId),
     onSuccess: (data) => {
-      setActionMessage({ type: "success", text: data.message || "Agent reactivated successfully." });
+      setActionMessage({ type: "success", text: (data.message as string) || "Agent reactivated successfully." });
       queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       setActionMessage({ type: "error", text: err.message || "Failed to reactivate agent." });
     }
   });
@@ -55,10 +51,10 @@ export default function AgentsPage() {
   const revokeMutation = useMutation({
     mutationFn: (agentId: string) => api.revokeAgent(agentId),
     onSuccess: (data) => {
-      setActionMessage({ type: "success", text: data.message || "Agent certificate revoked." });
+      setActionMessage({ type: "success", text: (data.message as string) || "Agent certificate revoked." });
       queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       setActionMessage({ type: "error", text: err.message || "Failed to revoke agent." });
     }
   });
@@ -69,7 +65,7 @@ export default function AgentsPage() {
       setActionMessage({ type: "success", text: `RSA key rotated! New key version: ${data.new_key_version}` });
       queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       setActionMessage({ type: "error", text: err.message || "Failed to rotate key." });
     }
   });
