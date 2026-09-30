@@ -11,7 +11,7 @@ export function cn(...inputs: ClassValue[]) {
 
 // BUTTON COMPONENT
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "emerald" | "secondary" | "danger" | "ghost" | "outline";
+  variant?: "primary" | "emerald" | "secondary" | "danger" | "ghost" | "outline";
   size?: "sm" | "md" | "lg";
 }
 
@@ -20,6 +20,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const baseStyle = "inline-flex items-center justify-center font-medium rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--emerald)] disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]";
     
     const variants = {
+      primary: "bg-[var(--emerald)] text-[var(--accent-fg)] hover:opacity-90 font-semibold shadow-sm",
       emerald: "bg-[var(--emerald)] text-[var(--accent-fg)] hover:opacity-90 font-semibold shadow-sm",
       secondary: "bg-[var(--surface-2)] text-[var(--fg)] border border-[var(--border)] hover:border-[var(--border-strong)] hover:bg-white/5",
       danger: "bg-[var(--blocked)] text-white hover:opacity-90 font-semibold shadow-sm",
@@ -64,7 +65,7 @@ export function Card({ className, children, ...props }: React.HTMLAttributes<HTM
 
 // BADGE COMPONENT
 export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
-  variant?: "allowed" | "held" | "blocked" | "info" | "tamper" | "subtle";
+  variant?: "allowed" | "held" | "blocked" | "info" | "tamper" | "subtle" | "outline" | "secondary" | "emerald" | "danger";
   dot?: boolean;
 }
 
@@ -76,6 +77,10 @@ export function Badge({ className, variant = "subtle", dot = true, children, ...
     info: "bg-[var(--info)]/15 text-[var(--info)] border-[var(--info)]/30",
     tamper: "bg-[var(--tamper)]/15 text-[var(--tamper)] border-[var(--tamper)]/30",
     subtle: "bg-[var(--surface-2)] text-[var(--muted)] border-[var(--border)]",
+    outline: "bg-transparent text-[var(--muted)] border-[var(--border)]",
+    secondary: "bg-[var(--surface-2)] text-[var(--fg)] border-[var(--border)]",
+    emerald: "bg-emerald-950/40 text-emerald-400 border-emerald-500/30",
+    danger: "bg-red-950/40 text-red-400 border-red-500/30",
   };
 
   const dotColors = {
@@ -85,6 +90,10 @@ export function Badge({ className, variant = "subtle", dot = true, children, ...
     info: "bg-[var(--info)]",
     tamper: "bg-[var(--tamper)]",
     subtle: "bg-[var(--subtle)]",
+    outline: "bg-[var(--subtle)]",
+    secondary: "bg-[var(--fg)]",
+    emerald: "bg-emerald-400",
+    danger: "bg-red-400",
   };
 
   return (

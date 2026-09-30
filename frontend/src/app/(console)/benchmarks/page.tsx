@@ -5,25 +5,22 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Card, Button, Badge, Skeleton } from "@/components/ui/primitives";
-import { 
-  Gauge, 
-  Play, 
-  Clock, 
-  Cpu, 
-  Zap, 
-  Layers, 
-  TrendingUp, 
-  BarChart3,
-  CheckCircle2
-} from "lucide-react";
+import { Play, Clock, TrendingUp, BarChart3 } from "lucide-react";
+
+interface BenchmarkResultData {
+  timestamp?: string;
+  stage_latencies?: Record<string, number | { mean_ms?: number; mean?: number; p95_ms?: number }>;
+  concurrency_scaling?: Array<{ agents?: number; num_agents?: number; throughput?: number; req_per_sec?: number; avg_latency_ms?: number }>;
+  ablation_study?: Record<string, unknown>;
+}
 
 export default function BenchmarksPage() {
-  const [benchmarkResult, setBenchmarkResult] = useState<any>(null);
+  const [benchmarkResult, setBenchmarkResult] = useState<BenchmarkResultData | null>(null);
 
-  const { isLoading, refetch } = useQuery({
+  const { isLoading } = useQuery({
     queryKey: ["benchmarks"],
     queryFn: async () => {
-      const data = await api.runPerformanceBenchmark();
+      const data = (await api.runPerformanceBenchmark()) as BenchmarkResultData;
       setBenchmarkResult(data);
       return data;
     },
@@ -33,13 +30,12 @@ export default function BenchmarksPage() {
   const runMutation = useMutation({
     mutationFn: () => api.runPerformanceBenchmark(),
     onSuccess: (data) => {
-      setBenchmarkResult(data);
+      setBenchmarkResult(data as BenchmarkResultData);
     },
   });
 
   const stageLatencies = benchmarkResult?.stage_latencies || {};
   const concurrencyScaling = benchmarkResult?.concurrency_scaling || [];
-  const ablationStudy = benchmarkResult?.ablation_study || {};
 
   return (
     <div className="space-y-6">
@@ -128,9 +124,10 @@ export default function BenchmarksPage() {
             </p>
           ) : (
             <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
-              {Object.entries(stageLatencies).map(([stageName, metrics]: [string, any], idx) => {
-                const meanMs = typeof metrics === "number" ? metrics : metrics?.mean_ms ?? metrics?.mean ?? 0.12;
-                const p95Ms = typeof metrics === "object" ? metrics?.p95_ms ?? meanMs * 1.5 : meanMs * 1.4;
+              {Object.entries(stageLatencies).map(([stageName, metrics], idx) => {
+                const metricObj = metrics as { mean_ms?: number; mean?: number; p95_ms?: number } | number;
+                const meanMs = typeof metricObj === "number" ? metricObj : metricObj?.mean_ms ?? metricObj?.mean ?? 0.12;
+                const p95Ms = typeof metricObj === "object" ? metricObj?.p95_ms ?? meanMs * 1.5 : meanMs * 1.4;
                 return (
                   <div
                     key={stageName}
@@ -179,7 +176,7 @@ export default function BenchmarksPage() {
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                 {Array.isArray(concurrencyScaling) && concurrencyScaling.length > 0 ? (
-                  concurrencyScaling.map((item: any, i: number) => (
+                  concurrencyScaling.map((item, i: number) => (
                     <div
                       key={i}
                       className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-center space-y-1"

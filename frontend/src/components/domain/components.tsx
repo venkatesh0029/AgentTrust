@@ -2,14 +2,14 @@
 
 import React, { useState } from "react";
 import { Badge } from "@/components/ui/primitives";
-import { Copy, Check, ShieldAlert, Cpu, AlertTriangle, Layers, Server } from "lucide-react";
+import { Copy, Check, Cpu, AlertTriangle, Layers, Server } from "lucide-react";
 
 // 1. DECISION PILL
 export function DecisionPill({ decision, reason }: { decision?: string; reason?: string }) {
   const d = (decision || "").toUpperCase();
 
   let variant: "allowed" | "held" | "blocked" | "info" | "tamper" | "subtle" = "subtle";
-  let label = d || "UNKNOWN";
+  const label = d || "UNKNOWN";
 
   if (d.includes("ALLOW") || d.includes("COMMIT") || d.includes("VERIFIED") || d.includes("SUCCESS") || d === "ACTIVE") {
     variant = "allowed";
@@ -30,19 +30,31 @@ export function DecisionPill({ decision, reason }: { decision?: string; reason?:
 }
 
 // 2. HASH TEXT (Truncated cryptographic digest with copy button & tooltip)
-export function HashText({ hash, length = 10 }: { hash?: string; length?: number }) {
+export function HashText({
+  hash,
+  value,
+  length = 10,
+  truncateLen,
+}: {
+  hash?: string;
+  value?: string;
+  length?: number;
+  truncateLen?: number;
+}) {
   const [copied, setCopied] = useState(false);
+  const targetHash = hash || value;
+  const targetLen = truncateLen || length;
 
-  if (!hash) return <span className="text-xs text-[var(--subtle)] font-mono">N/A</span>;
+  if (!targetHash) return <span className="text-xs text-[var(--subtle)] font-mono">N/A</span>;
 
   const truncated =
-    hash.length > length * 2
-      ? `${hash.slice(0, length)}...${hash.slice(-length)}`
-      : hash;
+    targetHash.length > targetLen * 2
+      ? `${targetHash.slice(0, targetLen)}...${targetHash.slice(-targetLen)}`
+      : targetHash;
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(hash);
+    navigator.clipboard.writeText(targetHash);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -50,7 +62,7 @@ export function HashText({ hash, length = 10 }: { hash?: string; length?: number
   return (
     <span
       onClick={handleCopy}
-      title={`Click to copy: ${hash}`}
+      title={`Click to copy: ${targetHash}`}
       className="inline-flex items-center gap-1.5 font-mono text-xs px-2 py-0.5 rounded bg-[var(--surface-2)] text-[var(--emerald)] border border-[var(--border)] cursor-pointer hover:border-[var(--emerald)]/50 transition-colors group"
     >
       <span>{truncated}</span>
@@ -115,10 +127,14 @@ export function EmptyState({
   title = "No Data Available",
   description = "No records were returned from the backend service.",
   icon: Icon = Layers,
+  actionLabel,
+  onAction,
 }: {
   title?: string;
   description?: string;
   icon?: React.ElementType;
+  actionLabel?: string;
+  onAction?: () => void;
 }) {
   return (
     <div className="flex flex-col items-center justify-center p-12 text-center border border-dashed border-[var(--border)] rounded-xl bg-[var(--surface)]/50">
@@ -127,6 +143,14 @@ export function EmptyState({
       </div>
       <h4 className="text-sm font-semibold text-[var(--fg)] mb-1">{title}</h4>
       <p className="text-xs text-[var(--muted)] max-w-sm mb-4">{description}</p>
+      {actionLabel && onAction && (
+        <button
+          onClick={onAction}
+          className="px-4 py-2 rounded-lg bg-[var(--emerald)] text-[var(--accent-fg)] font-semibold text-xs hover:opacity-90 transition-opacity"
+        >
+          {actionLabel}
+        </button>
+      )}
     </div>
   );
 }

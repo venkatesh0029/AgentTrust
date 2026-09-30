@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { api, EvidenceRecord } from "@/lib/api";
+import { api } from "@/lib/api";
 import { Card, Button, Badge, Skeleton } from "@/components/ui/primitives";
 import { DecisionPill, HashText, EmptyState } from "@/components/domain/components";
 import { 
@@ -11,8 +11,6 @@ import {
   Search, 
   ShieldCheck, 
   ShieldAlert, 
-  RefreshCw, 
-  Lock, 
   CheckCircle2, 
   XCircle,
   Clock,
@@ -23,7 +21,7 @@ import {
 export default function EvidencePage() {
   const [searchId, setSearchId] = useState("");
   const [activeEvidenceId, setActiveEvidenceId] = useState<string | null>(null);
-  const [verificationResult, setVerificationResult] = useState<any>(null);
+  const [verificationResult, setVerificationResult] = useState<Record<string, unknown> | null>(null);
 
   const { data: chain = [], isLoading: isLoadingChain } = useQuery({
     queryKey: ["auditChain"],
@@ -35,7 +33,6 @@ export default function EvidencePage() {
     data: evidenceData,
     isLoading: isLoadingEvidence,
     error: evidenceError,
-    refetch: refetchEvidence
   } = useQuery({
     queryKey: ["evidence", activeEvidenceId],
     queryFn: () => (activeEvidenceId ? api.fetchEvidence(activeEvidenceId) : null),
@@ -45,9 +42,9 @@ export default function EvidencePage() {
   const verifyMutation = useMutation({
     mutationFn: (id: string) => api.verifyEvidence(id),
     onSuccess: (data) => {
-      setVerificationResult(data);
+      setVerificationResult(data as Record<string, unknown>);
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       setVerificationResult({
         verified: false,
         status: "VERIFICATION_FAILED",
@@ -195,38 +192,41 @@ export default function EvidencePage() {
           ) : (
             <div className="space-y-4">
               {/* Verification Result Banner */}
-              {verificationResult && (
-                <div
-                  className={`p-4 rounded-xl border flex items-start gap-3 transition-all ${
-                    verificationResult.verification_result?.verified !== false &&
-                    verificationResult.verified !== false
-                      ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-400"
-                      : "bg-red-950/20 border-red-500/30 text-red-400"
-                  }`}
-                >
-                  {verificationResult.verification_result?.verified !== false &&
-                  verificationResult.verified !== false ? (
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-                  ) : (
-                    <XCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-                  )}
-                  <div className="flex-1 text-sm">
-                    <div className="font-semibold flex items-center justify-between">
-                      <span>
-                        {verificationResult.verification_result?.verified !== false &&
-                        verificationResult.verified !== false
-                          ? "Cryptographic Digest Match (VALID)"
-                          : "Digest Mismatch Detected (TAMPERED)"}
-                      </span>
+              {verificationResult && (() => {
+                const vRes = verificationResult as {
+                  verified?: boolean;
+                  detail?: string;
+                  verification_result?: { verified?: boolean; message?: string };
+                };
+                const isValid = vRes.verification_result?.verified !== false && vRes.verified !== false;
+                const msg = vRes.verification_result?.message || vRes.detail || "Calculated off-chain SHA-256 hash matches the ledger state commitment.";
+                
+                return (
+                  <div
+                    className={`p-4 rounded-xl border flex items-start gap-3 transition-all ${
+                      isValid
+                        ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-400"
+                        : "bg-red-950/20 border-red-500/30 text-red-400"
+                    }`}
+                  >
+                    {isValid ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                    ) : (
+                      <XCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1 text-sm">
+                      <div className="font-semibold flex items-center justify-between">
+                        <span>
+                          {isValid
+                            ? "Cryptographic Digest Match (VALID)"
+                            : "Digest Mismatch Detected (TAMPERED)"}
+                        </span>
+                      </div>
+                      <p className="text-xs opacity-90 mt-1">{msg}</p>
                     </div>
-                    <p className="text-xs opacity-90 mt-1">
-                      {verificationResult.verification_result?.message ||
-                        verificationResult.detail ||
-                        "Calculated off-chain SHA-256 hash matches the ledger state commitment."}
-                    </p>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Evidence Inspector Card */}
               <Card className="p-5 space-y-4">

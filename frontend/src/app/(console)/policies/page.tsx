@@ -10,13 +10,7 @@ import {
   FileText, 
   RefreshCw, 
   RotateCcw, 
-  CheckCircle2, 
-  ShieldCheck, 
-  Clock, 
-  DollarSign, 
-  ShieldAlert,
-  Sliders,
-  Plus
+  Clock
 } from "lucide-react";
 
 export default function PoliciesPage() {
@@ -37,14 +31,19 @@ export default function PoliciesPage() {
     onSuccess: (data) => {
       setFeedback({
         type: "success",
-        text: `Policy '${data.policy?.policy_id}' rolled back to version ${data.policy?.version}.`,
+        text: `Policy '${(data as { policy?: { policy_id?: string; version?: string } }).policy?.policy_id || "FIN-POLICY-001"}' rolled back to version ${targetVersion(data)}.`,
       });
       queryClient.invalidateQueries({ queryKey: ["policies"] });
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       setFeedback({ type: "error", text: err.message || "Rollback failed." });
     }
   });
+
+  function targetVersion(data: unknown): string {
+    const res = data as { policy?: { version?: string } };
+    return res.policy?.version || "1.0";
+  }
 
   return (
     <div className="space-y-6">

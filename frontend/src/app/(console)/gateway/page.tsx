@@ -2,8 +2,8 @@
 
 import React, { useState } from "react";
 import { PipelineStrip, DecisionPill, HashText } from "@/components/domain/components";
-import { Card, Button, Badge } from "@/components/ui/primitives";
-import { Cpu, Play, CheckCircle, ShieldAlert, Clock, RefreshCw } from "lucide-react";
+import { Card, Button } from "@/components/ui/primitives";
+import { Cpu, Play, RefreshCw } from "lucide-react";
 import { api, GatewaySubmitResponse } from "@/lib/api";
 
 export default function GatewayPage() {
@@ -70,12 +70,13 @@ export default function GatewayPage() {
 
         setReasonCode(res.reason || "POLICY_VIOLATION");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = (err as Error).message || "GATEWAY_ERROR";
       setStoppedStage(7);
-      setReasonCode(err.message || "GATEWAY_ERROR");
+      setReasonCode(errMsg);
       setResult({
         decision: "BLOCKED",
-        reason: err.message || "GATEWAY_ERROR",
+        reason: errMsg,
         protected_api_result: "NOT_EXECUTED",
       });
     } finally {

@@ -2,23 +2,23 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, ApprovalTicket } from "@/lib/api";
+import { api } from "@/lib/api";
 import { Card, Button, Badge, Skeleton } from "@/components/ui/primitives";
-import { HashText, EmptyState } from "@/components/domain/components";
+import { EmptyState } from "@/components/domain/components";
 import { 
   UserCheck, 
   UserX, 
   RefreshCw, 
   Clock, 
   AlertTriangle, 
-  CheckCircle2, 
-  ShieldAlert,
   DollarSign,
   FileCode
 } from "lucide-react";
 
 export default function ApprovalsPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [rejectingTicket, setRejectingTicket] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
@@ -33,11 +33,11 @@ export default function ApprovalsPage() {
   const approveMutation = useMutation({
     mutationFn: (approvalId: string) => api.approveTicket(approvalId),
     onSuccess: (data) => {
-      setFeedback({ type: "success", text: `Ticket ${data.approval_id || "approved"} resumed and executed on chain.` });
+      setFeedback({ type: "success", text: `Ticket ${(data.approval_id as string) || "approved"} resumed and executed on chain.` });
       queryClient.invalidateQueries({ queryKey: ["pendingApprovals"] });
       queryClient.invalidateQueries({ queryKey: ["auditChain"] });
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       setFeedback({ type: "error", text: err.message || "Failed to approve ticket." });
     }
   });
@@ -45,14 +45,14 @@ export default function ApprovalsPage() {
   const rejectMutation = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
       api.rejectTicket(id, reason),
-    onSuccess: (data) => {
+    onSuccess: () => {
       setFeedback({ type: "success", text: "Ticket rejected and recorded in audit log." });
       setRejectingTicket(null);
       setRejectReason("");
       queryClient.invalidateQueries({ queryKey: ["pendingApprovals"] });
       queryClient.invalidateQueries({ queryKey: ["auditChain"] });
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       setFeedback({ type: "error", text: err.message || "Failed to reject ticket." });
     }
   });
@@ -121,7 +121,7 @@ export default function ApprovalsPage() {
             title="No Pending Approvals"
             description="All agent requests are within policy thresholds. High-value transactions requiring human approval will appear here."
             actionLabel="Submit High-Value Request"
-            onAction={() => (window.location.href = "/gateway")}
+            onAction={() => router.push("/gateway")}
           />
         ) : (
           pendingTickets.map((ticket) => {
