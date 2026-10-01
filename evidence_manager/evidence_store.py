@@ -13,7 +13,19 @@ class EvidenceStore:
         """
         evidence_id = evidence_record["evidence_id"]
         self._store[evidence_id] = evidence_record
-        return HashManager.calculate_evidence_hash(evidence_record)
+        ev_hash = HashManager.calculate_evidence_hash(evidence_record)
+        try:
+            from fabric.persistent_db import PersistentStorageEngine
+            PersistentStorageEngine().save_evidence(
+                evidence_id=evidence_id,
+                request_id=evidence_record.get("request_id", ""),
+                agent_id=evidence_record.get("agent_id", ""),
+                evidence_hash=ev_hash,
+                evidence_data=evidence_record
+            )
+        except Exception:
+            pass
+        return ev_hash
 
     def get_evidence(self, evidence_id: str) -> Optional[Dict[str, Any]]:
         return self._store.get(evidence_id)

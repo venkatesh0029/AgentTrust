@@ -15,6 +15,7 @@ from evidence_manager.evidence_store import EvidenceStore
 from evidence_manager.provenance import ProvenanceBuilder
 from fabric.fabric_client import FabricClient
 
+from identity_manager.delegation import DelegationTokenManager
 from risk_engine.risk_evaluator import RiskEvaluator
 from audit_writer.chain_writer import AuditChainWriter
 
@@ -256,6 +257,39 @@ class ActionGateway:
             request_timestamp_iso=timestamp
         )
 
+        # Step 7.5: Capability Delegation Token Chain Check (if delegation_token present)
+        delegation_token = request_payload.get("delegation_token") or parameters.get("delegation_token")
+        if delegation_token and isinstance(delegation_token, dict):
+            issuer_agent_id = delegation_token.get("issuer_agent_id")
+            issuer_record = self.registry.get_agent(issuer_agent_id) if issuer_agent_id else None
+            issuer_pub_key = issuer_record.get("public_key") if issuer_record else None
+
+            if not issuer_pub_key:
+                return self._finalize_gateway_outcome(
+                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                    reason="UNKNOWN_DELEGATION_ISSUER", policy_id=agent_record.get("policy_id", "NONE"),
+                    policy_version="1.0", agent_version=agent_record.get("agent_version", "1.0"),
+                    api_result="NOT_EXECUTED", nonce=nonce
+                )
+
+            del_res = DelegationTokenManager.verify_delegation_chain(
+                token=delegation_token,
+                action=action,
+                amount=amount,
+                issuer_public_key=issuer_pub_key,
+                requesting_agent_id=agent_id
+            )
+            if not del_res.get("valid") or not del_res.get("allowed"):
+                return self._finalize_gateway_outcome(
+                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                    reason=del_res.get("reason", "DELEGATION_VERIFICATION_FAILED"),
+                    policy_id=agent_record.get("policy_id", "NONE"),
+                    policy_version="1.0", agent_version=agent_record.get("agent_version", "1.0"),
+                    api_result="NOT_EXECUTED", nonce=nonce
+                )
+
         # Step 8: Versioned Policy Engine Evaluation
         policy_id = agent_record.get("policy_id", "NONE")
         decision, reason, policy_version, matched_rules = self.policy_evaluator.evaluate(
@@ -328,11 +362,13 @@ class ActionGateway:
             matched_rules=matched_rules
         )
 
-    def process_human_approval_resume(self, approval_id: str, approver_id: str) -> Dict[str, Any]:
+    def process_human_approval_resume(self, approval_id: str, approver_id: str, provided_token: Optional[str] = None) -> Dict[str, Any]:
         """Resumes processing after human supervisor approves a pending request with complete re-validation (#11)."""
         app_record = self.approval_manager.get_approval_by_id(approval_id)
         if not app_record or app_record.get("status") != "PENDING":
             return {"success": False, "message": f"Approval ticket '{approval_id}' not found or not pending."}
+
+        token_to_pass = provided_token or app_record.get("approval_token")
 
         request_id = app_record["request_id"]
         agent_id = app_record["agent_id"]
@@ -387,7 +423,7 @@ class ActionGateway:
             )
 
         # NOW consume and mark ticket as approved
-        ok, app_record, msg = self.approval_manager.approve_request(approval_id, approver_id)
+        ok, app_record, msg = self.approval_manager.approve_request(approval_id, approver_id, provided_token=token_to_pass)
         if not ok or not app_record:
             return {"success": False, "message": msg}
 

@@ -89,6 +89,20 @@ class RiskEvaluator:
         except Exception:
             pass
 
+        # 8. Prompt Injection Risk Factor
+        try:
+            from risk_engine.prompt_injection_guard import PromptInjectionGuard
+            payload_to_scan = {
+                "action": action,
+                "parameters": {"resource": resource, "amount": str(amount)}
+            }
+            detected, penalty, matched_patterns = PromptInjectionGuard.evaluate_payload(payload_to_scan)
+            if detected:
+                risk_score += penalty
+                factors.append(f"prompt_injection_detected:{','.join(matched_patterns[:2])}")
+        except Exception:
+            pass
+
         # Cap score between 0 and 100
         risk_score = min(max(risk_score, 0), 100)
 

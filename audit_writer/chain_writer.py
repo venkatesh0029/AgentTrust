@@ -137,6 +137,17 @@ class AuditChainWriter:
                 previous_record_hash=prev_hash
             )
             self._records.append(record)
+            try:
+                from fabric.persistent_db import PersistentStorageEngine
+                PersistentStorageEngine().save_block(
+                    previous_hash=prev_hash,
+                    block_hash=record.record_hash,
+                    tx_count=1,
+                    block_data=record.to_dict(),
+                    timestamp=record.timestamp
+                )
+            except Exception:
+                pass
             return record
 
     def get_chain(self) -> List[Dict[str, Any]]:

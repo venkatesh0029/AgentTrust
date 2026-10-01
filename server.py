@@ -34,9 +34,15 @@ from identity_manager.jwt_auth import JWTAuthManager
 
 # Operational Mode & Environment Configuration
 CURRENT_MODE = os.environ.get("AGENTTRUST_MODE", "MODE_D_AGENTTRUST_FABRIC")
-GATEWAY_SECRET = os.environ.get("GATEWAY_SECRET", "AGENTTRUST_GATEWAY_HMAC_SECRET_v2_2026")
-DEMO_MODE = os.environ.get("AGENTTRUST_DEMO_MODE", "true").lower() in ("true", "1", "yes")
-ALLOW_RUNTIME_MODE_CHANGE = os.environ.get("AGENTTRUST_ALLOW_MODE_CHANGE", "true").lower() in ("true", "1", "yes")
+_ENV_GATEWAY_SECRET = os.environ.get("GATEWAY_SECRET")
+if not _ENV_GATEWAY_SECRET:
+    import secrets
+    GATEWAY_SECRET = secrets.token_hex(32)
+else:
+    GATEWAY_SECRET = _ENV_GATEWAY_SECRET
+
+DEMO_MODE = os.environ.get("AGENTTRUST_DEMO_MODE", "false").lower() in ("true", "1", "yes")
+ALLOW_RUNTIME_MODE_CHANGE = os.environ.get("AGENTTRUST_ALLOW_MODE_CHANGE", "false").lower() in ("true", "1", "yes")
 
 # Initialize Core Services
 cert_manager = CertificateManager(ca_common_name="AgentTrust Root CA")
@@ -110,10 +116,10 @@ app.add_middleware(
 )
 
 # --- RBAC & JWT Helper Dependency ---
-def check_admin_permission(required_permission: str, x_admin_role: Optional[str] = None, authorization: Optional[str] = None):
+def check_admin_permission(required_permission: str, x_admin_role: Optional[str] = None, authorization: Optional[str] = None) -> AdminRole:
     role_str = None
 
-    # First check JWT Authorization header
+    # 1. First check JWT Authorization header
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split("Bearer ", 1)[1].strip()
         try:
@@ -125,7 +131,7 @@ def check_admin_permission(required_permission: str, x_admin_role: Optional[str]
                 detail=f"JWT Authentication Failure: {str(e)}"
             )
 
-    # Fallback to X-Admin-Role header
+    # 2. Check X-Admin-Role header
     if not role_str and x_admin_role:
         if x_admin_role.startswith("eyJ"): # Standard JWT header prefix
             try:
@@ -169,6 +175,31 @@ def check_admin_permission_dep(required_permission: str):
     return _dependency
 
 # --- Pydantic API Models ---
+class LoginRequest(BaseModel):
+    username: str = Field(default="admin", description="Administrator or User Username")
+    password: Optional[str] = Field(default="", description="Password")
+    role: str = Field(default="SYSTEM_ADMIN", description="Requested Admin Role")
+
+@app.post("/auth/login", response_model=Dict[str, Any], tags=["Authentication"])
+@app.post("/api/v1/auth/login", response_model=Dict[str, Any], tags=["Authentication"])
+def login_for_access_token(req: LoginRequest):
+    """
+    Issues signed JWT access token for administrative actions.
+    """
+    try:
+        admin_role = AdminRole(req.role)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"Invalid Admin Role '{req.role}'. Must be one of {[r.value for r in AdminRole]}")
+    
+    token = JWTAuthManager.create_admin_token(role=admin_role.value, identity_id=req.username)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": 28800,
+        "role": admin_role.value,
+        "identity": req.username
+    }
+
 class ModeRequest(BaseModel):
     mode: str
 
