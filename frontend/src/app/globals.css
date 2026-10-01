@@ -1,5 +1,29 @@
 @import "tailwindcss";
 
+@theme {
+  --color-bg: #0a0d12;
+  --color-surface: #0f141b;
+  --color-surface-2: #151c26;
+  --color-border: #1f2a37;
+  --color-border-strong: #2b3a4d;
+
+  --color-fg: #e6edf3;
+  --color-muted: #8b98a9;
+  --color-subtle: #5b6878;
+
+  --color-emerald-accent: #34d399;
+  --color-accent-fg: #04130d;
+
+  --color-allowed: #34d399;
+  --color-held: #fbbf24;
+  --color-blocked: #f87171;
+  --color-info: #60a5fa;
+  --color-tamper: #f43f5e;
+
+  --font-sans: var(--font-inter), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-mono), monospace;
+}
+
 @layer base {
   :root {
     --bg: #0a0d12;
@@ -23,24 +47,24 @@
   }
 
   .light {
-    --bg: #f8fafc;
-    --surface: #ffffff;
-    --surface-2: #f1f5f9;
-    --border: #e2e8f0;
-    --border-strong: #cbd5e1;
+    --bg: #0b1120;
+    --surface: #0f172a;
+    --surface-2: #1e293b;
+    --border: #334155;
+    --border-strong: #475569;
 
-    --fg: #0f172a;
-    --muted: #475569;
+    --fg: #f8fafc;
+    --muted: #94a3b8;
     --subtle: #64748b;
 
-    --emerald: #059669;
-    --accent-fg: #ffffff;
+    --emerald: #34d399;
+    --accent-fg: #04130d;
 
-    --allowed: #059669;
-    --held: #d97706;
-    --blocked: #dc2626;
-    --info: #2563eb;
-    --tamper: #e11d48;
+    --allowed: #34d399;
+    --held: #fbbf24;
+    --blocked: #f87171;
+    --info: #60a5fa;
+    --tamper: #f43f5e;
   }
 }
 
@@ -78,15 +102,43 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Glow Effects */
+.glow-emerald {
+  box-shadow: 0 0 25px -5px rgba(52, 211, 153, 0.25);
+}
+
+.glow-amber {
+  box-shadow: 0 0 25px -5px rgba(251, 191, 36, 0.25);
+}
+
+.glow-rose {
+  box-shadow: 0 0 25px -5px rgba(248, 113, 113, 0.25);
+}
+
+.glow-blue {
+  box-shadow: 0 0 25px -5px rgba(96, 165, 250, 0.25);
+}
+
 /* Glassmorphic Overlay */
 .glass-header {
   background: rgba(15, 20, 27, 0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
-.light .glass-header {
-  background: rgba(255, 255, 255, 0.85);
+.glass-card {
+  background: rgba(15, 20, 27, 0.65);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+}
+
+/* Animated Gradient Borders */
+@keyframes border-glow {
+  0%, 100% { border-color: rgba(52, 211, 153, 0.4); }
+  50% { border-color: rgba(96, 165, 250, 0.4); }
+}
+
+.animate-glow-border {
+  animation: border-glow 4s ease-in-out infinite;
 }

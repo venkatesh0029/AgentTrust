@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { Badge } from "@/components/ui/primitives";
-import { Copy, Check, Cpu, AlertTriangle, Layers, Server } from "lucide-react";
+import { Copy, Check, Cpu, AlertTriangle, Layers, Server, ArrowRight, ShieldCheck, ShieldAlert } from "lucide-react";
 
 // 1. DECISION PILL
 export function DecisionPill({ decision, reason }: { decision?: string; reason?: string }) {
@@ -63,7 +63,7 @@ export function HashText({
     <span
       onClick={handleCopy}
       title={`Click to copy: ${targetHash}`}
-      className="inline-flex items-center gap-1.5 font-mono text-xs px-2 py-0.5 rounded bg-[var(--surface-2)] text-[var(--emerald)] border border-[var(--border)] cursor-pointer hover:border-[var(--emerald)]/50 transition-colors group"
+      className="inline-flex items-center gap-1.5 font-mono text-xs px-2.5 py-1 rounded-md bg-[var(--surface-2)] text-[var(--emerald)] border border-[var(--border)] cursor-pointer hover:border-[var(--emerald)]/50 transition-all hover:scale-[1.02] shadow-sm group"
     >
       <span>{truncated}</span>
       {copied ? (
@@ -90,20 +90,20 @@ export function StatCard({
   variant?: "emerald" | "held" | "blocked" | "info" | "default";
 }) {
   const borderColors = {
-    emerald: "border-l-4 border-l-[var(--emerald)]",
-    held: "border-l-4 border-l-[var(--held)]",
-    blocked: "border-l-4 border-l-[var(--blocked)]",
-    info: "border-l-4 border-l-[var(--info)]",
+    emerald: "border-l-4 border-l-[var(--emerald)] glow-emerald",
+    held: "border-l-4 border-l-[var(--held)] glow-amber",
+    blocked: "border-l-4 border-l-[var(--blocked)] glow-rose",
+    info: "border-l-4 border-l-[var(--info)] glow-blue",
     default: "border border-[var(--border)]",
   };
 
   return (
-    <div className={`rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 ${borderColors[variant]} shadow-sm`}>
-      <div className="flex items-center justify-between text-[var(--muted)] text-xs font-medium mb-2">
+    <div className={`rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 ${borderColors[variant]} transition-all hover:border-[var(--border-strong)] shadow-sm`}>
+      <div className="flex items-center justify-between text-[var(--muted)] text-xs font-medium mb-2 tracking-wide uppercase font-mono">
         <span>{title}</span>
         {Icon && <Icon className="w-4 h-4 text-[var(--subtle)]" />}
       </div>
-      <div className="text-2xl font-bold font-mono text-[var(--fg)] tracking-tight mb-1">
+      <div className="text-3xl font-extrabold font-mono text-[var(--fg)] tracking-tight mb-1">
         {value}
       </div>
       {subtext && <div className="text-xs text-[var(--muted)] font-mono">{subtext}</div>}
@@ -114,9 +114,10 @@ export function StatCard({
 // 4. MODE BADGE (Honest Ledger Status)
 export function ModeBadge({ mode }: { mode?: string }) {
   return (
-    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] font-mono text-xs text-[var(--fg)]">
+    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] font-mono text-xs text-[var(--fg)] shadow-sm">
+      <span className="w-2 h-2 rounded-full bg-[var(--emerald)] animate-pulse"></span>
       <Server className="w-3.5 h-3.5 text-[var(--emerald)]" />
-      <span>Ledger: local simulator</span>
+      <span className="font-medium">Ledger: local simulator</span>
       <span className="text-[10px] text-[var(--muted)] font-normal">({mode || "MODE_D"})</span>
     </div>
   );
@@ -138,15 +139,15 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center p-12 text-center border border-dashed border-[var(--border)] rounded-xl bg-[var(--surface)]/50">
-      <div className="w-12 h-12 rounded-full bg-[var(--surface-2)] flex items-center justify-center text-[var(--muted)] mb-3">
+      <div className="w-12 h-12 rounded-full bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-[var(--emerald)] mb-3 shadow-inner">
         <Icon className="w-6 h-6" />
       </div>
-      <h4 className="text-sm font-semibold text-[var(--fg)] mb-1">{title}</h4>
-      <p className="text-xs text-[var(--muted)] max-w-sm mb-4">{description}</p>
+      <h4 className="text-base font-semibold text-[var(--fg)] mb-1">{title}</h4>
+      <p className="text-xs text-[var(--muted)] max-w-sm mb-4 leading-relaxed">{description}</p>
       {actionLabel && onAction && (
         <button
           onClick={onAction}
-          className="px-4 py-2 rounded-lg bg-[var(--emerald)] text-[var(--accent-fg)] font-semibold text-xs hover:opacity-90 transition-opacity"
+          className="px-4 py-2 rounded-lg bg-[var(--emerald)] text-[var(--accent-fg)] font-semibold text-xs hover:opacity-90 transition-opacity shadow-sm"
         >
           {actionLabel}
         </button>
@@ -158,11 +159,11 @@ export function EmptyState({
 // 6. SANDBOX WARNING BANNER
 export function SandboxBanner() {
   return (
-    <div className="mb-6 p-4 rounded-xl border border-[var(--held)]/30 bg-[var(--held)]/10 text-[var(--held)] flex items-start gap-3">
+    <div className="mb-6 p-4 rounded-xl border border-[var(--held)]/40 bg-[var(--held)]/10 text-[var(--held)] flex items-start gap-3 shadow-sm">
       <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
       <div>
         <h4 className="text-sm font-bold">Sandbox Testing Environment</h4>
-        <p className="text-xs text-[var(--held)]/90 mt-0.5">
+        <p className="text-xs text-[var(--held)]/90 mt-0.5 leading-relaxed">
           This section contains sandbox controls (such as off-chain evidence tamper simulation and operational mode switching).
           Actions taken here simulate attack scenarios for security verification and will trigger chain validation warnings.
         </p>
@@ -195,28 +196,34 @@ export function PipelineStrip({
   stoppedStage?: number;
   reasonCode?: string;
 }) {
-  // If no stage passed, default to all stages passed (or 13 if stoppedStage is undefined)
   const lastActive = stoppedStage !== undefined ? stoppedStage : 13;
 
   return (
-    <div className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl p-5 mb-6">
+    <div className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl p-5 mb-6 shadow-sm relative overflow-hidden">
       <div className="flex items-center justify-between mb-4 pb-3 border-b border-[var(--border)]">
-        <div className="flex items-center gap-2">
-          <Cpu className="w-4 h-4 text-[var(--emerald)]" />
-          <h3 className="font-semibold text-sm">13-Stage Action Gateway Pipeline</h3>
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-[var(--emerald)]">
+            <Cpu className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="font-bold text-sm text-[var(--fg)]">13-Stage Action Gateway Pipeline</h3>
+            <p className="text-[11px] text-[var(--muted)]">Sequential Zero-Trust Security Verification Gateways</p>
+          </div>
         </div>
         {stoppedStage !== undefined && stoppedStage < 13 ? (
-          <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-[var(--blocked)]/15 text-[var(--blocked)] border border-[var(--blocked)]/30">
+          <span className="text-xs font-mono px-3 py-1 rounded-full bg-[var(--blocked)]/15 text-[var(--blocked)] border border-[var(--blocked)]/30 font-semibold flex items-center gap-1.5">
+            <ShieldAlert className="w-3.5 h-3.5" />
             Stopped at Stage {stoppedStage}: {reasonCode || "REJECTED"}
           </span>
         ) : (
-          <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-[var(--allowed)]/15 text-[var(--allowed)] border border-[var(--allowed)]/30">
+          <span className="text-xs font-mono px-3 py-1 rounded-full bg-[var(--allowed)]/15 text-[var(--allowed)] border border-[var(--allowed)]/30 font-semibold flex items-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5" />
             Pipeline Passed (13/13)
           </span>
         )}
       </div>
 
-      {/* Horizontal Node Flow */}
+      {/* Grid Stages with Glowing Nodes */}
       <div className="grid grid-cols-2 md:grid-cols-7 lg:grid-cols-13 gap-2">
         {STAGES_LIST.map((stg) => {
           const isPassed = stg.id <= lastActive;
@@ -224,9 +231,9 @@ export function PipelineStrip({
 
           let statusBg = "bg-[var(--surface-2)] text-[var(--muted)] border-[var(--border)]";
           if (isFailedStage) {
-            statusBg = "bg-[var(--blocked)]/20 text-[var(--blocked)] border-[var(--blocked)] font-bold animate-pulse";
+            statusBg = "bg-red-950/40 text-red-400 border-red-500 font-bold animate-pulse shadow-[0_0_15px_rgba(248,113,113,0.3)]";
           } else if (isPassed) {
-            statusBg = "bg-[var(--emerald)]/15 text-[var(--emerald)] border-[var(--emerald)]/40";
+            statusBg = "bg-emerald-950/30 text-emerald-400 border-emerald-500/40 font-medium shadow-[0_0_10px_rgba(52,211,153,0.1)]";
           }
 
           return (
