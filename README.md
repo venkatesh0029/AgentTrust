@@ -4,7 +4,6 @@
 
 **Verifiable identity, bounded authorization, and tamper-evident accountability for autonomous AI agents.**
 
-
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&logoColor=white)
@@ -374,4 +373,8 @@ If you use AgentTrust in academic work, please cite:
 
 ## Author
 
+<<<<<<< HEAD
 **Venkatesh** ([@venkatesh0029](https://github.com/venkatesh0029)), B.Tech CSE (Blockchain Technology), SRM Institute of Science and Technology.
+=======
+**Venkatesh** ([@venkatesh0029](https://github.com/venkatesh0029)), B.Tech CSE (Blockchain Technology), SRM Institute of Science and Technology.
+>>>>>>> 69e6a14 (fix(security): resolve 11 critical loopholes, implement intent-bound MCP execution, JWT auth endpoints, delegation verification, SQLite restart persistence, and 86-test regression suite)

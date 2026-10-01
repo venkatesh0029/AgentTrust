@@ -16,12 +16,32 @@ class CertificateManager:
     Manages Root Certificate Authority (CA) and X.509 Certificate issuance/validation for AI Agents.
     """
 
-    def __init__(self, ca_common_name: str = "AgentTrust Root CA"):
+    def __init__(self, ca_common_name: str = "AgentTrust Root CA", db_path: str = "agenttrust_persistent.db"):
         self.ca_common_name = ca_common_name
-        self.ca_private_key = KeyManager.generate_key_pair(2048)
-        self.ca_certificate = self._generate_root_ca_certificate()
+        self.db_path = db_path
+        
+        # Load or initialize Root CA credentials from PersistentStorageEngine
+        try:
+            from fabric.persistent_db import PersistentStorageEngine
+            self.storage = PersistentStorageEngine(db_path)
+            existing_ca = self.storage.get_ca_credentials("root_ca")
+        except Exception:
+            self.storage = None
+            existing_ca = None
+
+        if existing_ca:
+            self.ca_private_key = KeyManager.pem_to_private_key(existing_ca["private_key_pem"])
+            self.ca_certificate = x509.load_pem_x509_certificate(existing_ca["certificate_pem"].encode('utf-8'))
+        else:
+            self.ca_private_key = KeyManager.generate_key_pair(2048)
+            self.ca_certificate = self._generate_root_ca_certificate()
+            if self.storage:
+                key_pem = KeyManager.private_key_to_pem(self.ca_private_key)
+                cert_pem = self.ca_certificate.public_bytes(serialization.Encoding.PEM).decode('utf-8')
+                self.storage.save_ca_credentials("root_ca", key_pem, cert_pem)
+
         self.ca_public_key = self.ca_certificate.public_key()
-        self.revoked_fingerprints = set()
+        self.revoked_fingerprints = self.storage.get_crl_revocations() if self.storage else set()
 
     def _generate_root_ca_certificate(self) -> x509.Certificate:
         """Generates self-signed X.509 Root CA certificate."""
@@ -46,8 +66,11 @@ class CertificateManager:
         return cert
 
     def revoke_certificate(self, fingerprint: str) -> bool:
-        """Adds a certificate fingerprint to the Certificate Revocation List (CRL)."""
-        self.revoked_fingerprints.add(fingerprint.upper())
+        """Adds a certificate fingerprint to the Certificate Revocation List (CRL) and persists to SQLite."""
+        fp_upper = fingerprint.upper()
+        self.revoked_fingerprints.add(fp_upper)
+        if self.storage:
+            self.storage.save_crl_revocation(fp_upper)
         return True
 
     def is_revoked(self, fingerprint: str) -> bool:

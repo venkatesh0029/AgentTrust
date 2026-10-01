@@ -100,7 +100,9 @@ class HumanApprovalManager:
         if token in self._used_approval_tokens:
             return False, None, "APPROVAL_TOKEN_ALREADY_USED"
 
-        if provided_token and provided_token != token:
+        if not provided_token:
+            return False, None, "MISSING_APPROVAL_TOKEN"
+        if provided_token != token:
             return False, None, "INVALID_APPROVAL_TOKEN"
 
         # Check expiration
