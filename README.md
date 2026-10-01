@@ -4,7 +4,7 @@
 
 **Verifiable identity, bounded authorization, and tamper-evident accountability for autonomous AI agents.**
 
-[[CI](https://github.com/venkatesh0029/AgentTrust/actions/workflows/ci.yml/badge.svg)](https://github.com/venkatesh0029/AgentTrust/actions/workflows/ci.yml)
+[![CI](https://github.com/venkatesh0029/AgentTrust/actions/workflows/ci.yml/badge.svg)])
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&logoColor=white)
