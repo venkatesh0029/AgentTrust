@@ -97,6 +97,26 @@ class PersistentStorageEngine:
                 )
             """)
 
+            # 7. Human Approvals Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS human_approvals (
+                    approval_id TEXT PRIMARY KEY,
+                    request_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    approval_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+
+            # 8. Delegation Revocations Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS delegation_revocations (
+                    token_id TEXT PRIMARY KEY,
+                    revoked_at TEXT NOT NULL
+                )
+            """)
+
             conn.commit()
             conn.close()
 
@@ -230,3 +250,78 @@ class PersistentStorageEngine:
             conn.commit()
             conn.close()
             return block_id or 1
+
+    def list_evidence(self) -> list[dict[str, Any]]:
+        """Retrieves all persisted evidence records."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT evidence_json FROM evidence_store")
+            rows = cursor.fetchall()
+            conn.close()
+            res = []
+            for r in rows:
+                try:
+                    res.append(json.loads(r["evidence_json"]))
+                except Exception:
+                    pass
+            return res
+
+    def save_approval(self, approval_id: str, request_id: str, agent_id: str, status: str, approval_data: dict[str, Any]) -> None:
+        """Persists a human approval ticket record."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO human_approvals (
+                    approval_id, request_id, agent_id, status, approval_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                approval_id,
+                request_id,
+                agent_id,
+                status,
+                json.dumps(approval_data),
+                approval_data.get("created_at", "")
+            ))
+            conn.commit()
+            conn.close()
+
+    def list_approvals(self) -> list[dict[str, Any]]:
+        """Retrieves all human approval records."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT approval_json FROM human_approvals")
+            rows = cursor.fetchall()
+            conn.close()
+            res = []
+            for r in rows:
+                try:
+                    res.append(json.loads(r["approval_json"]))
+                except Exception:
+                    pass
+            return res
+
+    def save_delegation_revocation(self, token_id: str) -> None:
+        """Persists a revoked delegation token ID."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO delegation_revocations (token_id, revoked_at)
+                VALUES (?, ?)
+            """, (token_id, datetime.datetime.now(datetime.timezone.utc).isoformat()))
+            conn.commit()
+            conn.close()
+
+    def get_delegation_revocations(self) -> set[str]:
+        """Retrieves all revoked delegation token IDs."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT token_id FROM delegation_revocations")
+            rows = cursor.fetchall()
+            conn.close()
+            return {r["token_id"] for r in rows}
+
