@@ -380,7 +380,19 @@ class ActionGateway:
         approval_ref = app_record["approval_reference"]
         amount = float(parameters.get("amount", 0))
 
-        # Re-check Agent Identity & Status BEFORE consuming ticket
+        # 1. Check Approval Expiration
+        expires_at = app_record.get("expires_at")
+        if expires_at:
+            exp_dt = datetime.datetime.fromisoformat(expires_at)
+            if datetime.datetime.now(datetime.timezone.utc) > exp_dt:
+                return self._finalize_gateway_outcome(
+                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                    reason="APPROVAL_TICKET_EXPIRED", policy_id=policy_id, policy_version="1.0",
+                    agent_version="1.0", api_result="NOT_EXECUTED"
+                )
+
+        # 2. Re-check Agent Identity, Status & Certificate BEFORE consuming ticket
         agent_record = self.registry.get_agent(agent_id)
         if not agent_record or agent_record.get("status") != "ACTIVE":
             curr_status = agent_record.get("status", "UNKNOWN") if agent_record else "UNREGISTERED"
@@ -398,14 +410,38 @@ class ActionGateway:
                 api_result="NOT_EXECUTED"
             )
 
-        # Re-evaluate Policy against current active policy rules BEFORE consuming ticket
+        cert_pem = agent_record.get("certificate")
+        if cert_pem:
+            cert_val = self.cert_manager.verify_agent_certificate(cert_pem)
+            if not cert_val.get("valid"):
+                return self._finalize_gateway_outcome(
+                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                    reason=f"CERTIFICATE_INVALID_ON_RESUME ({cert_val.get('reason')})",
+                    policy_id=policy_id, policy_version="1.0", agent_version="1.0",
+                    api_result="NOT_EXECUTED"
+                )
+
+        # 3. Re-evaluate Risk Engine
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        risk_res = RiskEvaluator.evaluate(
+            agent_id=agent_id,
+            action=action,
+            resource=resource,
+            amount=amount,
+            agent_record=agent_record,
+            request_timestamp_iso=now_iso
+        )
+
+        # 4. Re-evaluate Policy against current active policy rules & risk BEFORE consuming ticket
         dec, rsn, pver, rules = self.policy_evaluator.evaluate(
             policy_id=policy_id,
             action=action,
             resource=resource,
             amount=amount,
-            request_timestamp_iso=now_iso
+            request_timestamp_iso=now_iso,
+            risk_score=risk_res.get("risk_score", 0.0),
+            risk_level=risk_res.get("risk_level", "LOW")
         )
 
         if dec == PolicyDecision.BLOCKED:
@@ -422,6 +458,20 @@ class ActionGateway:
                 agent_version=agent_record.get("agent_version", "1.0"),
                 api_result="NOT_EXECUTED"
             )
+
+        # 5. Re-check Delegation Token if present
+        del_token = parameters.get("delegation_token")
+        if del_token and isinstance(del_token, dict):
+            from identity_manager.delegation import DelegationTokenManager
+            issuer_pub = agent_record.get("public_key", "")
+            del_res = DelegationTokenManager.verify_delegation_chain(del_token, action, amount, issuer_pub, requesting_agent_id=agent_id)
+            if not del_res.get("valid"):
+                return self._finalize_gateway_outcome(
+                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                    reason=f"DELEGATION_RECHECK_FAILED: {del_res.get('reason')}", policy_id=policy_id,
+                    policy_version=pver, agent_version="1.0", api_result="NOT_EXECUTED"
+                )
 
         # NOW consume and mark ticket as approved
         ok, app_record, msg = self.approval_manager.approve_request(approval_id, approver_id, provided_token=token_to_pass)
@@ -458,7 +508,9 @@ class ActionGateway:
             tx_data=exec_res.get("transaction_data"),
             approval_ref=approval_ref,
             cert_fingerprint=cert_fp,
-            nonce=app_record.get("nonce", f"N-RESUME-{request_id}")
+            nonce=app_record.get("nonce", f"N-RESUME-{request_id}"),
+            risk_result=risk_res,
+            matched_rules=rules
         )
 
     def _finalize_gateway_outcome(
@@ -519,16 +571,12 @@ class ActionGateway:
         evidence_record["risk_factors"] = risk_eval["risk_factors"]
         evidence_record["matched_rules"] = rules
 
-        # 2. Save Evidence Off-chain & compute SHA-256 Hash
-        evidence_hash = self.evidence_store.save_evidence(evidence_record)
-        evidence_ref = evidence_record["evidence_id"]
-
-        # 3. Write Atomic Hash Chain Record (Concurrency-Safe)
+        # 2. Write Atomic Hash Chain Record FIRST so chain metadata is attached before hashing evidence
         chain_record = self.chain_writer.write_event(
             event_type=f"ACTION_{decision}",
             request_id=request_id,
             agent_id=agent_id,
-            request_hash=evidence_record.get("input_hash", evidence_hash),
+            request_hash=evidence_record.get("input_hash", "0"),
             risk_score=risk_eval["risk_score"],
             policy_version=policy_version,
             decision=decision,
@@ -539,6 +587,10 @@ class ActionGateway:
         evidence_record["sequence_number"] = chain_record.sequence_number
         evidence_record["previous_record_hash"] = chain_record.previous_record_hash
         evidence_record["record_hash"] = chain_record.record_hash
+
+        # 3. Save Evidence Off-chain & compute SHA-256 Hash AFTER attaching audit chain metadata (#5)
+        evidence_hash = self.evidence_store.save_evidence(evidence_record)
+        evidence_ref = evidence_record["evidence_id"]
 
         # 4. Commit Audit Event onto Hyperledger Fabric Blockchain Ledger with Failure Handling
         ledger_status = "COMMITTED"
