@@ -5,9 +5,11 @@ Enforces Intent-Bound Execution: verifies that executed tool_name and arguments
 are cryptographically bound to the signed agenttrust_payload.
 """
 
-import json
-from typing import Dict, Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
+
 from action_gateway.gateway import ActionGateway
+
 
 class MCPGovernanceGateway:
     """
@@ -20,9 +22,9 @@ class MCPGovernanceGateway:
 
     def handle_mcp_tool_call(
         self,
-        mcp_request: Dict[str, Any],
-        tool_executor: Callable[[str, Dict[str, Any]], Any]
-    ) -> Dict[str, Any]:
+        mcp_request: dict[str, Any],
+        tool_executor: Callable[[str, dict[str, Any]], Any]
+    ) -> dict[str, Any]:
         """
         Processes an incoming MCP tool call with Intent-Bound Execution.
         """

@@ -1,8 +1,9 @@
+import datetime
 import hashlib
 import json
-import datetime
 import threading
-from typing import Dict, Any, List, Optional
+from typing import Any
+
 
 class AuditChainRecord:
     """Canonical Immutable Audit Event record in the hash chain."""
@@ -20,7 +21,7 @@ class AuditChainRecord:
         decision: str,
         execution_result: str,
         previous_record_hash: str,
-        timestamp: Optional[str] = None
+        timestamp: str | None = None
     ):
         self.event_id = event_id
         self.sequence_number = sequence_number
@@ -54,7 +55,7 @@ class AuditChainRecord:
         json_bytes = json.dumps(data, sort_keys=True, separators=(',', ':')).encode('utf-8')
         return hashlib.sha256(json_bytes).hexdigest()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "event_id": self.event_id,
             "sequence_number": self.sequence_number,
@@ -80,7 +81,7 @@ class AuditChainWriter:
     GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
 
     def __init__(self):
-        self._records: List[AuditChainRecord] = []
+        self._records: list[AuditChainRecord] = []
         self._lock = threading.Lock()
         self._current_sequence = 0
         # Initialize Genesis Record
@@ -112,7 +113,7 @@ class AuditChainWriter:
         policy_version: str,
         decision: str,
         execution_result: str,
-        event_id: Optional[str] = None
+        event_id: str | None = None
     ) -> AuditChainRecord:
         """
         Thread-safe atomic append of an audit record to the hash chain.
@@ -150,11 +151,11 @@ class AuditChainWriter:
                 pass
             return record
 
-    def get_chain(self) -> List[Dict[str, Any]]:
+    def get_chain(self) -> list[dict[str, Any]]:
         with self._lock:
             return [r.to_dict() for r in self._records]
 
-    def verify_chain_integrity(self) -> Dict[str, Any]:
+    def verify_chain_integrity(self) -> dict[str, Any]:
         """
         Verifies entire hash chain from Genesis to latest block.
         Detects historical tampering or sequence gaps.

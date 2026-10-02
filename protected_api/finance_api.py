@@ -1,19 +1,21 @@
 import datetime
-from typing import Dict, Any, List, Optional
+from typing import Any
+
 from identity_manager.key_manager import KeyManager
 from identity_manager.signature_manager import SignatureManager
+
 
 class ProcurementService:
     """Mock Finance & Procurement Database & Business Logic."""
 
     def __init__(self):
-        self._reimbursements: Dict[str, Dict[str, Any]] = {}
-        self._purchase_orders: Dict[str, Dict[str, Any]] = {}
-        self._fund_transfers: Dict[str, Dict[str, Any]] = {}
+        self._reimbursements: dict[str, dict[str, Any]] = {}
+        self._purchase_orders: dict[str, dict[str, Any]] = {}
+        self._fund_transfers: dict[str, dict[str, Any]] = {}
 
     def create_purchase_order(
-        self, request_id: str, agent_id: str, supplier_id: str, item_name: str, amount: float, approval_ref: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, request_id: str, agent_id: str, supplier_id: str, item_name: str, amount: float, approval_ref: str | None = None
+    ) -> dict[str, Any]:
         po_id = f"PO-{len(self._purchase_orders) + 5001}"
         record = {
             "po_id": po_id,
@@ -30,12 +32,12 @@ class ProcurementService:
         self._purchase_orders[po_id] = record
         return record
 
-    def get_purchase_order(self, po_id: str) -> Optional[Dict[str, Any]]:
+    def get_purchase_order(self, po_id: str) -> dict[str, Any] | None:
         return self._purchase_orders.get(po_id)
 
     def create_fund_transfer(
-        self, request_id: str, agent_id: str, target_account: str, amount: float, approval_ref: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, request_id: str, agent_id: str, target_account: str, amount: float, approval_ref: str | None = None
+    ) -> dict[str, Any]:
         tx_id = f"TX-TRANSFER-{len(self._fund_transfers) + 2001}"
         record = {
             "transaction_id": tx_id,
@@ -52,8 +54,8 @@ class ProcurementService:
         return record
 
     def create_reimbursement(
-        self, request_id: str, agent_id: str, employee_id: str, amount: float, approval_ref: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, request_id: str, agent_id: str, employee_id: str, amount: float, approval_ref: str | None = None
+    ) -> dict[str, Any]:
         tx_id = f"TX-REIMB-{len(self._reimbursements) + 1001}"
         record = {
             "transaction_id": tx_id,
@@ -83,14 +85,14 @@ class ProtectedFinanceAPI:
 
     def __init__(self):
         self.service = ProcurementService()
-        self._idempotency_cache: Dict[str, Dict[str, Any]] = {}
+        self._idempotency_cache: dict[str, dict[str, Any]] = {}
         # Generate Gateway Service RSA Keypair for Service-to-Service mTLS/Signing
         self.gateway_service_private_key = KeyManager.generate_key_pair(2048)
         self.gateway_service_public_key_pem = KeyManager.public_key_to_pem(
             self.gateway_service_private_key.public_key()
         )
 
-    def create_gateway_auth_headers(self, request_id: str) -> Dict[str, str]:
+    def create_gateway_auth_headers(self, request_id: str) -> dict[str, str]:
         """Helper for Action Gateway to generate signed service-to-service headers."""
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
         payload = {
@@ -111,14 +113,14 @@ class ProtectedFinanceAPI:
     def execute_action(
         self,
         action: str,
-        parameters: Dict[str, Any],
+        parameters: dict[str, Any],
         gateway_token: str,
         request_id: str,
         agent_id: str,
-        approval_ref: Optional[str] = None,
-        auth_headers: Optional[Dict[str, str]] = None,
-        idempotency_key: Optional[str] = None
-    ) -> Dict[str, Any]:
+        approval_ref: str | None = None,
+        auth_headers: dict[str, str] | None = None,
+        idempotency_key: str | None = None
+    ) -> dict[str, Any]:
         """
         Executes protected business API operation.
         Verifies gateway token and service-to-service signature.

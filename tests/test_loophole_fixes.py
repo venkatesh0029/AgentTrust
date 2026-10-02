@@ -5,29 +5,29 @@ SQLite restart persistence, mandatory approval tokens, prompt injection normaliz
 and honest Fabric simulator status.
 """
 
-import pytest
-import tempfile
 import os
+import tempfile
+
+import pytest
 from fastapi.testclient import TestClient
 
-from server import app, DEMO_MODE
-from identity_manager.jwt_auth import JWTAuthManager
-from identity_manager.certificate_manager import CertificateManager
-from identity_manager.key_manager import KeyManager
+from action_gateway.gateway import ActionGateway
+from action_gateway.mcp_gateway import MCPGovernanceGateway
 from agent_registry.identity_store import IdentityStore
 from agent_registry.registration import AgentRegistry
-from action_gateway.mcp_gateway import MCPGovernanceGateway
-from action_gateway.gateway import ActionGateway
-from identity_manager.delegation import DelegationTokenManager
-from risk_engine.prompt_injection_guard import PromptInjectionGuard
+from evidence_manager.evidence_store import EvidenceStore
 from fabric.fabric_client import FabricClient
 from human_approval.approval_manager import HumanApprovalManager
+from identity_manager.certificate_manager import CertificateManager
+from identity_manager.delegation import DelegationTokenManager
+from identity_manager.jwt_auth import JWTAuthManager
+from identity_manager.key_manager import KeyManager
 from policy_engine.policy_evaluator import PolicyEvaluator
 from policy_engine.policy_loader import PolicyLoader
-from policy_engine.policy_models import PolicyRecord
 from protected_api.finance_api import ProtectedFinanceAPI
 from replay_protection.request_tracker import RequestTracker
-from evidence_manager.evidence_store import EvidenceStore
+from risk_engine.prompt_injection_guard import PromptInjectionGuard
+from server import app
 
 client = TestClient(app)
 
@@ -56,7 +56,7 @@ def test_mcp_intent_bound_execution_confused_deputy_prevention():
     id_store = IdentityStore()
     registry = AgentRegistry(cert_mgr, id_store)
 
-    agent_reg = registry.register_agent(
+    registry.register_agent(
         agent_id="MCP-AGENT-001",
         agent_name="MCPAgent",
         owner="OrgA",

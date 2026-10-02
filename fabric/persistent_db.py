@@ -4,12 +4,12 @@ Provides SQLite database persistence for CA certificates, Agent Registry, Replay
 Off-Chain Evidence Records, CRL Revocations, and Block Ledger State across server restarts.
 """
 
-import sqlite3
-import json
-import threading
-import os
 import datetime
-from typing import Dict, Any, List, Optional, Set
+import json
+import sqlite3
+import threading
+from typing import Any
+
 
 class PersistentStorageEngine:
     """
@@ -100,7 +100,7 @@ class PersistentStorageEngine:
             conn.commit()
             conn.close()
 
-    def save_agent(self, agent_data: Dict[str, Any]) -> None:
+    def save_agent(self, agent_data: dict[str, Any]) -> None:
         """Persists agent record to SQLite."""
         with self._lock:
             conn = self._get_connection()
@@ -123,7 +123,7 @@ class PersistentStorageEngine:
             conn.commit()
             conn.close()
 
-    def get_agent(self, agent_id: str) -> Optional[Dict[str, Any]]:
+    def get_agent(self, agent_id: str) -> dict[str, Any] | None:
         """Retrieves agent record from SQLite."""
         with self._lock:
             conn = self._get_connection()
@@ -135,7 +135,7 @@ class PersistentStorageEngine:
                 return dict(row)
             return None
 
-    def list_agents(self) -> List[Dict[str, Any]]:
+    def list_agents(self) -> list[dict[str, Any]]:
         """Retrieves all registered agents from SQLite."""
         with self._lock:
             conn = self._get_connection()
@@ -157,7 +157,7 @@ class PersistentStorageEngine:
             conn.commit()
             conn.close()
 
-    def get_crl_revocations(self) -> Set[str]:
+    def get_crl_revocations(self) -> set[str]:
         """Retrieves all revoked certificate fingerprints."""
         with self._lock:
             conn = self._get_connection()
@@ -179,7 +179,7 @@ class PersistentStorageEngine:
             conn.commit()
             conn.close()
 
-    def get_ca_credentials(self, key_id: str = "root_ca") -> Optional[Dict[str, str]]:
+    def get_ca_credentials(self, key_id: str = "root_ca") -> dict[str, str] | None:
         """Retrieves Root CA credentials if persisted."""
         with self._lock:
             conn = self._get_connection()
@@ -191,7 +191,7 @@ class PersistentStorageEngine:
                 return dict(row)
             return None
 
-    def save_evidence(self, evidence_id: str, request_id: str, agent_id: str, evidence_hash: str, evidence_data: Dict[str, Any]) -> None:
+    def save_evidence(self, evidence_id: str, request_id: str, agent_id: str, evidence_hash: str, evidence_data: dict[str, Any]) -> None:
         """Persists off-chain evidence to SQLite."""
         with self._lock:
             conn = self._get_connection()
@@ -211,7 +211,7 @@ class PersistentStorageEngine:
             conn.commit()
             conn.close()
 
-    def save_block(self, previous_hash: str, block_hash: str, tx_count: int, block_data: Dict[str, Any], timestamp: str) -> int:
+    def save_block(self, previous_hash: str, block_hash: str, tx_count: int, block_data: dict[str, Any], timestamp: str) -> int:
         """Persists committed block to SQLite block ledger."""
         with self._lock:
             conn = self._get_connection()

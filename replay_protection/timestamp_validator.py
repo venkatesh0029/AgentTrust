@@ -1,5 +1,5 @@
 import datetime
-from typing import Tuple
+
 
 class TimestampValidator:
     """Validates request timestamp freshness and expiration."""
@@ -7,7 +7,7 @@ class TimestampValidator:
     def __init__(self, window_seconds: int = 120):
         self.window_seconds = window_seconds
 
-    def validate(self, timestamp_iso: str, expires_at_iso: str = "") -> Tuple[bool, str]:
+    def validate(self, timestamp_iso: str, expires_at_iso: str = "") -> tuple[bool, str]:
         """
         Validates timestamp freshness and expiration.
         Returns: (is_valid, reason)
@@ -35,4 +35,4 @@ class TimestampValidator:
 
             return True, "VALID_TIMESTAMP"
         except Exception as e:
-            return False, f"INVALID_TIMESTAMP_FORMAT: {str(e)}"
+            return False, f"INVALID_TIMESTAMP_FORMAT: {e!s}"

@@ -6,14 +6,13 @@ audience binding, depth caps, and revocation checks.
 """
 
 import time
-import json
 import uuid
-import hashlib
-from typing import Dict, Any, List, Optional, Set
+from typing import Any
+
 from identity_manager.signature_manager import SignatureManager
 
 MAX_DELEGATION_DEPTH = 3
-_REVOKED_TOKENS: Set[str] = set()
+_REVOKED_TOKENS: set[str] = set()
 
 class DelegationTokenManager:
 
@@ -31,12 +30,12 @@ class DelegationTokenManager:
     def create_delegated_token(
         issuer_agent_id: str,
         delegate_agent_id: str,
-        allowed_actions: List[str],
+        allowed_actions: list[str],
         maximum_amount: float,
         issuer_private_key: str,
-        parent_token: Optional[Dict[str, Any]] = None,
+        parent_token: dict[str, Any] | None = None,
         ttl_seconds: int = 3600
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Creates a signed capability delegation token.
         Enforces:
@@ -85,12 +84,12 @@ class DelegationTokenManager:
 
     @staticmethod
     def verify_delegation_chain(
-        token: Dict[str, Any],
+        token: dict[str, Any],
         action: str,
         amount: float,
         issuer_public_key: str,
-        requesting_agent_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+        requesting_agent_id: str | None = None
+    ) -> dict[str, Any]:
         """
         Verifies token signature, revocation, audience binding, depth cap, expiration, action scope, and monetary amount limit.
         """

@@ -1,6 +1,7 @@
 import math
 from decimal import Decimal, InvalidOperation
-from typing import Dict, Any, Tuple
+from typing import Any
+
 
 class RequestValidator:
     """Validates raw incoming action request structure and parameter types."""
@@ -11,7 +12,7 @@ class RequestValidator:
     ]
 
     @classmethod
-    def validate_structure(cls, payload: Dict[str, Any]) -> Tuple[bool, str]:
+    def validate_structure(cls, payload: dict[str, Any]) -> tuple[bool, str]:
         for field in cls.REQUIRED_FIELDS:
             if field not in payload or payload[field] is None:
                 return False, f"MISSING_REQUIRED_FIELD: {field}"
@@ -29,7 +30,7 @@ class RequestValidator:
         return True, "VALID_STRUCTURE"
 
     @classmethod
-    def validate_monetary_amount(cls, amount: Any, action: str = "") -> Tuple[bool, str]:
+    def validate_monetary_amount(cls, amount: Any, action: str = "") -> tuple[bool, str]:
         """
         Validates monetary amount:
         - Must be numeric (int, float, Decimal), NOT boolean

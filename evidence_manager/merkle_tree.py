@@ -4,21 +4,21 @@ Calculates Merkle Root over block transactions and generates cryptographic inclu
 """
 
 import hashlib
-from typing import List, Dict, Any, Optional, Tuple
+
 
 class MerkleTree:
     """
     Computes binary Merkle tree over evidence transaction hashes and produces inclusion proofs.
     """
 
-    def __init__(self, hashes: List[str]):
+    def __init__(self, hashes: list[str]):
         self.leaves = [h.lower() for h in hashes] if hashes else [hashlib.sha256(b"EMPTY_BLOCK").hexdigest()]
         self.tree = self._build_tree(self.leaves)
 
     def _hash_pair(self, left: str, right: str) -> str:
         return hashlib.sha256(f"{left}:{right}".encode()).hexdigest()
 
-    def _build_tree(self, leaves: List[str]) -> List[List[str]]:
+    def _build_tree(self, leaves: list[str]) -> list[list[str]]:
         tree = [leaves]
         current_layer = leaves
         while len(current_layer) > 1:
@@ -36,7 +36,7 @@ class MerkleTree:
         """Returns hex Merkle root hash string."""
         return self.tree[-1][0]
 
-    def get_inclusion_proof(self, leaf_hash: str) -> Optional[List[Dict[str, str]]]:
+    def get_inclusion_proof(self, leaf_hash: str) -> list[dict[str, str]] | None:
         """
         Generates Merkle audit inclusion proof for a target leaf hash.
         Returns list of proof steps: [{"position": "right"/"left", "hash": "..."}]
@@ -66,7 +66,7 @@ class MerkleTree:
         return proof
 
     @staticmethod
-    def verify_inclusion_proof(leaf_hash: str, proof: List[Dict[str, str]], expected_root: str) -> bool:
+    def verify_inclusion_proof(leaf_hash: str, proof: list[dict[str, str]], expected_root: str) -> bool:
         """
         Verifies a Merkle inclusion proof independently.
         """

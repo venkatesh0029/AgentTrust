@@ -1,8 +1,9 @@
 import os
 from functools import lru_cache
-from typing import Optional
-from cryptography.hazmat.primitives.asymmetric import rsa
+
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
 
 class KeyManager:
     """
@@ -19,12 +20,13 @@ class KeyManager:
         )
 
     @staticmethod
-    def private_key_to_pem(private_key, password: Optional[str] = None) -> str:
+    def private_key_to_pem(private_key, password: str | None = None) -> str:
         """
         Converts private key object to PEM string.
         Encrypts with BestAvailableEncryption (AES-256) using provided password or environment key storage passphrase.
         """
         passphrase = password or os.environ.get("KEY_STORAGE_PASSPHRASE", "agenttrust_default_aes256_passphrase_2026")
+        encryption: serialization.KeySerializationEncryption
         if passphrase:
             encryption = serialization.BestAvailableEncryption(passphrase.encode('utf-8'))
         else:
@@ -39,7 +41,7 @@ class KeyManager:
 
     @staticmethod
     @lru_cache(maxsize=1024)
-    def pem_to_private_key(pem_str: str, password: Optional[str] = None):
+    def pem_to_private_key(pem_str: str, password: str | None = None):
         """Loads RSA private key object from PEM string (supports AES-256 encrypted PEMs). Cached for performance."""
         passphrase = password or os.environ.get("KEY_STORAGE_PASSPHRASE", "agenttrust_default_aes256_passphrase_2026")
         pass_bytes = passphrase.encode('utf-8') if passphrase else None

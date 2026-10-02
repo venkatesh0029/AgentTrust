@@ -5,10 +5,11 @@ Uses dynamic cryptographically secure secrets to prevent hardcoded key forgery.
 """
 
 import os
-import time
 import secrets
+import time
+from typing import Any
+
 import jwt
-from typing import Dict, Any, Optional
 
 # Load secret key from environment or dynamically generate a strong per-process secret
 _ENV_SECRET = os.environ.get("AGENTTRUST_JWT_SECRET")
@@ -49,7 +50,7 @@ class JWTAuthManager:
         return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
     @staticmethod
-    def verify_token(token: str) -> Dict[str, Any]:
+    def verify_token(token: str) -> dict[str, Any]:
         """
         Verifies JWT token signature, issuer, and expiration.
         Returns payload dict if valid, raises ValueError if invalid or expired.
@@ -65,4 +66,4 @@ class JWTAuthManager:
         except jwt.ExpiredSignatureError:
             raise ValueError("JWT Token Has Expired")
         except jwt.InvalidTokenError as e:
-            raise ValueError(f"Invalid JWT Token: {str(e)}")
+            raise ValueError(f"Invalid JWT Token: {e!s}")

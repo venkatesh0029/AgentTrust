@@ -1,23 +1,24 @@
 import copy
 import datetime
 import math
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Any
+
 from action_gateway.request_validator import RequestValidator
-from identity_manager.certificate_manager import CertificateManager
-from identity_manager.signature_manager import SignatureManager
 from agent_registry.registration import AgentRegistry
-from policy_engine.policy_evaluator import PolicyEvaluator
-from policy_engine.policy_models import PolicyDecision, DecisionReason
-from replay_protection.request_tracker import RequestTracker
-from protected_api.finance_api import ProtectedFinanceAPI
-from human_approval.approval_manager import HumanApprovalManager
+from audit_writer.chain_writer import AuditChainWriter
 from evidence_manager.evidence_store import EvidenceStore
 from evidence_manager.provenance import ProvenanceBuilder
 from fabric.fabric_client import FabricClient
-
+from human_approval.approval_manager import HumanApprovalManager
+from identity_manager.certificate_manager import CertificateManager
 from identity_manager.delegation import DelegationTokenManager
+from identity_manager.signature_manager import SignatureManager
+from policy_engine.policy_evaluator import PolicyEvaluator
+from policy_engine.policy_models import DecisionReason, PolicyDecision
+from protected_api.finance_api import ProtectedFinanceAPI
+from replay_protection.request_tracker import RequestTracker
 from risk_engine.risk_evaluator import RiskEvaluator
-from audit_writer.chain_writer import AuditChainWriter
+
 
 class ActionGateway:
     """
@@ -37,7 +38,7 @@ class ActionGateway:
         approval_manager: HumanApprovalManager,
         evidence_store: EvidenceStore,
         fabric_client: FabricClient,
-        chain_writer: Optional[AuditChainWriter] = None
+        chain_writer: AuditChainWriter | None = None
     ):
         self.registry = registry
         self.cert_manager = cert_manager
@@ -50,7 +51,7 @@ class ActionGateway:
         self.chain_writer = chain_writer or AuditChainWriter()
         self._event_counter = 1000
 
-    def process_request(self, request_payload: Dict[str, Any]) -> Dict[str, Any]:
+    def process_request(self, request_payload: dict[str, Any]) -> dict[str, Any]:
         """Main entry point for processing signed AI agent requests."""
         request_payload = copy.deepcopy(request_payload)
         raw_payload_for_sig = copy.deepcopy(request_payload)
@@ -362,7 +363,7 @@ class ActionGateway:
             matched_rules=matched_rules
         )
 
-    def process_human_approval_resume(self, approval_id: str, approver_id: str, provided_token: Optional[str] = None) -> Dict[str, Any]:
+    def process_human_approval_resume(self, approval_id: str, approver_id: str, provided_token: str | None = None) -> dict[str, Any]:
         """Resumes processing after human supervisor approves a pending request with complete re-validation (#11)."""
         app_record = self.approval_manager.get_approval_by_id(approval_id)
         if not app_record or app_record.get("status") != "PENDING":
@@ -466,21 +467,21 @@ class ActionGateway:
         agent_id: str,
         action: str,
         resource: str,
-        parameters: Dict[str, Any],
+        parameters: dict[str, Any],
         decision: str,
         reason: str,
         policy_id: str,
         policy_version: str,
         agent_version: str,
         api_result: str,
-        approval_ticket: Optional[Dict[str, Any]] = None,
-        tx_data: Optional[Dict[str, Any]] = None,
-        approval_ref: Optional[str] = None,
+        approval_ticket: dict[str, Any] | None = None,
+        tx_data: dict[str, Any] | None = None,
+        approval_ref: str | None = None,
         cert_fingerprint: str = "SHA256:DEFAULT",
         nonce: str = "",
-        risk_result: Optional[Dict[str, Any]] = None,
-        matched_rules: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
+        risk_result: dict[str, Any] | None = None,
+        matched_rules: list[str] | None = None
+    ) -> dict[str, Any]:
         """
         Creates off-chain evidence, records hash-chain audit log, and commits audit event to Fabric blockchain safely.
         """
@@ -559,7 +560,7 @@ class ActionGateway:
             )
         except Exception as e:
             # Failure Recovery: Preserve local evidence safely, do NOT silently claim success!
-            ledger_status = f"COMMIT_FAILED: {str(e)}"
+            ledger_status = f"COMMIT_FAILED: {e!s}"
             blockchain_commit = {
                 "block_index": -1,
                 "block_hash": "PENDING_RETRY",
@@ -598,7 +599,7 @@ class ActionGateway:
             }
         }
 
-    def _build_immediate_rejection(self, request_id: str, agent_id: str, action: str, resource: str, decision: str, reason: str, api_result: str = "NOT_EXECUTED") -> Dict[str, Any]:
+    def _build_immediate_rejection(self, request_id: str, agent_id: str, action: str, resource: str, decision: str, reason: str, api_result: str = "NOT_EXECUTED") -> dict[str, Any]:
         return {
             "gateway_status": "PROCESSED",
             "request_id": request_id,

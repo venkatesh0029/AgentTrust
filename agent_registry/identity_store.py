@@ -4,8 +4,10 @@ Provides in-memory caching backed by PersistentStorageEngine for atomic SQLite p
 """
 
 import datetime
-from typing import Dict, Optional, List, Any
+from typing import Any
+
 from agent_registry.status_manager import AgentStatus, StatusManager
+
 
 class IdentityStore:
     """
@@ -14,8 +16,8 @@ class IdentityStore:
 
     def __init__(self, db_path: str = "agenttrust_persistent.db"):
         self.db_path = db_path
-        self._agents: Dict[str, Dict[str, Any]] = {}
-        
+        self._agents: dict[str, dict[str, Any]] = {}
+        self.storage: Any | None = None
         try:
             from fabric.persistent_db import PersistentStorageEngine
             self.storage = PersistentStorageEngine(db_path)
@@ -25,7 +27,7 @@ class IdentityStore:
         except Exception:
             self.storage = None
 
-    def save_agent(self, agent_record: Dict[str, Any]) -> None:
+    def save_agent(self, agent_record: dict[str, Any]) -> None:
         """Saves or updates an agent record in-memory and SQLite."""
         agent_id = agent_record["agent_id"]
         self._agents[agent_id] = agent_record
@@ -35,7 +37,7 @@ class IdentityStore:
             except Exception:
                 pass
 
-    def get_agent(self, agent_id: str) -> Optional[Dict[str, Any]]:
+    def get_agent(self, agent_id: str) -> dict[str, Any] | None:
         """Retrieves agent record by ID."""
         if agent_id not in self._agents and self.storage:
             db_rec = self.storage.get_agent(agent_id)
@@ -43,7 +45,7 @@ class IdentityStore:
                 self._agents[agent_id] = db_rec
         return self._agents.get(agent_id)
 
-    def list_agents(self) -> List[Dict[str, Any]]:
+    def list_agents(self) -> list[dict[str, Any]]:
         """Returns all registered agent records."""
         return list(self._agents.values())
 

@@ -1,8 +1,10 @@
 import datetime
-from typing import Dict, Any, List, Optional
-from identity_manager.certificate_manager import CertificateManager
+from typing import Any
+
 from agent_registry.identity_store import IdentityStore
 from agent_registry.status_manager import AgentStatus
+from identity_manager.certificate_manager import CertificateManager
+
 
 class AgentRegistry:
     """
@@ -18,14 +20,14 @@ class AgentRegistry:
         agent_id: str,
         agent_name: str,
         owner: str = "Finance Dept",
-        capabilities: List[str] = None,
+        capabilities: list[str] | None = None,
         policy_id: str = "FIN-POLICY-001",
         organization: str = "OrgA",
         role: str = "procurement_agent",
         agent_version: str = "1.0",
         validity_days: int = 365,
-        public_key_pem: Optional[str] = None
-    ) -> Dict[str, Any]:
+        public_key_pem: str | None = None
+    ) -> dict[str, Any]:
         """
         Registers a new AI Agent:
         1. Issues X.509 cert using client public key (if provided) or server-generated key pair.
@@ -98,7 +100,7 @@ class AgentRegistry:
         cert = x509.load_pem_x509_certificate(cert_pem.encode('utf-8'))
         return str(cert.serial_number)
 
-    def rotate_key(self, agent_id: str, validity_days: int = 365, public_key_pem: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def rotate_key(self, agent_id: str, validity_days: int = 365, public_key_pem: str | None = None) -> dict[str, Any] | None:
         """
         Rotates an agent's RSA keypair and X.509 Certificate.
         """
@@ -138,10 +140,10 @@ class AgentRegistry:
             res["private_key"] = priv_key_pem
         return res
 
-    def get_agent(self, agent_id: str) -> Optional[Dict[str, Any]]:
+    def get_agent(self, agent_id: str) -> dict[str, Any] | None:
         return self.store.get_agent(agent_id)
 
-    def list_agents(self) -> List[Dict[str, Any]]:
+    def list_agents(self) -> list[dict[str, Any]]:
         return self.store.list_agents()
 
     def update_agent_status(self, agent_id: str, new_status: str, reason: str = "") -> bool:

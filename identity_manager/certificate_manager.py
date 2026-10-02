@@ -1,11 +1,14 @@
 import datetime
 import hashlib
 from functools import lru_cache
-from typing import Tuple, Dict, Any, Optional
+from typing import Any
+
 from cryptography import x509
-from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.x509.oid import NameOID
+
 from identity_manager.key_manager import KeyManager
+
 
 @lru_cache(maxsize=1024)
 def _parse_cert_cached(cert_pem: str) -> x509.Certificate:
@@ -20,7 +23,7 @@ class CertificateManager:
         self.ca_common_name = ca_common_name
         self.db_path = db_path
         
-        # Load or initialize Root CA credentials from PersistentStorageEngine
+        self.storage: Any | None = None
         try:
             from fabric.persistent_db import PersistentStorageEngine
             self.storage = PersistentStorageEngine(db_path)
@@ -79,7 +82,7 @@ class CertificateManager:
 
     def issue_agent_certificate_from_pubkey(
         self, agent_id: str, agent_name: str, public_key_pem: str, validity_days: int = 365
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         """
         Issues X.509 certificate for an AI agent using an externally provided public key.
         The private key remains strictly on the client/agent side and is never handled by the server.
@@ -116,7 +119,7 @@ class CertificateManager:
 
     def issue_agent_certificate(
         self, agent_id: str, agent_name: str, validity_days: int = 365, start_offset_days: int = 0
-    ) -> Tuple[str, str, str]:
+    ) -> tuple[str, str, str]:
         """
         Issues X.509 certificate for an AI agent signed by Root CA.
         Returns: (agent_pem_cert, agent_private_key_pem, cert_fingerprint)
@@ -159,7 +162,7 @@ class CertificateManager:
         cert_bytes = cert_pem.encode('utf-8')
         return "SHA256:" + hashlib.sha256(cert_bytes).hexdigest().upper()
 
-    def verify_agent_certificate(self, cert_pem: str) -> Dict[str, Any]:
+    def verify_agent_certificate(self, cert_pem: str) -> dict[str, Any]:
         """
         Verifies certificate validity against Root CA signature, CRL, and expiration.
         Returns dict with status and reason.
@@ -176,13 +179,15 @@ class CertificateManager:
                 return {"valid": False, "reason": "CERTIFICATE_EXPIRED"}
 
             # Verify Root CA Signature
-            from cryptography.hazmat.primitives.asymmetric import padding
-            self.ca_public_key.verify(
-                cert.signature,
-                cert.tbs_certificate_bytes,
-                padding.PKCS1v15(),
-                cert.signature_hash_algorithm
-            )
+            from cryptography.hazmat.primitives.asymmetric import padding, rsa
+            ca_pub_key = self.ca_public_key
+            if isinstance(ca_pub_key, rsa.RSAPublicKey):
+                ca_pub_key.verify(
+                    cert.signature,
+                    cert.tbs_certificate_bytes,
+                    padding.PKCS1v15(),
+                    cert.signature_hash_algorithm  # type: ignore[arg-type]
+                )
 
             # Extract Subject CN (Agent ID)
             common_name = None
@@ -198,6 +203,6 @@ class CertificateManager:
                 "reason": "CERTIFICATE_VALID"
             }
         except Exception as e:
-            return {"valid": False, "reason": f"INVALID_CERTIFICATE: {str(e)}"}
+            return {"valid": False, "reason": f"INVALID_CERTIFICATE: {e!s}"}
 
 

@@ -1,11 +1,11 @@
-import time
 import datetime
-from typing import Dict, Any, List, Optional, Tuple, Set
+from typing import Any
+
 
 class FailedCommitRecord:
     """Represents a failed blockchain ledger commitment held in retry storage."""
 
-    def __init__(self, event_id: str, request_id: str, payload: Dict[str, Any], error_msg: str):
+    def __init__(self, event_id: str, request_id: str, payload: dict[str, Any], error_msg: str):
         self.event_id = event_id
         self.request_id = request_id
         self.payload = payload
@@ -21,17 +21,17 @@ class RetryQueueManager:
     """
 
     def __init__(self):
-        self._pending_queue: Dict[str, FailedCommitRecord] = {}
-        self._dead_letter_queue: Dict[str, FailedCommitRecord] = {}
-        self._processed_idempotency_keys: Set[str] = set()
+        self._pending_queue: dict[str, FailedCommitRecord] = {}
+        self._dead_letter_queue: dict[str, FailedCommitRecord] = {}
+        self._processed_idempotency_keys: set[str] = set()
 
-    def enqueue_failed_commit(self, event_id: str, request_id: str, payload: Dict[str, Any], error_msg: str) -> FailedCommitRecord:
+    def enqueue_failed_commit(self, event_id: str, request_id: str, payload: dict[str, Any], error_msg: str) -> FailedCommitRecord:
         """Enqueues failed transaction into retry queue."""
         record = FailedCommitRecord(event_id, request_id, payload, error_msg)
         self._pending_queue[event_id] = record
         return record
 
-    def list_pending_retries(self) -> List[Dict[str, Any]]:
+    def list_pending_retries(self) -> list[dict[str, Any]]:
         return [
             {
                 "event_id": r.event_id,
@@ -44,7 +44,7 @@ class RetryQueueManager:
             for r in self._pending_queue.values() if r.status == "PENDING_RETRY"
         ]
 
-    def retry_commit(self, event_id: str, fabric_client) -> Tuple[bool, str]:
+    def retry_commit(self, event_id: str, fabric_client) -> tuple[bool, str]:
         """
         Retries committing failed transaction to Fabric ledger.
         Moves to DLQ if max retries exceeded.
@@ -62,7 +62,7 @@ class RetryQueueManager:
         record.retry_count += 1
         try:
             p = record.payload
-            res = fabric_client.record_action_event(
+            _res = fabric_client.record_action_event(
                 event_id=p["event_id"],
                 request_id=p["request_id"],
                 agent_id=p["agent_id"],
@@ -83,4 +83,4 @@ class RetryQueueManager:
                 record.status = "DEAD_LETTER_QUEUE"
                 self._dead_letter_queue[event_id] = record
                 self._pending_queue.pop(event_id, None)
-            return False, f"RETRY_FAILED: {str(e)}"
+            return False, f"RETRY_FAILED: {e!s}"

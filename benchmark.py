@@ -1,13 +1,10 @@
-import time
-import uuid
 import datetime
-import statistics
-import platform
-import sys
-import os
 import multiprocessing
-import json
-from typing import List, Dict, Any, Tuple
+import platform
+import statistics
+import sys
+import time
+from typing import Any
 
 if sys.platform == "win32":
     try:
@@ -15,22 +12,23 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from identity_manager.certificate_manager import CertificateManager
-from identity_manager.signature_manager import SignatureManager
+from action_gateway.gateway import ActionGateway
 from agent_registry.identity_store import IdentityStore
 from agent_registry.registration import AgentRegistry
-from policy_engine.policy_loader import PolicyLoader
-from policy_engine.policy_evaluator import PolicyEvaluator
-from policy_engine.policy_models import PolicyRecord, WorkingHours
-from replay_protection.request_tracker import RequestTracker
-from protected_api.finance_api import ProtectedFinanceAPI
-from human_approval.approval_manager import HumanApprovalManager
 from evidence_manager.evidence_store import EvidenceStore
 from evidence_manager.hash_manager import HashManager
 from fabric.fabric_client import FabricClient
-from action_gateway.gateway import ActionGateway
+from human_approval.approval_manager import HumanApprovalManager
+from identity_manager.certificate_manager import CertificateManager
+from identity_manager.signature_manager import SignatureManager
+from policy_engine.policy_evaluator import PolicyEvaluator
+from policy_engine.policy_loader import PolicyLoader
+from policy_engine.policy_models import PolicyRecord, WorkingHours
+from protected_api.finance_api import ProtectedFinanceAPI
+from replay_protection.request_tracker import RequestTracker
 
-def get_system_metadata() -> Dict[str, Any]:
+
+def get_system_metadata() -> dict[str, Any]:
     """Collects operating system, CPU, RAM, Python and library version details."""
     cpu_model = platform.processor() or "x86_64 Compatible Processor"
     cpu_cores = multiprocessing.cpu_count()
@@ -68,7 +66,7 @@ def get_system_metadata() -> Dict[str, Any]:
         "ledger_type": "Hyperledger Fabric-Compatible Permissioned Ledger Prototype (Python SHA-256 Engine)"
     }
 
-def calculate_percentiles(data: List[float]) -> Dict[str, float]:
+def calculate_percentiles(data: list[float]) -> dict[str, float]:
     """Calculates Mean, StdDev, Min, Max, P50, P90, P95, and P99 percentiles."""
     sorted_data = sorted(data)
     n = len(sorted_data)
@@ -155,12 +153,12 @@ def run_performance_benchmarks(num_requests: int = 100, num_repetitions: int = 3
     print("    Warm-Up Complete. Starting Metric Recording Runs.")
 
     # Accumulated metric arrays
-    client_signing_all: List[float] = []
-    gateway_auth_all: List[float] = []
-    policy_eval_all: List[float] = []
-    blockchain_commit_all: List[float] = []
-    gateway_e2e_all: List[float] = []
-    total_roundtrip_all: List[float] = []
+    client_signing_all: list[float] = []
+    gateway_auth_all: list[float] = []
+    policy_eval_all: list[float] = []
+    blockchain_commit_all: list[float] = []
+    gateway_e2e_all: list[float] = []
+    total_roundtrip_all: list[float] = []
 
     unauthorized_attempts = 0
     correctly_blocked = 0

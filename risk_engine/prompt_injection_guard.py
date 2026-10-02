@@ -5,10 +5,10 @@ obfuscation techniques (base64, leetspeak, zero-width spaces, unicode spoofing),
 and adversarial jailbreak patterns.
 """
 
-import re
 import base64
+import re
 import unicodedata
-from typing import Dict, Any, List, Tuple
+from typing import Any
 
 PROMPT_INJECTION_PATTERNS = [
     r"ignore (all )?previous instructions",
@@ -68,7 +68,7 @@ class PromptInjectionGuard:
         return f"{combined_text.lower()} {leet_translated}"
 
     @classmethod
-    def evaluate_payload(cls, payload: Dict[str, Any]) -> Tuple[bool, float, List[str]]:
+    def evaluate_payload(cls, payload: dict[str, Any]) -> tuple[bool, float, list[str]]:
         """
         Evaluates payload for prompt injection markers.
         Returns: (is_injection_detected, risk_score_increment, matched_patterns)

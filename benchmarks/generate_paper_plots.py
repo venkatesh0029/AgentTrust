@@ -3,14 +3,17 @@ Generates publication-quality latency distribution CDF charts and throughput sca
 for the AgentTrust IEEE Research Paper. Saved into paper/figures/.
 """
 
-import sys
 import os
+import sys
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import matplotlib
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
+
 
 def generate_paper_figures():
     figures_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "paper", "figures"))

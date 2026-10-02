@@ -1,8 +1,10 @@
 import datetime
 import threading
-from typing import Tuple, Set, Dict, Any, Optional
+from typing import Any
+
 from replay_protection.nonce_manager import NonceManager
 from replay_protection.timestamp_validator import TimestampValidator
+
 
 class RequestTracker:
     """
@@ -14,8 +16,8 @@ class RequestTracker:
         self.timestamp_window = timestamp_window
         self.nonce_manager = NonceManager()
         self.timestamp_validator = TimestampValidator(timestamp_window)
-        self._processed_request_ids: Dict[str, float] = {}
-        self._idempotency_records: Dict[str, Dict[str, Any]] = {}
+        self._processed_request_ids: dict[str, float] = {}
+        self._idempotency_records: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
     def check_and_track(
@@ -24,8 +26,8 @@ class RequestTracker:
         nonce: str,
         timestamp_iso: str,
         expires_at_iso: str = "",
-        idempotency_key: Optional[str] = None
-    ) -> Tuple[bool, str]:
+        idempotency_key: str | None = None
+    ) -> tuple[bool, str]:
         """
         Validates request against replay attacks atomically under lock.
         Returns (is_allowed, reason).
@@ -62,7 +64,7 @@ class RequestTracker:
         for r in expired_reqs:
             del self._processed_request_ids[r]
 
-    def get_idempotent_result(self, agent_id: str, idempotency_key: str) -> Optional[Dict[str, Any]]:
+    def get_idempotent_result(self, agent_id: str, idempotency_key: str) -> dict[str, Any] | None:
         """Returns cached execution result for duplicate idempotency key bound to the specific agent_id."""
         if not idempotency_key:
             return None
@@ -70,7 +72,7 @@ class RequestTracker:
         with self._lock:
             return self._idempotency_records.get(scoped_key)
 
-    def record_idempotent_result(self, agent_id: str, idempotency_key: str, result: Dict[str, Any]) -> None:
+    def record_idempotent_result(self, agent_id: str, idempotency_key: str, result: dict[str, Any]) -> None:
         """Stores execution outcome for an idempotency key bound strictly to agent_id."""
         if idempotency_key:
             scoped_key = f"{agent_id}:{idempotency_key}"

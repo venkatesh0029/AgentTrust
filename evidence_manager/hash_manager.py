@@ -1,6 +1,7 @@
-import json
 import hashlib
-from typing import Dict, Any
+import json
+from typing import Any
+
 
 class HashManager:
     """
@@ -8,19 +9,19 @@ class HashManager:
     """
 
     @staticmethod
-    def canonical_json_bytes(evidence_record: Dict[str, Any]) -> bytes:
+    def canonical_json_bytes(evidence_record: dict[str, Any]) -> bytes:
         """Converts evidence dict to deterministic sorted JSON bytes."""
         json_str = json.dumps(evidence_record, sort_keys=True, separators=(',', ':'))
         return json_str.encode('utf-8')
 
     @classmethod
-    def calculate_evidence_hash(cls, evidence_record: Dict[str, Any]) -> str:
+    def calculate_evidence_hash(cls, evidence_record: dict[str, Any]) -> str:
         """Calculates hex SHA-256 hash string of evidence record."""
         data_bytes = cls.canonical_json_bytes(evidence_record)
         return hashlib.sha256(data_bytes).hexdigest()
 
     @classmethod
-    def verify_integrity(cls, current_evidence: Dict[str, Any], expected_hash: str) -> Dict[str, Any]:
+    def verify_integrity(cls, current_evidence: dict[str, Any], expected_hash: str) -> dict[str, Any]:
         """
         Re-computes SHA-256 hash of current evidence and compares with stored on-chain hash.
         Returns verification detail dictionary.

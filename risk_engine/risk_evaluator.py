@@ -1,6 +1,7 @@
 import datetime
 from enum import Enum
-from typing import Dict, Any, List, Tuple
+from typing import Any
+
 
 class RiskLevel(str, Enum):
     LOW = "LOW"
@@ -23,13 +24,13 @@ class RiskEvaluator:
         action: str,
         resource: str,
         amount: float = 0.0,
-        agent_record: Dict[str, Any] = None,
+        agent_record: dict[str, Any] | None = None,
         request_timestamp_iso: str = "",
         recent_failed_attempts: int = 0,
         recent_request_count: int = 0
-    ) -> Dict[str, Any]:
-        risk_score = 0
-        factors: List[str] = []
+    ) -> dict[str, Any]:
+        risk_score: float = 0.0
+        factors: list[str] = []
 
         # 1. Transaction Amount Factor
         if amount > 50000.0:

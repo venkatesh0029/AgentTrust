@@ -1,15 +1,12 @@
-import pytest
-import math
-import uuid
 import datetime
+import uuid
+
 from fastapi.testclient import TestClient
 
-from server import app, agent_registry, policy_evaluator, action_gateway, finance_api, cert_manager
-from agent_registry.admin_rbac import AdminRole
-from agent_registry.status_manager import AgentStatus
 from identity_manager.signature_manager import SignatureManager
-from protected_api.finance_api import ProtectedFinanceAPI
 from policy_engine.policy_evaluator import PolicyEvaluator
+from protected_api.finance_api import ProtectedFinanceAPI
+from server import action_gateway, agent_registry, app
 
 client = TestClient(app)
 
@@ -38,7 +35,7 @@ def test_regression_rbac_finance_approver_role():
     """Verify that FINANCE_APPROVER role can approve tickets while AUDITOR is denied."""
     # Register pending approval
     agent_id = f"AGENT-APPR-{uuid.uuid4().hex[:4]}"
-    reg = agent_registry.register_agent(agent_id=agent_id, agent_name="ApprAgent")
+    agent_registry.register_agent(agent_id=agent_id, agent_name="ApprAgent")
     
     app_record = action_gateway.approval_manager.create_approval_request(
         request_id=f"REQ-APPR-{uuid.uuid4().hex[:4]}",
