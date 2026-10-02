@@ -1,4 +1,5 @@
 import datetime
+import threading
 from typing import Any
 
 from identity_manager.key_manager import KeyManager
@@ -86,6 +87,7 @@ class ProtectedFinanceAPI:
     def __init__(self):
         self.service = ProcurementService()
         self._idempotency_cache: dict[str, dict[str, Any]] = {}
+        self._idempotency_lock = threading.Lock()
         # Generate Gateway Service RSA Keypair for Service-to-Service mTLS/Signing
         self.gateway_service_private_key = KeyManager.generate_key_pair(2048)
         self.gateway_service_public_key_pem = KeyManager.public_key_to_pem(
@@ -165,95 +167,97 @@ class ProtectedFinanceAPI:
                 "message": "Gateway Service Signature Verification Failed."
             }
 
-        # 3. Scoped Idempotency Check per (agent_id, idempotency_key)
+        # 3. Scoped Idempotency Check per (agent_id, idempotency_key) with thread lock
         raw_key = idempotency_key or request_id
         cache_key = f"{agent_id}:{raw_key}"
-        if cache_key in self._idempotency_cache:
-            cached_res = self._idempotency_cache[cache_key].copy()
-            cached_res["idempotent_replay"] = True
-            return cached_res
 
-        # Execute business logic
-        action_upper = action.upper()
+        with self._idempotency_lock:
+            if cache_key in self._idempotency_cache:
+                cached_res = self._idempotency_cache[cache_key].copy()
+                cached_res["idempotent_replay"] = True
+                return cached_res
 
-        if action_upper == "CREATE_PURCHASE_ORDER":
-            supplier_id = parameters.get("supplier_id") or parameters.get("resource") or "SUPPLIER-001"
-            item_name = parameters.get("item_name", "Procurement Office Supplies")
-            amount = float(parameters.get("amount", 0))
+            # Execute business logic
+            action_upper = action.upper()
 
-            po_record = self.service.create_purchase_order(
-                request_id=request_id,
-                agent_id=agent_id,
-                supplier_id=supplier_id,
-                item_name=item_name,
-                amount=amount,
-                approval_ref=approval_ref
-            )
-            res = {
-                "success": True,
-                "api_result": "EXECUTED",
-                "transaction_data": po_record
-            }
-            self._idempotency_cache[cache_key] = res
-            return res
+            if action_upper == "CREATE_PURCHASE_ORDER":
+                supplier_id = parameters.get("supplier_id") or parameters.get("resource") or "SUPPLIER-001"
+                item_name = parameters.get("item_name", "Procurement Office Supplies")
+                amount = float(parameters.get("amount", 0))
 
-        elif action_upper == "TRANSFER_FUNDS":
-            target_account = parameters.get("target_account") or parameters.get("resource") or "ACC-99901"
-            amount = float(parameters.get("amount", 0))
-
-            tf_record = self.service.create_fund_transfer(
-                request_id=request_id,
-                agent_id=agent_id,
-                target_account=target_account,
-                amount=amount,
-                approval_ref=approval_ref
-            )
-            res = {
-                "success": True,
-                "api_result": "EXECUTED",
-                "transaction_data": tf_record
-            }
-            self._idempotency_cache[cache_key] = res
-            return res
-
-        elif action_upper == "CREATE_REIMBURSEMENT":
-            employee_id = parameters.get("employee_id", "EMP-001")
-            amount = float(parameters.get("amount", 0))
-
-            tx_record = self.service.create_reimbursement(
-                request_id=request_id,
-                agent_id=agent_id,
-                employee_id=employee_id,
-                amount=amount,
-                approval_ref=approval_ref
-            )
-            res = {
-                "success": True,
-                "api_result": "EXECUTED",
-                "transaction_data": tx_record
-            }
-            self._idempotency_cache[cache_key] = res
-            return res
-
-        elif action_upper == "READ_ACCOUNT":
-            account_id = parameters.get("resource", "ACC-001")
-            res = {
-                "success": True,
-                "api_result": "EXECUTED",
-                "transaction_data": {
-                    "account_id": account_id,
-                    "account_name": "Corporate Procurement Account",
-                    "balance": 1500000.0,
-                    "currency": "INR",
-                    "status": "ACTIVE"
+                po_record = self.service.create_purchase_order(
+                    request_id=request_id,
+                    agent_id=agent_id,
+                    supplier_id=supplier_id,
+                    item_name=item_name,
+                    amount=amount,
+                    approval_ref=approval_ref
+                )
+                res = {
+                    "success": True,
+                    "api_result": "EXECUTED",
+                    "transaction_data": po_record
                 }
-            }
-            self._idempotency_cache[cache_key] = res
-            return res
+                self._idempotency_cache[cache_key] = res
+                return res
 
-        else:
-            return {
-                "success": False,
-                "error": "UNKNOWN_ACTION",
-                "message": f"Action '{action}' is not supported by Procurement/Finance API."
-            }
+            elif action_upper == "TRANSFER_FUNDS":
+                target_account = parameters.get("target_account") or parameters.get("resource") or "ACC-99901"
+                amount = float(parameters.get("amount", 0))
+
+                tf_record = self.service.create_fund_transfer(
+                    request_id=request_id,
+                    agent_id=agent_id,
+                    target_account=target_account,
+                    amount=amount,
+                    approval_ref=approval_ref
+                )
+                res = {
+                    "success": True,
+                    "api_result": "EXECUTED",
+                    "transaction_data": tf_record
+                }
+                self._idempotency_cache[cache_key] = res
+                return res
+
+            elif action_upper == "CREATE_REIMBURSEMENT":
+                employee_id = parameters.get("employee_id", "EMP-001")
+                amount = float(parameters.get("amount", 0))
+
+                tx_record = self.service.create_reimbursement(
+                    request_id=request_id,
+                    agent_id=agent_id,
+                    employee_id=employee_id,
+                    amount=amount,
+                    approval_ref=approval_ref
+                )
+                res = {
+                    "success": True,
+                    "api_result": "EXECUTED",
+                    "transaction_data": tx_record
+                }
+                self._idempotency_cache[cache_key] = res
+                return res
+
+            elif action_upper == "READ_ACCOUNT":
+                account_id = parameters.get("resource", "ACC-001")
+                res = {
+                    "success": True,
+                    "api_result": "EXECUTED",
+                    "transaction_data": {
+                        "account_id": account_id,
+                        "account_name": "Corporate Procurement Account",
+                        "balance": 1500000.0,
+                        "currency": "INR",
+                        "status": "ACTIVE"
+                    }
+                }
+                self._idempotency_cache[cache_key] = res
+                return res
+
+            else:
+                return {
+                    "success": False,
+                    "error": "UNKNOWN_ACTION",
+                    "message": f"Action '{action}' is not supported by Procurement/Finance API."
+                }

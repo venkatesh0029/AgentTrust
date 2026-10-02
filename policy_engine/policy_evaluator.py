@@ -110,7 +110,7 @@ class PolicyEvaluator:
 
     @staticmethod
     def _check_working_hours(request_timestamp_iso: str, start_str: str, end_str: str, use_server_time: bool = True) -> bool:
-        """Verifies if request timestamp falls within configured working hours (e.g. 09:00 - 18:00 UTC)."""
+        """Verifies if request timestamp falls within configured working hours (e.g. 09:00 - 18:00 UTC, or overnight 22:00 - 06:00 UTC)."""
         try:
             if use_server_time:
                 dt = datetime.datetime.now(datetime.timezone.utc)
@@ -127,6 +127,11 @@ class PolicyEvaluator:
             start_time = datetime.time(start_parts[0], start_parts[1])
             end_time = datetime.time(end_parts[0], end_parts[1])
 
-            return start_time <= request_time <= end_time
+            if start_time <= end_time:
+                return start_time <= request_time <= end_time
+            else:
+                # Overnight working hours window (e.g. 22:00 -> 06:00 UTC)
+                return request_time >= start_time or request_time <= end_time
         except Exception:
-            return True
+            # Fail-closed: reject requests on policy format or timestamp parsing errors
+            return False

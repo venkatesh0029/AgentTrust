@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import datetime
 import statistics
+import threading
 import time
 
 try:
@@ -206,7 +207,8 @@ class BenchmarkEngine:
 
             latencies = []
             errors = 0
-            start_proc_mem = psutil.Process().memory_info().rss / (1024 * 1024)
+            lock = threading.Lock()
+            start_proc_mem = psutil.Process().memory_info().rss / (1024 * 1024) if psutil else 0.0
             t_start = time.perf_counter()
 
             def worker(agent_tuple):
@@ -228,27 +230,30 @@ class BenchmarkEngine:
                     t0 = time.perf_counter()
                     try:
                         res = self.gw.process_request(payload)
-                        latencies.append((time.perf_counter() - t0) * 1000.0)
-                        if res.get("decision") != "ALLOWED":
-                            errors += 1
+                        lat = (time.perf_counter() - t0) * 1000.0
+                        with lock:
+                            latencies.append(lat)
+                            if res.get("decision") != "ALLOWED":
+                                errors += 1
                     except Exception:
-                        errors += 1
+                        with lock:
+                            errors += 1
 
             with ThreadPoolExecutor(max_workers=min(num_agents, 32)) as executor:
                 executor.map(worker, agents)
 
             total_wall_time = time.perf_counter() - t_start
             total_reqs = num_agents * reqs_per_agent
-            end_proc_mem = psutil.Process().memory_info().rss / (1024 * 1024)
+            end_proc_mem = psutil.Process().memory_info().rss / (1024 * 1024) if psutil else 0.0
             rps = total_reqs / total_wall_time if total_wall_time > 0 else 0
 
             stats = calculate_percentiles(latencies)
             stats["throughput_rps"] = rps
             stats["total_requests"] = total_reqs
             stats["total_time_sec"] = total_wall_time
-            stats["cpu_utilization_pct"] = psutil.cpu_percent(interval=None)
-            stats["memory_delta_mb"] = end_proc_mem - start_proc_mem
-            stats["failure_rate"] = errors / total_reqs
+            stats["cpu_utilization_pct"] = psutil.cpu_percent(interval=None) if psutil else 0.0
+            stats["memory_delta_mb"] = (end_proc_mem - start_proc_mem) if psutil else 0.0
+            stats["failure_rate"] = errors / total_reqs if total_reqs > 0 else 0.0
 
             results[num_agents] = stats
 
@@ -283,18 +288,37 @@ class BenchmarkEngine:
                 if mode == "Full AgentTrust":
                     self.gw.process_request(payload)
                 elif mode == "Without Risk Engine":
-                    # Skip Step 7 Risk Eval
-                    self.evaluator.evaluate("BENCH-POL", "CREATE_PURCHASE_ORDER", "SUP-1", 2500.0, payload["timestamp"])
+                    # Bypass Risk Engine evaluation inside gateway workflow
+                    old_eval = self.gw.risk_evaluator
+                    self.gw.risk_evaluator = type("DummyRisk", (), {"evaluate": staticmethod(lambda **kwargs: {"risk_score": 0.0, "risk_level": "LOW", "risk_factors": []})})()
+                    try:
+                        self.gw.process_request(payload)
+                    finally:
+                        self.gw.risk_evaluator = old_eval
                 elif mode == "Without Replay Protection":
-                    # Skip Step 6 Replay Check
-                    r_res = RiskEvaluator.evaluate("ABLATE-AGENT-01", "CREATE_PURCHASE_ORDER", "SUP-1", 2500.0, ag_info)
-                    self.evaluator.evaluate("BENCH-POL", "CREATE_PURCHASE_ORDER", "SUP-1", 2500.0, payload["timestamp"], r_res["risk_score"])
+                    # Bypass Replay Tracker check inside gateway workflow
+                    old_tracker = self.gw.replay_tracker
+                    self.gw.replay_tracker = type("DummyReplay", (), {"check_and_track": staticmethod(lambda **kwargs: (True, "OK"))})()
+                    try:
+                        self.gw.process_request(payload)
+                    finally:
+                        self.gw.replay_tracker = old_tracker
                 elif mode == "Without Hash Chain":
-                    # Skip chain writer
-                    pass
+                    # Bypass Audit Hash Chain record writing
+                    old_writer = self.gw.chain_writer
+                    self.gw.chain_writer = type("DummyWriter", (), {"write_event": staticmethod(lambda **kwargs: type("DummyRec", (), {"sequence_number": 0, "previous_record_hash": "0", "record_hash": "0"})())})()
+                    try:
+                        self.gw.process_request(payload)
+                    finally:
+                        self.gw.chain_writer = old_writer
                 elif mode == "Without Fabric":
-                    # Skip fabric commit
-                    pass
+                    # Bypass Fabric Ledger commit
+                    old_fabric = self.gw.fabric_client
+                    self.gw.fabric_client = type("DummyFabric", (), {"record_action_event": staticmethod(lambda **kwargs: {"status": "SKIPPED"})})()
+                    try:
+                        self.gw.process_request(payload)
+                    finally:
+                        self.gw.fabric_client = old_fabric
 
                 latencies.append((time.perf_counter() - t0) * 1000.0)
 
