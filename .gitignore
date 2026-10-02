@@ -53,5 +53,5 @@ frontend/.next/
 frontend/out/
 node_modules/
 .next/
-
-
+# SQLite Databases
+*.db

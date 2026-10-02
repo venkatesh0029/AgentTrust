@@ -9,7 +9,7 @@ import threading
 import time
 
 try:
-    import psutil
+    import psutil  # type: ignore[import-untyped]
 except ImportError:
     psutil = None
 from concurrent.futures import ThreadPoolExecutor

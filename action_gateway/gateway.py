@@ -1,6 +1,7 @@
 import copy
 import datetime
 import math
+import uuid
 from typing import Any
 
 from action_gateway.request_validator import RequestValidator
@@ -258,8 +259,12 @@ class ActionGateway:
             request_timestamp_iso=timestamp
         )
 
-        # Step 7.5: Capability Delegation Token Chain Check (if delegation_token present)
+        # Step 7.5: Capability Delegation Token Chain Check (Normalize top-level delegation token)
         delegation_token = request_payload.get("delegation_token") or parameters.get("delegation_token")
+        if delegation_token:
+            parameters["delegation_token"] = delegation_token
+            request_payload["delegation_token"] = delegation_token
+
         if delegation_token and isinstance(delegation_token, dict):
             issuer_agent_id = delegation_token.get("issuer_agent_id")
             issuer_record = self.registry.get_agent(issuer_agent_id) if issuer_agent_id else None
@@ -327,8 +332,18 @@ class ActionGateway:
                 api_result = f"FAILED: {exec_res.get('error')}"
 
         elif decision == PolicyDecision.PENDING_HUMAN_APPROVAL:
-            # Route to Human Approval Queue
+            # Route to Human Approval Queue with immutable authorization context & delegation token
             raw_hash = SignatureManager.canonical_serialize(payload_to_verify).hex()
+            auth_context = {
+                "agent_id": agent_id,
+                "key_version": agent_record.get("key_version", 1),
+                "certificate_fingerprint": agent_record.get("certificate_fingerprint", ""),
+                "policy_id": policy_id,
+                "policy_version": policy_version,
+                "risk_score": risk_result.get("risk_score"),
+                "request_hash": raw_hash,
+                "delegation_token": delegation_token
+            }
             approval_ticket = self.approval_manager.create_approval_request(
                 request_id=request_id,
                 agent_id=agent_id,
@@ -338,7 +353,9 @@ class ActionGateway:
                 reason=reason.value,
                 policy_id=policy_id,
                 request_hash=raw_hash,
-                policy_version=policy_version
+                policy_version=policy_version,
+                authorization_context=auth_context,
+                delegation_token=delegation_token
             )
             api_result = "HELD_FOR_HUMAN_APPROVAL"
 
@@ -364,7 +381,7 @@ class ActionGateway:
         )
 
     def process_human_approval_resume(self, approval_id: str, approver_id: str, provided_token: str | None = None) -> dict[str, Any]:
-        """Resumes processing after human supervisor approves a pending request with complete re-validation (#11)."""
+        """Resumes processing after human supervisor approves a pending request with complete atomic re-validation (#11, #1)."""
         app_record = self.approval_manager.get_approval_by_id(approval_id)
         if not app_record or app_record.get("status") != "PENDING":
             return {"success": False, "message": f"Approval ticket '{approval_id}' not found or not pending."}
@@ -377,25 +394,81 @@ class ActionGateway:
         resource = app_record["resource"]
         parameters = app_record["parameters"]
         policy_id = app_record["policy_id"]
-        approval_ref = app_record["approval_reference"]
         amount = float(parameters.get("amount", 0))
 
-        # 1. Check Approval Expiration
-        expires_at = app_record.get("expires_at")
-        if expires_at:
-            exp_dt = datetime.datetime.fromisoformat(expires_at)
-            if datetime.datetime.now(datetime.timezone.utc) > exp_dt:
-                return self._finalize_gateway_outcome(
-                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
-                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
-                    reason="APPROVAL_TICKET_EXPIRED", policy_id=policy_id, policy_version="1.0",
-                    agent_version="1.0", api_result="NOT_EXECUTED"
-                )
+        # Atomic Validator Callback executed INSIDE the HumanApprovalManager lock
+        validation_context: dict[str, Any] = {}
 
-        # 2. Re-check Agent Identity, Status & Certificate BEFORE consuming ticket
-        agent_record = self.registry.get_agent(agent_id)
-        if not agent_record or agent_record.get("status") != "ACTIVE":
-            curr_status = agent_record.get("status", "UNKNOWN") if agent_record else "UNREGISTERED"
+        def _atomic_validator(record: dict[str, Any]) -> tuple[bool, str]:
+            # 1. Re-check Agent Identity, Status & Key Version
+            ag_rec = self.registry.get_agent(agent_id)
+            if not ag_rec or ag_rec.get("status") != "ACTIVE":
+                st = ag_rec.get("status", "UNKNOWN") if ag_rec else "UNREGISTERED"
+                return False, f"AGENT_REVOKED_OR_INACTIVE_ON_RESUME ({st})"
+
+            auth_ctx = record.get("authorization_context", {})
+            stored_key_ver = auth_ctx.get("key_version")
+            if stored_key_ver is not None and ag_rec.get("key_version") != stored_key_ver:
+                return False, "KEY_VERSION_CHANGED_SINCE_APPROVAL_ISSUANCE"
+
+            # 2. Re-check Certificate Validity & Fingerprint Match
+            cert_pem = ag_rec.get("certificate")
+            if cert_pem:
+                cert_val = self.cert_manager.verify_agent_certificate(cert_pem)
+                if not cert_val.get("valid"):
+                    return False, f"CERTIFICATE_INVALID_ON_RESUME ({cert_val.get('reason')})"
+
+                stored_fp = auth_ctx.get("certificate_fingerprint")
+                if stored_fp and cert_val.get("fingerprint") != stored_fp:
+                    return False, "CERTIFICATE_FINGERPRINT_CHANGED_SINCE_APPROVAL_ISSUANCE"
+
+            # 3. Re-evaluate Risk Engine
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            risk_res = RiskEvaluator.evaluate(
+                agent_id=agent_id,
+                action=action,
+                resource=resource,
+                amount=amount,
+                agent_record=ag_rec,
+                request_timestamp_iso=now_iso
+            )
+            validation_context["risk_result"] = risk_res
+
+            # 4. Re-evaluate Policy against active policy rules & risk
+            dec, rsn, pver, rules = self.policy_evaluator.evaluate(
+                policy_id=policy_id,
+                action=action,
+                resource=resource,
+                amount=amount,
+                request_timestamp_iso=now_iso,
+                risk_score=risk_res.get("risk_score", 0.0),
+                risk_level=risk_res.get("risk_level", "LOW")
+            )
+            validation_context["policy_version"] = pver
+            validation_context["matched_rules"] = rules
+
+            if dec == PolicyDecision.BLOCKED:
+                return False, f"POLICY_RECHECK_FAILED: {rsn.value}"
+
+            # 5. Re-check Delegation Token (using stored delegation token or parameters)
+            del_token = record.get("delegation_token") or parameters.get("delegation_token") or auth_ctx.get("delegation_token")
+            if del_token and isinstance(del_token, dict):
+                issuer_pub = ag_rec.get("public_key", "")
+                del_res = DelegationTokenManager.verify_delegation_chain(
+                    del_token, action, amount, issuer_pub, requesting_agent_id=agent_id
+                )
+                if not del_res.get("valid"):
+                    return False, f"DELEGATION_RECHECK_FAILED: {del_res.get('reason')}"
+
+            validation_context["agent_record"] = ag_rec
+            return True, "VALID"
+
+        # ATOMICALLY consume approval ticket ONLY if validator passes inside the lock
+        ok, updated_record, msg = self.approval_manager.approve_request(
+            approval_id, approver_id, provided_token=token_to_pass, validator_fn=_atomic_validator
+        )
+        if not ok or not updated_record:
+            # Ticket was not consumed; finalize rejection outcome safely
             return self._finalize_gateway_outcome(
                 request_id=request_id,
                 agent_id=agent_id,
@@ -403,81 +476,17 @@ class ActionGateway:
                 resource=resource,
                 parameters=parameters,
                 decision=PolicyDecision.BLOCKED.value,
-                reason=f"AGENT_REVOKED_OR_INACTIVE_ON_RESUME ({curr_status})",
+                reason=f"RESUME_VALIDATION_FAILED: {msg}",
                 policy_id=policy_id,
                 policy_version="1.0",
                 agent_version="1.0",
                 api_result="NOT_EXECUTED"
             )
 
-        cert_pem = agent_record.get("certificate")
-        if cert_pem:
-            cert_val = self.cert_manager.verify_agent_certificate(cert_pem)
-            if not cert_val.get("valid"):
-                return self._finalize_gateway_outcome(
-                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
-                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
-                    reason=f"CERTIFICATE_INVALID_ON_RESUME ({cert_val.get('reason')})",
-                    policy_id=policy_id, policy_version="1.0", agent_version="1.0",
-                    api_result="NOT_EXECUTED"
-                )
+        agent_record = validation_context.get("agent_record") or self.registry.get_agent(agent_id) or {}
+        approval_ref = updated_record.get("approval_reference")
 
-        # 3. Re-evaluate Risk Engine
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        risk_res = RiskEvaluator.evaluate(
-            agent_id=agent_id,
-            action=action,
-            resource=resource,
-            amount=amount,
-            agent_record=agent_record,
-            request_timestamp_iso=now_iso
-        )
-
-        # 4. Re-evaluate Policy against current active policy rules & risk BEFORE consuming ticket
-        dec, rsn, pver, rules = self.policy_evaluator.evaluate(
-            policy_id=policy_id,
-            action=action,
-            resource=resource,
-            amount=amount,
-            request_timestamp_iso=now_iso,
-            risk_score=risk_res.get("risk_score", 0.0),
-            risk_level=risk_res.get("risk_level", "LOW")
-        )
-
-        if dec == PolicyDecision.BLOCKED:
-            return self._finalize_gateway_outcome(
-                request_id=request_id,
-                agent_id=agent_id,
-                action=action,
-                resource=resource,
-                parameters=parameters,
-                decision=PolicyDecision.BLOCKED.value,
-                reason=f"POLICY_RECHECK_FAILED: {rsn.value}",
-                policy_id=policy_id,
-                policy_version=pver,
-                agent_version=agent_record.get("agent_version", "1.0"),
-                api_result="NOT_EXECUTED"
-            )
-
-        # 5. Re-check Delegation Token if present
-        del_token = parameters.get("delegation_token")
-        if del_token and isinstance(del_token, dict):
-            from identity_manager.delegation import DelegationTokenManager
-            issuer_pub = agent_record.get("public_key", "")
-            del_res = DelegationTokenManager.verify_delegation_chain(del_token, action, amount, issuer_pub, requesting_agent_id=agent_id)
-            if not del_res.get("valid"):
-                return self._finalize_gateway_outcome(
-                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
-                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
-                    reason=f"DELEGATION_RECHECK_FAILED: {del_res.get('reason')}", policy_id=policy_id,
-                    policy_version=pver, agent_version="1.0", api_result="NOT_EXECUTED"
-                )
-
-        # NOW consume and mark ticket as approved
-        ok, app_record, msg = self.approval_manager.approve_request(approval_id, approver_id, provided_token=token_to_pass)
-        if not ok or not app_record:
-            return {"success": False, "message": msg}
-
+        # Execute protected business action
         auth_headers = self.finance_api.create_gateway_auth_headers(request_id)
         exec_res = self.finance_api.execute_action(
             action=action,
@@ -502,15 +511,15 @@ class ActionGateway:
             decision=PolicyDecision.ALLOWED_AFTER_APPROVAL.value if exec_res.get("success") else PolicyDecision.BLOCKED.value,
             reason="APPROVED_BY_HUMAN_SUPERVISOR" if exec_res.get("success") else f"EXECUTION_FAILED: {exec_res.get('error')}",
             policy_id=policy_id,
-            policy_version="1.0",
+            policy_version=validation_context.get("policy_version", "1.0"),
             agent_version=agent_ver,
             api_result=api_res_str,
             tx_data=exec_res.get("transaction_data"),
             approval_ref=approval_ref,
             cert_fingerprint=cert_fp,
-            nonce=app_record.get("nonce", f"N-RESUME-{request_id}"),
-            risk_result=risk_res,
-            matched_rules=rules
+            nonce=updated_record.get("nonce", f"N-RESUME-{request_id}"),
+            risk_result=validation_context.get("risk_result"),
+            matched_rules=validation_context.get("matched_rules")
         )
 
     def _finalize_gateway_outcome(
@@ -537,8 +546,7 @@ class ActionGateway:
         """
         Creates off-chain evidence, records hash-chain audit log, and commits audit event to Fabric blockchain safely.
         """
-        self._event_counter += 1
-        event_id = f"EVENT-{self._event_counter}"
+        event_id = f"EVENT-{uuid.uuid4().hex[:12].upper()}"
 
         risk_eval = risk_result or {
             "risk_score": 0.0,

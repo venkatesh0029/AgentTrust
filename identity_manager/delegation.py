@@ -13,18 +13,38 @@ from identity_manager.signature_manager import SignatureManager
 
 MAX_DELEGATION_DEPTH = 3
 _REVOKED_TOKENS: set[str] = set()
+_REVOCATIONS_LOADED = False
+
+def _ensure_revocations_loaded() -> None:
+    global _REVOKED_TOKENS, _REVOCATIONS_LOADED
+    if not _REVOCATIONS_LOADED:
+        try:
+            from fabric.persistent_db import PersistentStorageEngine
+            revs = PersistentStorageEngine().get_delegation_revocations()
+            _REVOKED_TOKENS.update(revs)
+        except Exception:
+            pass
+        _REVOCATIONS_LOADED = True
 
 class DelegationTokenManager:
 
     @staticmethod
     def revoke_token(token_id: str) -> None:
-        """Revokes a capability delegation token ID."""
+        """Revokes a capability delegation token ID and persists to SQLite."""
+        _ensure_revocations_loaded()
         _REVOKED_TOKENS.add(token_id)
+        try:
+            from fabric.persistent_db import PersistentStorageEngine
+            PersistentStorageEngine().save_delegation_revocation(token_id)
+        except Exception:
+            pass
 
     @staticmethod
     def is_token_revoked(token_id: str) -> bool:
         """Checks if delegation token ID is revoked."""
+        _ensure_revocations_loaded()
         return token_id in _REVOKED_TOKENS
+
 
     @staticmethod
     def create_delegated_token(
