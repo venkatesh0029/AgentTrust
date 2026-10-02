@@ -1,15 +1,16 @@
-import sys
 import os
+import sys
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import time
-import statistics
 import datetime
+import statistics
+import time
 import uuid
-from typing import Dict, Any, List
 
-from server import agent_registry, action_gateway
 from identity_manager.signature_manager import SignatureManager
+from server import action_gateway, agent_registry
+
 
 class ComparativeBenchmarkRunner:
 
@@ -18,7 +19,7 @@ class ComparativeBenchmarkRunner:
         self.reg = agent_registry.register_agent(self.agent_id, "BenchAgent", "PerfOrg")
         self.priv_key = self.reg["private_key"]
 
-    def run_comparative_suite(self, iterations: int = 100) -> Dict[str, Dict[str, float]]:
+    def run_comparative_suite(self, iterations: int = 100) -> dict[str, dict[str, float]]:
         """
         Executes comparative benchmarks over specified iterations and reports latency percentiles.
         """
@@ -55,11 +56,11 @@ class ComparativeBenchmarkRunner:
             payload["signature"] = sig
 
             t0 = time.perf_counter()
-            res = action_gateway.process_request(payload)
+            _res = action_gateway.process_request(payload)
             t1 = time.perf_counter()
             latencies_agenttrust.append((t1 - t0) * 1000.0)
 
-        def calc_metrics(lats: List[float]) -> Dict[str, float]:
+        def calc_metrics(lats: list[float]) -> dict[str, float]:
             sorted_l = sorted(lats)
             n = len(sorted_l)
             return {

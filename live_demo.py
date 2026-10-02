@@ -1,9 +1,6 @@
-import time
-import uuid
 import datetime
 import sys
-import os
-from typing import Dict, Any
+import uuid
 
 if sys.platform == "win32":
     try:
@@ -11,21 +8,21 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from identity_manager.certificate_manager import CertificateManager
-from identity_manager.signature_manager import SignatureManager
+from action_gateway.gateway import ActionGateway
+from action_gateway.retry_queue import RetryQueueManager
 from agent_registry.identity_store import IdentityStore
 from agent_registry.registration import AgentRegistry
-from policy_engine.policy_loader import PolicyLoader
-from policy_engine.policy_evaluator import PolicyEvaluator
-from policy_engine.policy_models import PolicyRecord, WorkingHours
-from replay_protection.request_tracker import RequestTracker
-from protected_api.finance_api import ProtectedFinanceAPI
-from human_approval.approval_manager import HumanApprovalManager
 from evidence_manager.evidence_store import EvidenceStore
 from evidence_manager.hash_manager import HashManager
 from fabric.fabric_client import FabricClient
-from action_gateway.gateway import ActionGateway
-from action_gateway.retry_queue import RetryQueueManager
+from human_approval.approval_manager import HumanApprovalManager
+from identity_manager.certificate_manager import CertificateManager
+from identity_manager.signature_manager import SignatureManager
+from policy_engine.policy_evaluator import PolicyEvaluator
+from policy_engine.policy_loader import PolicyLoader
+from policy_engine.policy_models import PolicyRecord, WorkingHours
+from protected_api.finance_api import ProtectedFinanceAPI
+from replay_protection.request_tracker import RequestTracker
 
 # ANSI Color codes for clean live demo output
 CYAN = "\033[96m"
@@ -69,9 +66,8 @@ def run_live_demo():
     print(f"{BOLD}[+] Registering Autonomous Agent FINANCE-AGENT-001 with X.509 Certificate...{RESET}")
     agent_info = reg.register_agent("FINANCE-AGENT-001", "FinanceAgent", "Finance Dept", ["CREATE_REIMBURSEMENT"], "FIN-POLICY-001")
     priv_key = agent_info["private_key"]
-    pub_key = agent_info["public_key"]
     print(f"    * Cert Fingerprint: {agent_info['certificate_fingerprint'][:24]}...")
-    print(f"    * RSA 2048 Private Key Encrypted at Rest (AES-256-GCM)")
+    print("    * RSA 2048 Private Key Encrypted at Rest (AES-256-GCM)")
 
     # Define Bounded Policy: Max ₹10,000 auto-allow, Above ₹10,000 requires human approval
     policy = PolicyRecord(
@@ -85,7 +81,7 @@ def run_live_demo():
         version="1.0"
     )
     loader.save_policy(policy)
-    print(f"    * Policy Configured: Max Auto Amount = Rs 10,000.00 | Human Approval Threshold = Rs 10,000.00")
+    print("    * Policy Configured: Max Auto Amount = Rs 10,000.00 | Human Approval Threshold = Rs 10,000.00")
 
     # --- SCENARIO 1: Valid ₹7,500 Reimbursement ---
     print_header("Scenario 1: Valid Rs 7,500 Reimbursement Request")
@@ -140,7 +136,7 @@ def run_live_demo():
     print_header("Scenario 4: Compromised / Revoked Agent Action Attempt")
     rev_agent_info = reg.register_agent("REVOKED-AGENT-001", "CompromisedAgent", "SecOps", ["CREATE_REIMBURSEMENT"], "FIN-POLICY-001")
     reg.revoke_agent("REVOKED-AGENT-001")
-    print(f"    * Administrator Action: Revoked certificate status for REVOKED-AGENT-001 in Registry.")
+    print("    * Administrator Action: Revoked certificate status for REVOKED-AGENT-001 in Registry.")
     p4 = {
         "request_id": f"REQ-DEMO-04-{uuid.uuid4().hex[:6]}",
         "agent_id": "REVOKED-AGENT-001",
@@ -224,7 +220,7 @@ def run_live_demo():
     
     # Simulate database tampering
     ev_store.simulate_tamper(ev_id, "amount", 999999.0)
-    print(f"    * Malicious Database Action   : Changed 'amount' off-chain to Rs 999,999.00")
+    print("    * Malicious Database Action   : Changed 'amount' off-chain to Rs 999,999.00")
     
     # Verify hash against Fabric ledger
     tampered_ev = ev_store.get_evidence(ev_id)
@@ -282,7 +278,7 @@ def run_live_demo():
 
     # Restore Orderer Service
     fabric.record_action_event = orig_record_fn
-    print(f"    * Network Status Restored  : Hyperledger Fabric Orderer service back online.")
+    print("    * Network Status Restored  : Hyperledger Fabric Orderer service back online.")
     
     # Process Retry
     ok, msg = retry_mgr.retry_commit(event_id_8, fabric)

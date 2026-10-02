@@ -1,6 +1,5 @@
-import pytest
 from identity_manager.certificate_manager import CertificateManager
-from identity_manager.key_manager import KeyManager
+
 
 def test_root_ca_and_cert_issuance():
     cm = CertificateManager(ca_common_name="Test CA")

@@ -1,7 +1,6 @@
-import json
-import pytest
 from evidence_manager.hash_manager import HashManager
 from evidence_manager.provenance import ProvenanceBuilder
+
 
 def test_canonical_serialization_key_ordering_invariance():
     """

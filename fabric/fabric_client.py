@@ -1,8 +1,9 @@
 import os
 import socket
-import json
-from typing import Dict, Any, List, Optional
+from typing import Any
+
 from fabric.ledger_service import FabricLedgerService
+
 
 class FabricClient:
     """
@@ -16,7 +17,7 @@ class FabricClient:
         self.ledger_service = FabricLedgerService()
         self.chaincode = self.ledger_service.chaincode
 
-    def _invoke_grpc_peer(self, function_name: str, args: List[str]) -> Dict[str, Any]:
+    def _invoke_grpc_peer(self, function_name: str, args: list[str]) -> dict[str, Any]:
         """
         Submits gRPC transaction proposal directly to the Hyperledger Fabric Peer node.
         Honestly reports whether real Fabric gRPC Gateway SDK connection is established,
@@ -57,7 +58,7 @@ class FabricClient:
         policy_version: str,
         evidence_reference: str,
         evidence_hash: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         return self.ledger_service.record_audit_event(
             event_id=event_id,
             request_id=request_id,
@@ -81,7 +82,7 @@ class FabricClient:
         policy_version: str = "1.0",
         organization: str = "OrgA",
         caller_org: str = "OrgA"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Invokes chaincode recordEvidence and commits block to ledger."""
         tx_record = self.chaincode.recordEvidence(
             request_id=request_id,
@@ -107,26 +108,26 @@ class FabricClient:
             "committed_at": block.timestamp
         }
 
-    def get_evidence(self, request_id: str) -> Optional[Dict[str, Any]]:
+    def get_evidence(self, request_id: str) -> dict[str, Any] | None:
         return self.chaincode.getEvidence(request_id)
 
-    def verify_evidence(self, request_id: str, recalculated_hash: str) -> Dict[str, Any]:
+    def verify_evidence(self, request_id: str, recalculated_hash: str) -> dict[str, Any]:
         return self.chaincode.verifyEvidence(request_id, recalculated_hash)
 
-    def get_transaction_metadata(self, tx_id: str) -> Optional[Dict[str, Any]]:
+    def get_transaction_metadata(self, tx_id: str) -> dict[str, Any] | None:
         return self.chaincode.getTransactionMetadata(tx_id)
 
-    def get_event(self, event_id: str) -> Optional[Dict[str, Any]]:
+    def get_event(self, event_id: str) -> dict[str, Any] | None:
         return self.chaincode.GetActionEvent(event_id)
 
-    def query_by_agent(self, agent_id: str) -> List[Dict[str, Any]]:
+    def query_by_agent(self, agent_id: str) -> list[dict[str, Any]]:
         return self.chaincode.QueryEventsByAgent(agent_id)
 
-    def query_by_decision(self, decision: str) -> List[Dict[str, Any]]:
+    def query_by_decision(self, decision: str) -> list[dict[str, Any]]:
         return self.chaincode.QueryEventsByDecision(decision)
 
-    def verify_evidence_hash(self, evidence_reference: str, recalculated_hash: str) -> Dict[str, Any]:
+    def verify_evidence_hash(self, evidence_reference: str, recalculated_hash: str) -> dict[str, Any]:
         return self.chaincode.VerifyEvidenceReference(evidence_reference, recalculated_hash)
 
-    def get_blocks(self) -> Dict[str, Any]:
+    def get_blocks(self) -> dict[str, Any]:
         return self.ledger_service.get_ledger_summary()

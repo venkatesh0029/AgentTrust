@@ -1,7 +1,8 @@
+import datetime
 import hashlib
 import json
-import datetime
-from typing import Dict, Any, Optional
+from typing import Any
+
 
 class ProvenanceBuilder:
     """
@@ -14,7 +15,7 @@ class ProvenanceBuilder:
         agent_id: str,
         action: str,
         resource: str,
-        parameters: Dict[str, Any],
+        parameters: dict[str, Any],
         decision: str,
         reason: str,
         policy_id: str,
@@ -23,10 +24,10 @@ class ProvenanceBuilder:
         api_result: str,
         cert_fingerprint: str = "SHA256:DEFAULT",
         nonce: str = "",
-        approval_reference: Optional[str] = None,
-        error_details: Optional[str] = None,
-        execution_trace: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        approval_reference: str | None = None,
+        error_details: str | None = None,
+        execution_trace: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         evidence_id = f"EVIDENCE-{request_id}"
 
         # Compute deterministic hashes for input parameters and output results

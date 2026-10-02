@@ -1,3 +1,3 @@
-from audit_writer.chain_writer import AuditChainWriter, AuditChainRecord
+from audit_writer.chain_writer import AuditChainRecord, AuditChainWriter
 
-__all__ = ["AuditChainWriter", "AuditChainRecord"]
+__all__ = ["AuditChainRecord", "AuditChainWriter"]

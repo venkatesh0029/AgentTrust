@@ -1,7 +1,8 @@
 import datetime
-from typing import List, Optional, Dict, Any
 from enum import Enum
+
 from pydantic import BaseModel, Field
+
 
 class PolicyDecision(str, Enum):
     ALLOWED = "ALLOWED"
@@ -36,7 +37,7 @@ class PolicyHistoryEntry(BaseModel):
     version: str
     maximum_amount: float
     human_approval_above: float
-    allowed_actions: List[str]
+    allowed_actions: list[str]
     allowed_resource: str
     changed_at: str
     change_author: str = "POLICY_ADMIN"
@@ -45,7 +46,7 @@ class PolicyHistoryEntry(BaseModel):
 class PolicyRecord(BaseModel):
     policy_id: str
     agent_id: str
-    allowed_actions: List[str]
+    allowed_actions: list[str]
     allowed_resource: str
     maximum_amount: float
     human_approval_above: float
@@ -53,7 +54,7 @@ class PolicyRecord(BaseModel):
     version: str = "1.0"
     status: str = "ACTIVE"
     effective_from: str = Field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
-    effective_until: Optional[str] = None
+    effective_until: str | None = None
     change_author: str = "POLICY_ADMIN"
     change_reason: str = "Initial Policy Setup"
-    version_history: List[PolicyHistoryEntry] = Field(default_factory=list)
+    version_history: list[PolicyHistoryEntry] = Field(default_factory=list)

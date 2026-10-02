@@ -4,10 +4,8 @@ Demonstrates real AI Agent tool calls intercepted live by AgentTrust Security Ga
 Shows valid agent execution vs. adversarial LLM prompt injection attack interception.
 """
 
-import sys
 import os
-import time
-import datetime
+import sys
 import uuid
 
 if hasattr(sys.stdout, 'reconfigure'):
@@ -15,8 +13,9 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
-from agenttrust_sdk.agent_guard import agenttrust_guarded, AgentTrustSDK
-from server import agent_registry, action_gateway
+from agenttrust_sdk.agent_guard import agenttrust_guarded
+from server import agent_registry
+
 
 def print_banner(title: str):
     print("\n" + "=" * 80)
@@ -31,8 +30,8 @@ def main():
     policy_id = f"LLM-POLICY-{uuid.uuid4().hex[:4].upper()}"
     print(f"\n[1] Registering Autonomous LLM Agent: {agent_id}...")
 
-    from server import policy_loader
     from policy_engine.policy_models import PolicyRecord, WorkingHours
+    from server import policy_loader
     policy_loader.save_policy(PolicyRecord(
         policy_id=policy_id,
         agent_id=agent_id,

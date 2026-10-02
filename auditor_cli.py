@@ -4,12 +4,12 @@ Allows external auditors to independently verify transaction evidence inclusion 
 Root CA certificate trust chains, and Fabric block Merkle root digests without trusting gateway runtime.
 """
 
-import sys
-import json
 import argparse
-from typing import Dict, Any
+import json
+import sys
+
 from evidence_manager.merkle_tree import MerkleTree
-from identity_manager.signature_manager import SignatureManager
+
 
 def verify_evidence_proof(evidence_file: str, merkle_root: str, proof_file: str) -> bool:
     """Verifies off-chain evidence inclusion against Merkle root."""

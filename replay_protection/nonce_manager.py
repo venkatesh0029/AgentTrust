@@ -1,11 +1,11 @@
 import datetime
-from typing import Dict
+
 
 class NonceManager:
     """Tracks seen nonces to prevent replay attacks with automatic eviction."""
 
     def __init__(self):
-        self._used_nonces: Dict[str, float] = {}
+        self._used_nonces: dict[str, float] = {}
 
     def is_nonce_used(self, nonce: str) -> bool:
         return nonce in self._used_nonces

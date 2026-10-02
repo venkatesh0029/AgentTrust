@@ -1,6 +1,7 @@
 import datetime
-from typing import Dict, Optional, List, Any
-from policy_engine.policy_models import PolicyRecord, PolicyHistoryEntry
+
+from policy_engine.policy_models import PolicyHistoryEntry, PolicyRecord
+
 
 class PolicyLoader:
     """
@@ -8,7 +9,7 @@ class PolicyLoader:
     """
 
     def __init__(self):
-        self._policies: Dict[str, PolicyRecord] = {}
+        self._policies: dict[str, PolicyRecord] = {}
 
     def save_policy(self, policy: PolicyRecord, author: str = "POLICY_ADMIN", reason: str = "Policy Update") -> None:
         """Saves or updates policy record, preserving version history."""
@@ -36,7 +37,7 @@ class PolicyLoader:
         policy.change_reason = reason
         self._policies[policy.policy_id] = policy.model_copy(deep=True)
 
-    def rollback_policy(self, policy_id: str, target_version: str, author: str = "POLICY_ADMIN") -> Optional[PolicyRecord]:
+    def rollback_policy(self, policy_id: str, target_version: str, author: str = "POLICY_ADMIN") -> PolicyRecord | None:
         """
         Rolls back policy to a historical version.
         Returns rolled-back PolicyRecord if successful, None otherwise.
@@ -87,9 +88,9 @@ class PolicyLoader:
         self._policies[policy_id] = updated
         return updated
 
-    def get_policy(self, policy_id: str) -> Optional[PolicyRecord]:
+    def get_policy(self, policy_id: str) -> PolicyRecord | None:
         pol = self._policies.get(policy_id)
         return pol.model_copy(deep=True) if pol else None
 
-    def list_policies(self) -> List[PolicyRecord]:
+    def list_policies(self) -> list[PolicyRecord]:
         return [p.model_copy(deep=True) for p in self._policies.values()]

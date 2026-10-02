@@ -1,7 +1,8 @@
-import json
-import hashlib
 import datetime
-from typing import Dict, Any, List, Optional
+import hashlib
+import json
+from typing import Any
+
 
 class AgentTrustChaincode:
     """
@@ -11,15 +12,15 @@ class AgentTrustChaincode:
 
     def __init__(self):
         # World State storage (Simulates CouchDB/LevelDB state DB in Fabric Peer)
-        self.world_state: Dict[str, str] = {}
+        self.world_state: dict[str, str] = {}
         # Transaction History log
-        self.tx_history: List[Dict[str, Any]] = []
+        self.tx_history: list[dict[str, Any]] = []
 
-    def _put_state(self, key: str, value_dict: Dict[str, Any]) -> None:
+    def _put_state(self, key: str, value_dict: dict[str, Any]) -> None:
         """Puts key-value object into World State DB."""
         self.world_state[key] = json.dumps(value_dict, sort_keys=True)
 
-    def _get_state(self, key: str) -> Optional[Dict[str, Any]]:
+    def _get_state(self, key: str) -> dict[str, Any] | None:
         """Gets key-value object from World State DB."""
         val = self.world_state.get(key)
         if val:
@@ -27,7 +28,7 @@ class AgentTrustChaincode:
         return None
 
     # --- Agent Lifecycle Functions ---
-    def RegisterAgent(self, agent_id: str, owner: str, cert_fingerprint: str, status: str = "ACTIVE") -> Dict[str, Any]:
+    def RegisterAgent(self, agent_id: str, owner: str, cert_fingerprint: str, status: str = "ACTIVE") -> dict[str, Any]:
         key = f"AGENT_{agent_id}"
         agent_data = {
             "docType": "agent",
@@ -40,7 +41,7 @@ class AgentTrustChaincode:
         self._put_state(key, agent_data)
         return agent_data
 
-    def GetAgent(self, agent_id: str) -> Optional[Dict[str, Any]]:
+    def GetAgent(self, agent_id: str) -> dict[str, Any] | None:
         return self._get_state(f"AGENT_{agent_id}")
 
     def UpdateAgentStatus(self, agent_id: str, new_status: str) -> bool:
@@ -59,7 +60,7 @@ class AgentTrustChaincode:
         return self.UpdateAgentStatus(agent_id, "SUSPENDED")
 
     # --- Policy Functions ---
-    def RegisterPolicy(self, policy_id: str, agent_id: str, policy_data: Dict[str, Any]) -> Dict[str, Any]:
+    def RegisterPolicy(self, policy_id: str, agent_id: str, policy_data: dict[str, Any]) -> dict[str, Any]:
         key = f"POLICY_{policy_id}"
         policy_record = {
             "docType": "policy",
@@ -71,7 +72,7 @@ class AgentTrustChaincode:
         self._put_state(key, policy_record)
         return policy_record
 
-    def GetPolicy(self, policy_id: str) -> Optional[Dict[str, Any]]:
+    def GetPolicy(self, policy_id: str) -> dict[str, Any] | None:
         return self._get_state(f"POLICY_{policy_id}")
 
     # --- Action Event Functions ---
@@ -88,7 +89,7 @@ class AgentTrustChaincode:
         policy_version: str,
         evidence_reference: str,
         evidence_hash: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         key = f"EVENT_{event_id}"
         if self._get_state(key):
             raise ValueError(f"Immutability Violation: Action event '{event_id}' already committed to ledger.")
@@ -112,10 +113,10 @@ class AgentTrustChaincode:
         self.tx_history.append(event_record)
         return event_record
 
-    def GetActionEvent(self, event_id: str) -> Optional[Dict[str, Any]]:
+    def GetActionEvent(self, event_id: str) -> dict[str, Any] | None:
         return self._get_state(f"EVENT_{event_id}")
 
-    def QueryEventsByAgent(self, agent_id: str) -> List[Dict[str, Any]]:
+    def QueryEventsByAgent(self, agent_id: str) -> list[dict[str, Any]]:
         results = []
         for key, val_str in self.world_state.items():
             if key.startswith("EVENT_"):
@@ -124,7 +125,7 @@ class AgentTrustChaincode:
                     results.append(data)
         return results
 
-    def QueryEventsByDecision(self, decision: str) -> List[Dict[str, Any]]:
+    def QueryEventsByDecision(self, decision: str) -> list[dict[str, Any]]:
         results = []
         for key, val_str in self.world_state.items():
             if key.startswith("EVENT_"):
@@ -142,7 +143,7 @@ class AgentTrustChaincode:
         policy_version: str = "1.0",
         organization: str = "OrgA",
         caller_org: str = "OrgA"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Hyperledger Fabric chaincode function: recordEvidence
         Stores audit evidence hashes on-chain after caller authorization check.
@@ -172,11 +173,11 @@ class AgentTrustChaincode:
         self.tx_history.append(record)
         return record
 
-    def getEvidence(self, request_id: str) -> Optional[Dict[str, Any]]:
+    def getEvidence(self, request_id: str) -> dict[str, Any] | None:
         """Hyperledger Fabric chaincode function: getEvidence"""
         return self._get_state(f"EVID_{request_id}")
 
-    def verifyEvidence(self, request_id: str, recalculated_hash: str) -> Dict[str, Any]:
+    def verifyEvidence(self, request_id: str, recalculated_hash: str) -> dict[str, Any]:
         """Hyperledger Fabric chaincode function: verifyEvidence"""
         record = self.getEvidence(request_id)
         if not record:
@@ -193,14 +194,14 @@ class AgentTrustChaincode:
             "status": "VERIFIED" if is_valid else "TAMPERING_DETECTED"
         }
 
-    def getTransactionMetadata(self, tx_id: str) -> Optional[Dict[str, Any]]:
+    def getTransactionMetadata(self, tx_id: str) -> dict[str, Any] | None:
         """Hyperledger Fabric chaincode function: getTransactionMetadata"""
         for tx in self.tx_history:
             if tx.get("tx_id") == tx_id:
                 return tx
         return None
 
-    def EvaluateTransactionPolicy(self, agent_id: str, action: str, amount: float = 0.0, policy_id: Optional[str] = None) -> Dict[str, Any]:
+    def EvaluateTransactionPolicy(self, agent_id: str, action: str, amount: float = 0.0, policy_id: str | None = None) -> dict[str, Any]:
         """
         On-chain smart contract policy verification.
         Ensures that even if the gateway is bypassed or compromised, the ledger smart contract
@@ -228,7 +229,7 @@ class AgentTrustChaincode:
 
         return {"allowed": True, "reason": "CHAINCODE_APPROVED"}
 
-    def GetEvidenceHash(self, request_id: str) -> Optional[str]:
+    def GetEvidenceHash(self, request_id: str) -> str | None:
         record = self.getEvidence(request_id)
         if record:
             return record.get("evidence_hash")
@@ -239,7 +240,7 @@ class AgentTrustChaincode:
                     return data.get("evidence_hash")
         return None
 
-    def VerifyEvidenceReference(self, evidence_reference: str, recalculated_hash: str) -> Dict[str, Any]:
+    def VerifyEvidenceReference(self, evidence_reference: str, recalculated_hash: str) -> dict[str, Any]:
         for key, val_str in self.world_state.items():
             if key.startswith("EVENT_") or key.startswith("EVID_"):
                 data = json.loads(val_str)

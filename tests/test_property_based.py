@@ -3,14 +3,18 @@ Property-Based Testing Suite using Hypothesis for AgentTrust Security Framework.
 Formally verifies system invariants over randomized, generated parameter domains.
 """
 
-import pytest
 import datetime
-import uuid
 import math
-from hypothesis import given, strategies as st, settings
+import uuid
 
-from server import agent_registry, action_gateway
-from identity_manager.signature_manager import SignatureManager
+import pytest
+
+hypothesis = pytest.importorskip("hypothesis")
+from hypothesis import given, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+
+from identity_manager.signature_manager import SignatureManager  # noqa: E402
+from server import action_gateway, agent_registry  # noqa: E402
 
 # Generate test agent identity once for fuzzing session
 FUZZ_AGENT_ID = "AGENT-PROPERTY-TEST-001"

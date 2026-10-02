@@ -1,8 +1,11 @@
-import json
 import base64
+import json
+
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec, rsa, padding
+from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
+
 from identity_manager.key_manager import KeyManager
+
 
 class SignatureManager:
     """

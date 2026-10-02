@@ -4,19 +4,23 @@ Provides native decorator (@agenttrust_guarded) for integrating autonomous AI ag
 (LangChain, CrewAI, AutoGen, LlamaIndex, OpenAI Tool Calling) with AgentTrust Security Gateway.
 """
 
-import functools
 import datetime
+import functools
 import uuid
-import requests
-from typing import Dict, Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
+
+import requests  # type: ignore[import-untyped]
+
 from identity_manager.signature_manager import SignatureManager
+
 
 class AgentTrustSDK:
     """
     Client SDK for AI Agents interacting with the AgentTrust Action Gateway.
     """
 
-    def __init__(self, gateway_url: str = "http://127.0.0.1:8000", admin_role: Optional[str] = None, use_local_gateway: bool = False):
+    def __init__(self, gateway_url: str = "http://127.0.0.1:8000", admin_role: str | None = None, use_local_gateway: bool = False):
         self.gateway_url = gateway_url.rstrip("/")
         self.admin_role = admin_role
         self.use_local_gateway = use_local_gateway
@@ -27,9 +31,9 @@ class AgentTrustSDK:
         private_key_pem: str,
         action: str,
         resource: str,
-        parameters: Dict[str, Any],
-        amount: Optional[float] = None
-    ) -> Dict[str, Any]:
+        parameters: dict[str, Any],
+        amount: float | None = None
+    ) -> dict[str, Any]:
         """
         Constructs a cryptographically signed payload and submits it to the AgentTrust Gateway.
         Fails closed on network failures when remote gateway mode is enabled.
@@ -79,7 +83,7 @@ class AgentTrustSDK:
             # Fail Closed: Return BLOCKED decision and log network failure error
             return {
                 "decision": "BLOCKED",
-                "reason": f"SDK_NETWORK_ERROR: Unable to reach AgentTrust Gateway ({str(e)})",
+                "reason": f"SDK_NETWORK_ERROR: Unable to reach AgentTrust Gateway ({e!s})",
                 "protected_api_result": "DENIED"
             }
 

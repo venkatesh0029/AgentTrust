@@ -1,36 +1,37 @@
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import time
-import uuid
 import datetime
 import statistics
-import multiprocessing
+import time
+
 try:
     import psutil
 except ImportError:
     psutil = None
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Dict, Any, Tuple
+from typing import Any
 
-from identity_manager.certificate_manager import CertificateManager
-from identity_manager.signature_manager import SignatureManager
+from action_gateway.gateway import ActionGateway
 from agent_registry.identity_store import IdentityStore
 from agent_registry.registration import AgentRegistry
-from policy_engine.policy_loader import PolicyLoader
-from policy_engine.policy_evaluator import PolicyEvaluator
-from policy_engine.policy_models import PolicyRecord, WorkingHours
-from replay_protection.request_tracker import RequestTracker
-from protected_api.finance_api import ProtectedFinanceAPI
-from human_approval.approval_manager import HumanApprovalManager
-from evidence_manager.evidence_store import EvidenceStore
 from audit_writer.chain_writer import AuditChainWriter
+from evidence_manager.evidence_store import EvidenceStore
 from fabric.fabric_client import FabricClient
-from action_gateway.gateway import ActionGateway
+from human_approval.approval_manager import HumanApprovalManager
+from identity_manager.certificate_manager import CertificateManager
+from identity_manager.signature_manager import SignatureManager
+from policy_engine.policy_evaluator import PolicyEvaluator
+from policy_engine.policy_loader import PolicyLoader
+from policy_engine.policy_models import PolicyRecord, WorkingHours
+from protected_api.finance_api import ProtectedFinanceAPI
+from replay_protection.request_tracker import RequestTracker
 from risk_engine.risk_evaluator import RiskEvaluator
 
-def calculate_percentiles(data: List[float]) -> Dict[str, float]:
+
+def calculate_percentiles(data: list[float]) -> dict[str, float]:
     """Calculates Mean, StdDev, Min, Max, P50 (median), P90, P95, and P99 percentiles."""
     if not data:
         return {"mean": 0, "stddev": 0, "min": 0, "max": 0, "p50": 0, "p90": 0, "p95": 0, "p99": 0}
@@ -83,7 +84,7 @@ class BenchmarkEngine:
             self.api, self.approval, self.ev_store, self.fabric, chain_writer=self.writer
         )
 
-    def measure_stage_latencies(self, num_samples: int = 100) -> Dict[str, Dict[str, float]]:
+    def measure_stage_latencies(self, num_samples: int = 100) -> dict[str, dict[str, float]]:
         """Measures exact per-stage execution times in milliseconds."""
         ag_info = self.reg.register_agent("BENCH-AGENT-STAGE", "BenchAgent", "Dept", ["CREATE_PURCHASE_ORDER"], "BENCH-POL")
         priv_key = ag_info["private_key"]
@@ -97,7 +98,7 @@ class BenchmarkEngine:
         )
         self.loader.save_policy(pol)
 
-        stage_times = {
+        stage_times: dict[str, list[float]] = {
             "sig_generation": [],
             "sig_verification": [],
             "cert_validation": [],
@@ -141,12 +142,12 @@ class BenchmarkEngine:
 
             # 4. Replay Check
             t0 = time.perf_counter()
-            self.replay.check_and_track(req_id, n, payload["timestamp"])
+            self.replay.check_and_track(req_id, n, str(payload["timestamp"]))
             stage_times["replay_checking"].append((time.perf_counter() - t0) * 1000.0)
 
             # 5. Risk Evaluation
             t0 = time.perf_counter()
-            r_res = RiskEvaluator.evaluate("BENCH-AGENT-STAGE", "CREATE_PURCHASE_ORDER", "SUP-1", 5000.0, ag_info, payload["timestamp"])
+            r_res = RiskEvaluator.evaluate("BENCH-AGENT-STAGE", "CREATE_PURCHASE_ORDER", "SUP-1", 5000.0, ag_info, str(payload["timestamp"]))
             stage_times["risk_evaluation"].append((time.perf_counter() - t0) * 1000.0)
 
             # 6. Policy Evaluation
@@ -183,7 +184,7 @@ class BenchmarkEngine:
 
         return {k: calculate_percentiles(v) for k, v in stage_times.items()}
 
-    def run_concurrency_scale_test(self, num_agents_list: List[int] = [1, 10, 50, 100], reqs_per_agent: int = 5) -> Dict[int, Dict[str, Any]]:
+    def run_concurrency_scale_test(self, num_agents_list: list[int] = [1, 10, 50, 100], reqs_per_agent: int = 5) -> dict[int, dict[str, Any]]:
         """Benchmarks system throughput and latency under 1, 10, 50, and 100 concurrent agents."""
         results = {}
 
@@ -253,7 +254,7 @@ class BenchmarkEngine:
 
         return results
 
-    def run_ablation_study(self, num_requests: int = 50) -> Dict[str, Dict[str, float]]:
+    def run_ablation_study(self, num_requests: int = 50) -> dict[str, dict[str, float]]:
         """Ablation Experiment measuring performance effect of disabling individual security components."""
         ag_info = self.reg.register_agent("ABLATE-AGENT-01", "AblateAgent", "Dept", ["CREATE_PURCHASE_ORDER"], "BENCH-POL")
         pk = ag_info["private_key"]

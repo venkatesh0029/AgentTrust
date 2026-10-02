@@ -1,7 +1,8 @@
 import datetime
-from typing import Dict, Any, Tuple, List
-from policy_engine.policy_models import PolicyRecord, PolicyDecision, DecisionReason
+
 from policy_engine.policy_loader import PolicyLoader
+from policy_engine.policy_models import DecisionReason, PolicyDecision
+
 
 class PolicyEvaluator:
     """
@@ -18,10 +19,10 @@ class PolicyEvaluator:
         action: str,
         resource: str,
         amount: float,
-        request_timestamp_iso: str,
+        request_timestamp_iso: str = "",
         risk_score: float = 0.0,
         risk_level: str = "LOW"
-    ) -> Tuple[PolicyDecision, DecisionReason, str, List[str]]:
+    ) -> tuple[PolicyDecision, DecisionReason, str, list[str]]:
         """
         Evaluates policy rules with Deny-by-Default, Risk Integration, and Most-Restrictive Enforcement.
         Returns: (PolicyDecision, DecisionReason, policy_version, matched_rules)
@@ -77,8 +78,8 @@ class PolicyEvaluator:
         return PolicyDecision.ALLOWED, DecisionReason.WITHIN_AUTHORITY_LIMIT, policy.version, matched_rules
 
     def resolve_conflicting_policies(
-        self, policy_ids: List[str], action: str, resource: str, amount: float, timestamp_iso: str
-    ) -> Tuple[PolicyDecision, DecisionReason, str]:
+        self, policy_ids: list[str], action: str, resource: str, amount: float, timestamp_iso: str
+    ) -> tuple[PolicyDecision, DecisionReason, str]:
         """
         Conflict Resolver: Evaluates multiple active policies.
         Applies 'Most Restrictive Rule Wins' principle.

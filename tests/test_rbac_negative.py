@@ -1,5 +1,5 @@
-import pytest
-from agent_registry.admin_rbac import RBACManager, AdminRole
+from agent_registry.admin_rbac import AdminRole, RBACManager
+
 
 def test_auditor_attempts_to_revoke_agent_denied():
     assert RBACManager.is_action_allowed(AdminRole.AUDITOR, "revoke_agent") is False

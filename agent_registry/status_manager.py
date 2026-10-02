@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class AgentStatus(str, Enum):
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
@@ -11,7 +12,7 @@ class StatusManager:
     Validates and transitions AI agent operational statuses.
     """
 
-    VALID_TRANSITIONS = {
+    VALID_TRANSITIONS: dict[AgentStatus, list[AgentStatus]] = {
         AgentStatus.ACTIVE: [AgentStatus.SUSPENDED, AgentStatus.REVOKED, AgentStatus.EXPIRED],
         AgentStatus.SUSPENDED: [AgentStatus.ACTIVE, AgentStatus.REVOKED, AgentStatus.EXPIRED],
         AgentStatus.REVOKED: [],  # Terminal state

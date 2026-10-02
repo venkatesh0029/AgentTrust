@@ -1,19 +1,22 @@
-import pytest
 import datetime
 import uuid
-from identity_manager.certificate_manager import CertificateManager
-from identity_manager.signature_manager import SignatureManager
+
+import pytest
+
+from action_gateway.gateway import ActionGateway
 from agent_registry.identity_store import IdentityStore
 from agent_registry.registration import AgentRegistry
-from policy_engine.policy_loader import PolicyLoader
-from policy_engine.policy_evaluator import PolicyEvaluator
-from policy_engine.policy_models import PolicyRecord, WorkingHours, PolicyDecision
-from replay_protection.request_tracker import RequestTracker
-from protected_api.finance_api import ProtectedFinanceAPI
-from human_approval.approval_manager import HumanApprovalManager
 from evidence_manager.evidence_store import EvidenceStore
 from fabric.fabric_client import FabricClient
-from action_gateway.gateway import ActionGateway
+from human_approval.approval_manager import HumanApprovalManager
+from identity_manager.certificate_manager import CertificateManager
+from identity_manager.signature_manager import SignatureManager
+from policy_engine.policy_evaluator import PolicyEvaluator
+from policy_engine.policy_loader import PolicyLoader
+from policy_engine.policy_models import PolicyDecision, PolicyRecord, WorkingHours
+from protected_api.finance_api import ProtectedFinanceAPI
+from replay_protection.request_tracker import RequestTracker
+
 
 @pytest.fixture
 def resilience_setup():

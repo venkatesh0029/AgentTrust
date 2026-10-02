@@ -1,8 +1,10 @@
+import datetime
 import hashlib
 import json
-import datetime
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from fabric.chaincode.agent_trust_chaincode import AgentTrustChaincode
+
 
 class Block:
     """Represents a single immutable block in the Hyperledger Fabric ledger chain."""
@@ -10,9 +12,9 @@ class Block:
     def __init__(
         self,
         index: int,
-        transactions: List[Dict[str, Any]],
+        transactions: list[dict[str, Any]],
         previous_hash: str,
-        timestamp: Optional[str] = None
+        timestamp: str | None = None
     ):
         self.index = index
         self.transactions = transactions
@@ -30,7 +32,7 @@ class Block:
         json_bytes = json.dumps(block_content, sort_keys=True, separators=(',', ':')).encode('utf-8')
         return hashlib.sha256(json_bytes).hexdigest()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "index": self.index,
             "transactions_count": len(self.transactions),
@@ -48,8 +50,8 @@ class FabricLedgerService:
 
     def __init__(self):
         self.chaincode = AgentTrustChaincode()
-        self.blocks: List[Block] = []
-        self._pending_transactions: List[Dict[str, Any]] = []
+        self.blocks: list[Block] = []
+        self._pending_transactions: list[dict[str, Any]] = []
         self._create_genesis_block()
 
     def _create_genesis_block(self):
@@ -67,7 +69,7 @@ class FabricLedgerService:
         )
         self.blocks.append(genesis_block)
 
-    def commit_transaction(self, tx_data: Dict[str, Any]) -> Block:
+    def commit_transaction(self, tx_data: dict[str, Any]) -> Block:
         """
         Commits a transaction into a new block on the Hyperledger Fabric ledger.
         """
@@ -93,7 +95,7 @@ class FabricLedgerService:
         policy_version: str,
         evidence_reference: str,
         evidence_hash: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Executes Chaincode RecordActionEvent and commits block to ledger.
         """
@@ -129,7 +131,7 @@ class FabricLedgerService:
             "committed_at": block.timestamp
         }
 
-    def get_ledger_summary(self) -> Dict[str, Any]:
+    def get_ledger_summary(self) -> dict[str, Any]:
         return {
             "total_blocks": len(self.blocks),
             "latest_block_hash": self.blocks[-1].hash if self.blocks else None,

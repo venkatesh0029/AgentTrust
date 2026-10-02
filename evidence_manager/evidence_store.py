@@ -1,13 +1,15 @@
-from typing import Dict, Any, Optional
+from typing import Any
+
 from evidence_manager.hash_manager import HashManager
+
 
 class EvidenceStore:
     """Off-Chain Storage engine for detailed sensitive evidence records."""
 
     def __init__(self):
-        self._store: Dict[str, Dict[str, Any]] = {}
+        self._store: dict[str, dict[str, Any]] = {}
 
-    def save_evidence(self, evidence_record: Dict[str, Any]) -> str:
+    def save_evidence(self, evidence_record: dict[str, Any]) -> str:
         """
         Saves evidence off-chain and returns calculated SHA-256 hash.
         """
@@ -27,10 +29,10 @@ class EvidenceStore:
             pass
         return ev_hash
 
-    def get_evidence(self, evidence_id: str) -> Optional[Dict[str, Any]]:
+    def get_evidence(self, evidence_id: str) -> dict[str, Any] | None:
         return self._store.get(evidence_id)
 
-    def get_evidence_by_request_id(self, request_id: str) -> Optional[Dict[str, Any]]:
+    def get_evidence_by_request_id(self, request_id: str) -> dict[str, Any] | None:
         for ev in self._store.values():
             if ev.get("request_id") == request_id:
                 return ev

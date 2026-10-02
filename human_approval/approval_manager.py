@@ -1,7 +1,8 @@
 import datetime
-import uuid
 import hashlib
-from typing import Dict, Any, List, Optional, Tuple, Set
+import uuid
+from typing import Any
+
 
 class HumanApprovalManager:
     """
@@ -10,9 +11,9 @@ class HumanApprovalManager:
     """
 
     def __init__(self):
-        self._pending_approvals: Dict[str, Dict[str, Any]] = {}
+        self._pending_approvals: dict[str, dict[str, Any]] = {}
         self._approval_counter = 100
-        self._used_approval_tokens: Set[str] = set()
+        self._used_approval_tokens: set[str] = set()
 
     def create_approval_request(
         self,
@@ -20,13 +21,13 @@ class HumanApprovalManager:
         agent_id: str,
         action: str,
         resource: str,
-        parameters: Dict[str, Any],
+        parameters: dict[str, Any],
         reason: str,
         policy_id: str,
         request_hash: str = "",
         policy_version: str = "1.0",
         expires_in_seconds: int = 3600
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Creates a pending human approval ticket with bound approval token."""
         self._approval_counter += 1
         approval_id = f"APPR-REQ-{self._approval_counter}"
@@ -59,27 +60,27 @@ class HumanApprovalManager:
         self._pending_approvals[approval_id] = record
         return record
 
-    def get_approval_by_id(self, approval_id: str) -> Optional[Dict[str, Any]]:
+    def get_approval_by_id(self, approval_id: str) -> dict[str, Any] | None:
         return self._pending_approvals.get(approval_id)
 
-    def get_approval_by_request_id(self, request_id: str) -> Optional[Dict[str, Any]]:
+    def get_approval_by_request_id(self, request_id: str) -> dict[str, Any] | None:
         for record in self._pending_approvals.values():
             if record["request_id"] == request_id:
                 return record
         return None
 
-    def list_pending(self) -> List[Dict[str, Any]]:
+    def list_pending(self) -> list[dict[str, Any]]:
         return [r for r in self._pending_approvals.values() if r["status"] == "PENDING"]
 
-    def list_all(self) -> List[Dict[str, Any]]:
+    def list_all(self) -> list[dict[str, Any]]:
         return list(self._pending_approvals.values())
 
     def approve_request(
         self,
         approval_id: str,
         approver_id: str = "HUMAN_SUPERVISOR_01",
-        provided_token: Optional[str] = None
-    ) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+        provided_token: str | None = None
+    ) -> tuple[bool, dict[str, Any] | None, str]:
         """
         Human approver signs off on request using single-use bound approval token.
         Prohibits self-approval where approver_id equals requesting agent_id.
@@ -126,7 +127,7 @@ class HumanApprovalManager:
 
         return True, record, "APPROVED_SUCCESSFULLY"
 
-    def reject_request(self, approval_id: str, approver_id: str = "HUMAN_SUPERVISOR_01", reason: str = "REJECTED_BY_HUMAN") -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    def reject_request(self, approval_id: str, approver_id: str = "HUMAN_SUPERVISOR_01", reason: str = "REJECTED_BY_HUMAN") -> tuple[bool, dict[str, Any] | None, str]:
         """Human approver rejects request."""
         record = self.get_approval_by_id(approval_id)
         if not record:
