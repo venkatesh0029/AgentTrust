@@ -108,9 +108,9 @@ export default function EvidencePage() {
         {chain.length > 0 && (
           <div className="mt-3 pt-3 border-t border-[var(--border)]/50 flex items-center gap-2 flex-wrap text-xs">
             <span className="text-[var(--muted)] shrink-0">Recent Requests:</span>
-            {chain.slice(-5).reverse().map((rec) => (
+            {chain.slice(-5).reverse().map((rec, idx) => (
               <button
-                key={rec.request_id}
+                key={`${rec.request_id || 'ev'}-${idx}`}
                 onClick={() => handleSelectRecord(rec.request_id)}
                 className={`font-mono px-2 py-0.5 rounded border transition-colors ${
                   activeEvidenceId === rec.request_id
@@ -145,9 +145,9 @@ export default function EvidencePage() {
                 No audit records found.
               </p>
             ) : (
-              chain.slice().reverse().map((rec) => (
+              chain.slice().reverse().map((rec, idx) => (
                 <div
-                  key={rec.request_id}
+                  key={`${rec.request_id || 'ev'}-${idx}`}
                   onClick={() => handleSelectRecord(rec.request_id)}
                   className={`p-2.5 rounded-lg border text-xs cursor-pointer transition-all ${
                     activeEvidenceId === rec.request_id

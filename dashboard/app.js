@@ -669,7 +669,12 @@ async function fetchAgentsAndPolicies() {
           <td><strong class="font-mono text-primary">v${a.key_version || 1}</strong></td>
           <td class="font-mono text-xs text-muted">${a.certificate_fingerprint ? a.certificate_fingerprint.substring(0, 16) + '...' : 'SHA256:...'}</td>
           <td>
-            <button class="btn btn-outline btn-sm" onclick="rotateAgentKey('${a.agent_id}')">ROTATE KEY</button>
+            <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+              <button class="btn btn-outline btn-sm" onclick="rotateAgentKey('${a.agent_id}')">ROTATE</button>
+              ${a.status === 'ACTIVE' ? `<button class="btn btn-warning btn-sm" onclick="suspendAgent('${a.agent_id}')">SUSPEND</button>` : `<button class="btn btn-primary btn-sm" onclick="reactivateAgent('${a.agent_id}')">REACTIVATE</button>`}
+              ${a.status !== 'REVOKED' ? `<button class="btn btn-danger btn-sm" onclick="revokeAgent('${a.agent_id}')">REVOKE</button>` : ''}
+              <button class="btn btn-secondary btn-sm" onclick="deleteAgent('${a.agent_id}')">DELETE</button>
+            </div>
           </td>
         </tr>
       `).join('');
@@ -681,9 +686,12 @@ async function fetchAgentsAndPolicies() {
         <tr>
           <td class="font-mono text-xs text-success">${p.policy_id}</td>
           <td class="font-mono text-xs text-primary">${p.agent_id}</td>
-          <td class="font-mono">₹${p.maximum_amount}</td>
-          <td class="font-mono">₹${p.human_approval_above}</td>
+          <td class="font-mono">$${p.maximum_amount}</td>
+          <td class="font-mono">$${p.human_approval_above}</td>
           <td><span class="badge badge-neutral font-mono">v${p.version}</span></td>
+          <td>
+            <button class="btn btn-outline btn-sm" onclick="rollbackPolicy('${p.policy_id}', '1.0')">ROLLBACK v1.0</button>
+          </td>
         </tr>
       `).join('');
     }
@@ -698,6 +706,56 @@ async function rotateAgentKey(agentId) {
     refreshAllDashboardData();
   } catch (err) {
     console.error('Error rotating agent key:', err);
+  }
+}
+
+async function suspendAgent(agentId) {
+  try {
+    await fetch(`/agents/${agentId}/suspend?reason=MANUAL_ADMIN_SUSPEND`, { method: 'POST' });
+    refreshAllDashboardData();
+  } catch (err) {
+    console.error('Error suspending agent:', err);
+  }
+}
+
+async function reactivateAgent(agentId) {
+  try {
+    await fetch(`/agents/${agentId}/reactivate`, { method: 'POST' });
+    refreshAllDashboardData();
+  } catch (err) {
+    console.error('Error reactivating agent:', err);
+  }
+}
+
+async function revokeAgent(agentId) {
+  try {
+    await fetch(`/agents/${agentId}/revoke?reason=MANUAL_REVOCATION`, { method: 'POST' });
+    refreshAllDashboardData();
+  } catch (err) {
+    console.error('Error revoking agent:', err);
+  }
+}
+
+async function deleteAgent(agentId) {
+  if (!confirm(`Are you sure you want to delete agent ${agentId}?`)) return;
+  try {
+    await fetch(`/agents/${agentId}`, { method: 'DELETE' });
+    refreshAllDashboardData();
+  } catch (err) {
+    console.error('Error deleting agent:', err);
+  }
+}
+
+async function rollbackPolicy(policyId, version) {
+  try {
+    await fetch('/policies/rollback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ policy_id: policyId, target_version: version })
+    });
+    refreshAllDashboardData();
+  } catch (err) {
+    console.error('Error rolling back policy:', err);
   }
 }
 
@@ -927,3 +985,9 @@ window.clearConsole = clearConsole;
 window.switchMode = switchMode;
 window.runLiveBenchmark = runLiveBenchmark;
 window.rotateAgentKey = rotateAgentKey;
+window.suspendAgent = suspendAgent;
+window.reactivateAgent = reactivateAgent;
+window.revokeAgent = revokeAgent;
+window.deleteAgent = deleteAgent;
+window.rollbackPolicy = rollbackPolicy;
+

@@ -29,7 +29,7 @@ export default function LedgerPage() {
     valid: boolean;
     status: string;
     verified_blocks: number;
-    message?: string;
+    message?: string | null;
   } | null>(null);
 
   const { data: chain = [], isLoading: isLoadingChain, refetch: refetchChain } = useQuery({
@@ -262,7 +262,7 @@ export default function LedgerPage() {
         ) : (
           filteredChain.slice().reverse().map((block, idx) => (
             <Card
-              key={block.sequence_number || block.event_id || idx}
+              key={`block-${block.sequence_number ?? block.event_id ?? 'b'}-${idx}`}
               className="p-4 transition-all hover:border-[var(--border-strong)] relative overflow-hidden"
             >
               {/* Card Header */}

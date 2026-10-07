@@ -109,23 +109,23 @@ class PolicyEvaluator:
         return PolicyDecision.ALLOWED, DecisionReason.WITHIN_AUTHORITY_LIMIT, versions[0]
 
     @staticmethod
-    def _check_working_hours(request_timestamp_iso: str, start_str: str, end_str: str, use_server_time: bool = True) -> bool:
+    def _check_working_hours(request_timestamp_iso: str, start_str: str, end_str: str, use_server_time: bool = False) -> bool:
         """Verifies if request timestamp falls within configured working hours (e.g. 09:00 - 18:00 UTC, or overnight 22:00 - 06:00 UTC)."""
         try:
-            if use_server_time:
-                dt = datetime.datetime.now(datetime.timezone.utc)
-            else:
-                dt = datetime.datetime.fromisoformat(request_timestamp_iso)
+            if request_timestamp_iso and not use_server_time:
+                dt = datetime.datetime.fromisoformat(request_timestamp_iso.replace("Z", "+00:00"))
                 if dt.tzinfo is not None:
                     dt = dt.astimezone(datetime.timezone.utc)
+            else:
+                dt = datetime.datetime.now(datetime.timezone.utc)
 
             request_time = dt.time()
 
             start_parts = [int(x) for x in start_str.split(':')]
             end_parts = [int(x) for x in end_str.split(':')]
 
-            start_time = datetime.time(start_parts[0], start_parts[1])
-            end_time = datetime.time(end_parts[0], end_parts[1])
+            start_time = datetime.time(start_parts[0], start_parts[1], 0, 0)
+            end_time = datetime.time(end_parts[0], end_parts[1], 59, 999999)
 
             if start_time <= end_time:
                 return start_time <= request_time <= end_time
