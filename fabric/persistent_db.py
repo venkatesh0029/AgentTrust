@@ -42,9 +42,15 @@ class PersistentStorageEngine:
                     certificate TEXT,
                     policy_id TEXT NOT NULL,
                     key_version INTEGER DEFAULT 1,
-                    registered_at TEXT NOT NULL
+                    registered_at TEXT NOT NULL,
+                    private_key TEXT
                 )
             """)
+
+            cursor.execute("PRAGMA table_info(agents)")
+            existing_cols = [row["name"] for row in cursor.fetchall()]
+            if "private_key" not in existing_cols:
+                cursor.execute("ALTER TABLE agents ADD COLUMN private_key TEXT")
 
             # 2. Replay Request Tracker Table
             cursor.execute("""
@@ -127,8 +133,8 @@ class PersistentStorageEngine:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT OR REPLACE INTO agents (
-                    agent_id, agent_name, owner, status, public_key, certificate, policy_id, key_version, registered_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    agent_id, agent_name, owner, status, public_key, certificate, policy_id, key_version, registered_at, private_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 agent_data["agent_id"],
                 agent_data["agent_name"],
@@ -138,7 +144,8 @@ class PersistentStorageEngine:
                 agent_data.get("certificate", ""),
                 agent_data.get("policy_id", "FIN-POLICY-001"),
                 agent_data.get("key_version", 1),
-                agent_data.get("registered_at", "")
+                agent_data.get("registered_at", ""),
+                agent_data.get("private_key", "")
             ))
             conn.commit()
             conn.close()

@@ -65,6 +65,7 @@ class AgentRegistry:
             "certificate_serial": serial_str,
             "certificate": cert_pem,
             "public_key": self._extract_public_key_from_cert(cert_pem),
+            "private_key": priv_key_pem or "",
             "key_version": 1,
             "capabilities": capabilities,
             "policy_id": policy_id,

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { PipelineStrip, DecisionPill, HashText } from "@/components/domain/components";
 import { Card, Button } from "@/components/ui/primitives";
 import { Cpu, Play, RefreshCw, ShieldCheck, AlertTriangle, XCircle, CheckCircle2, Lock, Filter } from "lucide-react";
@@ -119,8 +119,24 @@ export default function GatewayPage() {
     loadData();
   }, []);
 
+  // Filter agents by category button
+  const filteredAgents = useMemo(() => {
+    return agents.filter(a => {
+      if (selectedCategory === "PASS_13_STAGES") return a.category === "PASS_13_STAGES";
+      if (selectedCategory === "HELD_APPROVAL") return a.category === "HELD_APPROVAL";
+      if (selectedCategory === "POLICY_EXCEEDED") return a.category === "POLICY_EXCEEDED";
+      if (selectedCategory === "SUSPENDED_REVOKED") return a.category === "SUSPENDED" || a.category === "REVOKED";
+      return true; // ALL
+    });
+  }, [agents, selectedCategory]);
+
+  const countPass13 = useMemo(() => agents.filter(a => a.category === "PASS_13_STAGES").length, [agents]);
+  const countHeld = useMemo(() => agents.filter(a => a.category === "HELD_APPROVAL").length, [agents]);
+  const countExceeded = useMemo(() => agents.filter(a => a.category === "POLICY_EXCEEDED").length, [agents]);
+  const countSuspendedRevoked = useMemo(() => agents.filter(a => a.category === "SUSPENDED" || a.category === "REVOKED").length, [agents]);
+
   // Sync selected agent's recommended parameters
-  const handleAgentSelect = (selectedId: string) => {
+  const handleAgentSelect = useCallback((selectedId: string) => {
     setAgentId(selectedId);
     const ag = agents.find(a => a.agent_id === selectedId);
     if (ag) {
@@ -129,7 +145,17 @@ export default function GatewayPage() {
       }
       setAmount(ag.recommended_amount);
     }
-  };
+  }, [agents, action]);
+
+  // Sync selected agent when category filter changes
+  useEffect(() => {
+    if (filteredAgents.length > 0) {
+      const exists = filteredAgents.some(a => a.agent_id === agentId);
+      if (!exists) {
+        handleAgentSelect(filteredAgents[0].agent_id);
+      }
+    }
+  }, [selectedCategory, filteredAgents, agentId, handleAgentSelect]);
 
   const selectedAgent = agents.find(a => a.agent_id === agentId);
 
@@ -165,33 +191,40 @@ export default function GatewayPage() {
       setResult(res);
 
       const decision = (res.decision || "").toUpperCase();
-      const reason = (res.reason || "").toUpperCase();
+      const rawReason = typeof res.reason === "string" ? res.reason : JSON.stringify(res.reason || "");
+      const reason = rawReason.toUpperCase();
 
       if (decision.includes("ALLOW") || decision.includes("COMMIT")) {
         setStoppedStage(13); // All 13 stages passed
         setReasonCode(undefined);
       } else if (decision.includes("PENDING") || decision.includes("APPROVAL") || reason.includes("APPROVAL")) {
         setStoppedStage(8); // Stopped at Stage 8 (Decision / Human Approval Ticket)
-        setReasonCode(res.reason || "HELD_FOR_HUMAN_APPROVAL");
-      } else if (reason.includes("REVOKED")) {
+        setReasonCode(rawReason || "HELD_FOR_HUMAN_APPROVAL");
+      } else if (reason.includes("CANONICAL") || reason.includes("FORMAT")) {
+        setStoppedStage(1);
+        setReasonCode(rawReason || "CANONICAL_JSON_ERROR");
+      } else if (reason.includes("REVOKED") || reason.includes("CERTIFICATE")) {
         setStoppedStage(2);
-        setReasonCode(res.reason || "CERTIFICATE_REVOKED");
-      } else if (reason.includes("SUSPEND")) {
-        setStoppedStage(4);
-        setReasonCode(res.reason || "AGENT_SUSPENDED");
+        setReasonCode(rawReason || "CERTIFICATE_REVOKED");
       } else if (reason.includes("SIGNATURE")) {
         setStoppedStage(3);
-        setReasonCode(res.reason || "INVALID_SIGNATURE");
-      } else if (reason.includes("LIMIT") || reason.includes("POLICY") || reason.includes("EXCEEDED") || reason.includes("AUTHORITY")) {
-        setStoppedStage(7);
-        setReasonCode(res.reason || "AUTHORITY_LIMIT_EXCEEDED");
+        setReasonCode(rawReason || "INVALID_SIGNATURE");
+      } else if (reason.includes("SUSPEND")) {
+        setStoppedStage(4);
+        setReasonCode(rawReason || "AGENT_SUSPENDED");
+      } else if (reason.includes("REPLAY") || reason.includes("NONCE") || reason.includes("TIMESTAMP") || reason.includes("EXPIRED")) {
+        setStoppedStage(5);
+        setReasonCode(rawReason || "REPLAY_ATTACK_DETECTED");
+      } else if (reason.includes("RISK") || reason.includes("PROMPT_INJECTION")) {
+        setStoppedStage(6);
+        setReasonCode(rawReason || "SERVER_RISK_HIGH");
       } else {
         setStoppedStage(7);
-        setReasonCode(res.reason || "POLICY_VIOLATION");
+        setReasonCode(rawReason || "POLICY_VIOLATION");
       }
     } catch (err: unknown) {
       const errMsg = (err as Error).message || "GATEWAY_ERROR";
-      setStoppedStage(7);
+      setStoppedStage(undefined);
       setReasonCode(errMsg);
       setResult({
         decision: "BLOCKED",
@@ -203,19 +236,7 @@ export default function GatewayPage() {
     }
   };
 
-  // Filter agents by category button
-  const filteredAgents = agents.filter(a => {
-    if (selectedCategory === "PASS_13_STAGES") return a.category === "PASS_13_STAGES";
-    if (selectedCategory === "HELD_APPROVAL") return a.category === "HELD_APPROVAL";
-    if (selectedCategory === "POLICY_EXCEEDED") return a.category === "POLICY_EXCEEDED";
-    if (selectedCategory === "SUSPENDED_REVOKED") return a.category === "SUSPENDED" || a.category === "REVOKED";
-    return true; // ALL
-  });
 
-  const countPass13 = agents.filter(a => a.category === "PASS_13_STAGES").length;
-  const countHeld = agents.filter(a => a.category === "HELD_APPROVAL").length;
-  const countExceeded = agents.filter(a => a.category === "POLICY_EXCEEDED").length;
-  const countSuspendedRevoked = agents.filter(a => a.category === "SUSPENDED" || a.category === "REVOKED").length;
 
   return (
     <div className="space-y-6">

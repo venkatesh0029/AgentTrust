@@ -292,7 +292,7 @@ export default function OverviewPage() {
               </thead>
               <tbody className="divide-y divide-[var(--border)] font-sans">
                 {auditEvents.slice().reverse().slice(0, 10).map((ev: AuditRecord, i: number) => (
-                  <tr key={ev.request_id || i} className="hover:bg-[var(--surface-2)]/40 transition-colors">
+                  <tr key={`${ev.request_id || 'REQ'}-${i}`} className="hover:bg-[var(--surface-2)]/40 transition-colors">
                     <td className="py-3 px-4 font-mono font-bold text-[var(--fg)]">
                       {ev.request_id || `REQ-${i}`}
                     </td>

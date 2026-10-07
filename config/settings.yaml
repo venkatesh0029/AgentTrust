@@ -22,3 +22,10 @@ blockchain:
   org_name: "AgentTrustOrg"
   channel_name: "agenttrust-channel"
   chaincode_name: "agenttrust-cc"
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  enabled: true
+  ttl_seconds: 300
