@@ -53,5 +53,8 @@ frontend/.next/
 frontend/out/
 node_modules/
 .next/
+# Binaries
+*.exe
+
 # SQLite Databases
 *.db
