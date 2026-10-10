@@ -20,24 +20,19 @@ class TestFabricLiveNetworkIntegration(unittest.TestCase):
     )
     def test_live_fabric_peer_connection_and_endorsement(self):
         """Verifies transaction proposal endorsement against live Fabric network gateway."""
-        peer_url = os.environ.get("FABRIC_PEER_URL", "grpc://localhost:7051")
-        channel_id = os.environ.get("FABRIC_CHANNEL_ID", "agenttrust-channel")
-        chaincode_id = os.environ.get("FABRIC_CHAINCODE_ID", "agenttrust_cc")
-
         ledger = FabricLedgerService()
-        status = ledger.get_ledger_status()
+        summary = ledger.get_ledger_summary()
 
-        self.assertIsNotNone(status)
-        self.assertIn("chain_length", status)
-        self.assertGreaterEqual(status["chain_length"], 1)
+        self.assertIsNotNone(summary)
+        self.assertIn("total_blocks", summary)
+        self.assertGreaterEqual(summary["total_blocks"], 1)
 
     def test_fabric_honest_simulator_fallback_status(self):
         """Verifies transparent telemetry reporting of ledger provider status."""
         ledger = FabricLedgerService()
-        status = ledger.get_ledger_status()
-        self.assertIn("chain_length", status)
-        self.assertIn("total_transactions", status)
-        self.assertIn("latest_block_hash", status)
+        summary = ledger.get_ledger_summary()
+        self.assertIn("total_blocks", summary)
+        self.assertIn("latest_block_hash", summary)
 
 
 if __name__ == "__main__":
