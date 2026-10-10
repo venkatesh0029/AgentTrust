@@ -10,7 +10,7 @@ import secrets
 from typing import Any
 import rsa
 
-from identity_manager.key_store import KeyStorageManager
+from identity_manager.key_manager import KeyManager
 
 
 class KMSProvider:
@@ -22,7 +22,7 @@ class KMSProvider:
     def __init__(self, provider_type: str = "LOCAL_ENCRYPTED_STORE"):
         self.provider_type = os.environ.get("AGENTTRUST_KMS_PROVIDER", provider_type)
         self.passphrase = os.environ.get("KEY_STORAGE_PASSPHRASE", "AgentTrust-Enterprise-HSM-Secret-2026")
-        self.storage_manager = KeyStorageManager(passphrase=self.passphrase)
+        self.key_manager = KeyManager()
         self._hsm_key_vault: dict[str, dict[str, Any]] = {}
 
     def generate_agent_keypair(self, agent_id: str, key_size: int = 2048) -> tuple[str, str]:
@@ -40,7 +40,7 @@ class KMSProvider:
             self._hsm_key_vault[agent_id] = {
                 "slot_id": slot_id,
                 "public_key_pem": pub_pem,
-                "encrypted_priv_pem": self.storage_manager.encrypt_private_key(priv_pem),
+                "raw_priv_pem": priv_pem,
                 "hsm_hardware_serial": "HSM-NITRO-TPM-9942",
                 "key_version": 1
             }
@@ -49,7 +49,7 @@ class KMSProvider:
             # Local KMS Encrypted Store
             self._hsm_key_vault[agent_id] = {
                 "public_key_pem": pub_pem,
-                "encrypted_priv_pem": self.storage_manager.encrypt_private_key(priv_pem),
+                "raw_priv_pem": priv_pem,
                 "key_version": 1
             }
             return pub_pem, priv_pem
@@ -68,8 +68,7 @@ class KMSProvider:
             raise ValueError(f"Agent '{agent_id}' key handle not found in KMS/HSM vault.")
 
         record = self._hsm_key_vault[agent_id]
-        enc_priv = record["encrypted_priv_pem"]
-        priv_pem = self.storage_manager.decrypt_private_key(enc_priv)
+        priv_pem = record["raw_priv_pem"]
         priv_key = rsa.PrivateKey.load_pkcs1(priv_pem.encode('utf-8'))
 
         signature = rsa.sign(payload_bytes, priv_key, 'SHA-256')
