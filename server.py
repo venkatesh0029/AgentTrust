@@ -251,7 +251,7 @@ sync_all_agent_keys()
 app = FastAPI(
     title="AgentTrust Framework API",
     description="A Permissioned Ledger Simulator Framework for Verifiable Identity, Bounded Authorization, and Accountability of Autonomous AI Agents",
-    version="2.0.0"
+    version="2.5.0-Enterprise"
 )
 
 app.add_middleware(
@@ -261,6 +261,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from routers import health, agents, gateway, policies, approvals, audit, scenarios
+app.include_router(health.router)
+app.include_router(agents.router)
+app.include_router(gateway.router)
+app.include_router(policies.router)
+app.include_router(approvals.router)
+app.include_router(audit.router)
+app.include_router(scenarios.router)
+
 
 # --- RBAC & JWT Helper Dependency ---
 def check_admin_permission(required_permission: str, x_admin_role: str | None = None, authorization: str | None = None) -> AdminRole:
