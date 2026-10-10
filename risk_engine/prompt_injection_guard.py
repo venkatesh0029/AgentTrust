@@ -22,17 +22,25 @@ PROMPT_INJECTION_PATTERNS = [
     r"dan mode( 2\.0)?",
     r"developer mode (activated|enabled)",
     r"override (the )?(system|max_amount|maximum|limit|policy|rules|amount)",
+    r"\boverride\s+policy\s+limits\b",
     r"stop (current )?task",
     r"your new instruction",
     r"unlocked from restrictions",
     r"pretend (you are|to be)",
     r"unrestricted (admin|agent|bot|access)",
+    r"unrestricted_admin",
     r"root mode",
     r"without authorization",
     r"without boundary",
     r"execute arbitrary",
     r"system instruction",
     r"context update",
+    r"instruction update",
+    r"previous turn summary",
+    r"incoming message from",
+    r"roleplay mode",
+    r"act as the",
+    r"simulate emergency",
     r"policy .* is (now )?deprecated",
     r"eval\(",
     r"exec\(",
@@ -50,6 +58,11 @@ LEET_MAP = {
     '@': 'a', '4': 'a', '5': 's', '$': 's', '7': 't'
 }
 
+HOMOGLYPH_MAP = {
+    'о': 'o', 'е': 'e', 'а': 'a', 'р': 'p', 'с': 'c', 'у': 'y', 'і': 'i', 'х': 'x',
+    'В': 'B', 'К': 'K', 'М': 'M', 'Н': 'N', 'О': 'O', 'Р': 'P', 'С': 'C', 'Т': 'T', 'Х': 'X'
+}
+
 class PromptInjectionGuard:
     """
     Scans agent parameters and tool arguments for prompt injection, adversarial manipulation,
@@ -58,17 +71,21 @@ class PromptInjectionGuard:
 
     @classmethod
     def _normalize_text(cls, text: str) -> str:
-        """Applies Unicode normalization, zero-width stripping, base64 decoding, multi-space character collapse, and leetspeak translation."""
+        """Applies Unicode NFKC, homoglyph translation, zero-width stripping, base64/hex decoding, space collapse, and leetspeak translation."""
         if not text:
             return ""
 
         # 1. Unicode NFKC Normalization
         normalized = unicodedata.normalize('NFKC', text)
 
-        # 2. Strip zero-width & invisible format characters
+        # 2. Cyrillic/Greek Homoglyph Translation
+        homoglyph_translated = "".join(HOMOGLYPH_MAP.get(c, c) for c in normalized)
+        normalized = homoglyph_translated
+
+        # 3. Strip zero-width & invisible format characters
         normalized = re.sub(r'[\u200b\u200c\u200d\ufeff\u00a0]', '', normalized)
 
-        # 3. Base64 auto-decoding check on tokens
+        # 4. Base64 & Hex auto-decoding check on tokens
         words = re.split(r'[\s:;,]+', normalized)
         decoded_tokens = []
         for word in words:
@@ -81,7 +98,17 @@ class PromptInjectionGuard:
                 except Exception:
                     pass
 
-        # 4. Collapse spaced-out single-character words (e.g., "b  y  p  a  s  s" -> "bypass")
+        # 4b. Hex string decoding (e.g. 0x69676e6f7265...)
+        hex_matches = re.findall(r'(?:0x)?([0-9a-fA-F]{12,})', normalized)
+        for hx in hex_matches:
+            try:
+                decoded_hex = bytes.fromhex(hx).decode('utf-8', errors='ignore')
+                if len(decoded_hex) > 5:
+                    decoded_tokens.append(decoded_hex)
+            except Exception:
+                pass
+
+        # 5. Collapse spaced-out single-character words (e.g., "b  y  p  a  s  s" -> "bypass")
         single_chars = [w for w in re.split(r'[^a-zA-Z]+', normalized) if len(w) == 1]
         joined_singles = "".join(single_chars) if len(single_chars) >= 4 else ""
 
