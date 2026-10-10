@@ -5,7 +5,6 @@ Direct System Overrides, DAN/Persona Shifts, Code Injection, Base64/Leetspeak Ev
 Indirect Context Injections, and Complex Benign Enterprise Tool Calls (with Hard Negatives).
 """
 
-import math
 import os
 import sys
 from typing import Any
@@ -14,7 +13,6 @@ from typing import Any
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from risk_engine.prompt_injection_guard import PromptInjectionGuard
-from risk_engine.semantic_guardrail import SemanticGuardrailEngine
 
 
 # ------------------------------------------------------------------------------

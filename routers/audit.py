@@ -3,7 +3,6 @@ Audit Chain, Evidence Store & Merkle Proof Router.
 Provides cryptographic evidence lookup, Merkle inclusion proofs, and ledger audit verification.
 """
 
-from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter(prefix="/audit", tags=["Tamper-Evident Audit & Merkle Proofs"])

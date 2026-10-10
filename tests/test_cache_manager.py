@@ -2,7 +2,6 @@
 Tests for CacheManager (Redis & In-Memory Fallback)
 """
 
-import pytest
 from cache_manager import CacheManager
 
 

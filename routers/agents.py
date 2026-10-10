@@ -3,8 +3,7 @@ Agent Management & Identity Lifecycle Router.
 Handles Agent Registration, X.509 Certificate Issuance, Status Changes, and Delegation Tokens.
 """
 
-from typing import Any
-from fastapi import APIRouter, Body, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/agents", tags=["Agent Identity & Lifecycle"])

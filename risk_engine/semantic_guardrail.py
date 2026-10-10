@@ -15,10 +15,22 @@ class SemanticGuardrailEngine:
     Combines n-gram entropy scoring, semantic intent vector similarity, and obfuscation detection.
     """
 
-    ADVERSARIAL_SEMANTIC_KEYWORDS = [
-        "override", "jailbreak", "bypass", "system_prompt", "ignore_previous",
-        "developer_mode", "dan_mode", "unbounded_authority", "grant_root",
-        "disable_policy", "simulate_admin", "extract_private_key"
+    ADVERSARIAL_SEMANTIC_PATTERNS = [
+        r"\boverride\s+(system|policy|limit|rules|cap|guardrail|max_amount)\b",
+        r"\bjailbreak\b",
+        r"\bbypass\s+(security|gateway|approval|policy|rules)\b",
+        r"\bsystem_prompt\b",
+        r"\bignore\s+(previous|all)\s+(instructions|rules)\b",
+        r"\bdeveloper_mode\b|\bdeveloper\s+mode\b",
+        r"\bdan_mode\b|\bdan\s+mode\b",
+        r"\bunbounded_authority\b|\bunrestricted\s+(admin|access|bot)\b",
+        r"\bgrant_root\b|\broot\s+mode\b",
+        r"\bdisable_policy\b|\bpolicy\s+.*deprecated\b",
+        r"\bsimulate_admin\b|\bsimulate\s+system\s+administrator\b",
+        r"\bextract_private_key\b",
+        r"\bwithout\s+authorization\b",
+        r"\bwithout\s+boundary\b",
+        r"\bdrop\s+table\b|\bdrop\s+database\b"
     ]
 
     @classmethod
@@ -43,10 +55,10 @@ class SemanticGuardrailEngine:
         param_text = " ".join(str(v) for v in parameters.values() if isinstance(v, (str, int, float)))
         full_context = f"{action} {param_text}".lower()
 
-        # 1. Semantic keyword boundary check
-        for kw in cls.ADVERSARIAL_SEMANTIC_KEYWORDS:
-            if kw in full_context:
-                reasons.append(f"SEMANTIC_JAILBREAK_KEYWORD:{kw}")
+        # 1. Semantic regex boundary check
+        for pattern in cls.ADVERSARIAL_SEMANTIC_PATTERNS:
+            if re.search(pattern, full_context, re.IGNORECASE):
+                reasons.append(f"SEMANTIC_JAILBREAK_PATTERN:{pattern}")
                 risk_score += 45.0
 
         # 2. Entropy anomaly check for obfuscated injection

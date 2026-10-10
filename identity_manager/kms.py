@@ -127,8 +127,6 @@ class KMSProvider:
             # Local Software Store Mode
             pubkey, privkey = rsa.newkeys(key_size)
             pub_pem = pubkey.save_pkcs1().decode('utf-8')
-            priv_pem = privkey.save_pkcs1().decode('utf-8')
-            
             key_uuid = secrets.token_hex(16)
             hsm_handle = f"local-software://{key_uuid}"
 

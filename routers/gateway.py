@@ -5,7 +5,7 @@ Executes agent payloads through zero-trust security checks in non-blocking async
 
 import asyncio
 from typing import Any
-from fastapi import APIRouter, Body, Header, HTTPException
+from fastapi import APIRouter, Body
 
 from routers.health import increment_request_metrics
 
