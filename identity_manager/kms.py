@@ -65,15 +65,27 @@ class KMSProvider:
         self._key_metadata_vault: dict[str, dict[str, Any]] = {}
         self._pkcs11_session = None
 
-        if self.provider_type == "REAL_SOFT_HSM2_PKCS11" and HAS_PKCS11_LIB and self.softhsm_lib:
-            try:
-                lib = pkcs11.lib(self.softhsm_lib)
-                token = lib.get_token(token_label=os.environ.get("SOFTHSM2_TOKEN", "AgentTrustToken"))
-                pin = self.passphrase or "1234"
-                self._pkcs11_session = token.open(rw=True, user_pin=pin)
-            except Exception:
-                # Fallback cleanly if PKCS#11 token session initialization fails
+        if self.provider_type == "REAL_SOFT_HSM2_PKCS11":
+            if not (HAS_PKCS11_LIB and self.softhsm_lib):
+                if provider_type == "REAL_SOFT_HSM2_PKCS11":
+                    raise RuntimeError(
+                        "Explicitly requested REAL_SOFT_HSM2_PKCS11 mode, but python-pkcs11 library "
+                        "or SoftHSM2 dynamic shared library (libsofthsm2.so / softhsm2.dll) was not detected."
+                    )
                 self.provider_type = "LOCAL_SOFTWARE_STORE"
+            else:
+                try:
+                    lib = pkcs11.lib(self.softhsm_lib)
+                    token = lib.get_token(token_label=os.environ.get("SOFTHSM2_TOKEN", "AgentTrustToken"))
+                    pin = self.passphrase or "1234"
+                    self._pkcs11_session = token.open(rw=True, user_pin=pin)
+                except Exception as e:
+                    if provider_type == "REAL_SOFT_HSM2_PKCS11":
+                        raise RuntimeError(
+                            f"Explicitly requested REAL_SOFT_HSM2_PKCS11 mode, but token session "
+                            f"initialization failed: {e}"
+                        )
+                    self.provider_type = "LOCAL_SOFTWARE_STORE"
 
     def get_provider_status(self) -> dict[str, Any]:
         """Returns verified operational status of the KMS provider."""
