@@ -45,7 +45,13 @@ from cache_manager import cache_manager
 
 # Operational Mode & Environment Configuration
 CURRENT_MODE = os.environ.get("AGENTTRUST_MODE", "MODE_D_AGENTTRUST_FABRIC")
+ENV_PROFILE = os.environ.get("AGENTTRUST_ENV", "development").lower()
+
 _ENV_GATEWAY_SECRET = os.environ.get("GATEWAY_SECRET")
+if ENV_PROFILE in ("production", "prod"):
+    if not _ENV_GATEWAY_SECRET or _ENV_GATEWAY_SECRET in ("default_secret_key_change_in_production", "secret"):
+        raise RuntimeError("SECURITY VIOLATION: Production environment requires explicit secure GATEWAY_SECRET. Refusing to initialize with default secrets.")
+
 if not _ENV_GATEWAY_SECRET:
     import secrets
     GATEWAY_SECRET = secrets.token_hex(32)
@@ -54,6 +60,7 @@ else:
 
 DEMO_MODE = os.environ.get("AGENTTRUST_DEMO_MODE", "false").lower() in ("true", "1", "yes")
 ALLOW_RUNTIME_MODE_CHANGE = os.environ.get("AGENTTRUST_ALLOW_MODE_CHANGE", "false").lower() in ("true", "1", "yes")
+
 
 # Initialize Core Services
 cert_manager = CertificateManager(ca_common_name="AgentTrust Root CA")
