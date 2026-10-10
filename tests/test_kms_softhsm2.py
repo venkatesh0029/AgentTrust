@@ -47,6 +47,14 @@ class TestSoftHSM2Integration(unittest.TestCase):
             self.kms.sign_payload_in_hsm("UNREGISTERED_AGENT_999", b"payload")
         self.assertIn("not found in KMS metadata vault", str(ctx.exception))
 
+    def test_explicit_pkcs11_mode_fail_closed(self):
+        """Verifies explicit REAL_SOFT_HSM2_PKCS11 mode raises RuntimeError if token is missing."""
+        status = self.kms.get_provider_status()
+        if not status["is_token_backed"]:
+            with self.assertRaises(RuntimeError) as ctx:
+                KMSProvider(provider_type="REAL_SOFT_HSM2_PKCS11")
+            self.assertIn("Explicitly requested REAL_SOFT_HSM2_PKCS11 mode", str(ctx.exception))
+
     def test_hsm_key_rotation(self):
         pub_1, handle_1 = self.kms.generate_agent_keypair(self.test_agent_id, key_size=2048)
         pub_2, handle_2, version_2 = self.kms.rotate_agent_key(self.test_agent_id)
