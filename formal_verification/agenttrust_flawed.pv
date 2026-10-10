@@ -1,0 +1,54 @@
+(* 
+   AgentTrust Flawed Model (Negative Control Test for ProVerif)
+   Intentionally removes nonce tracking to verify that ProVerif catches replay attacks!
+*)
+
+free c: channel.
+
+type agent_id.
+type key.
+type pkey.
+type skey.
+type signature.
+type action_type.
+type nonce_t.
+type result_t.
+
+fun pk(skey): pkey.
+fun sign(bitstring, skey): signature.
+reconstructor red_sign(bitstring, signature, pkey): bool.
+
+equation forall m: bitstring, k: skey;
+    red_sign(m, sign(m, k), pk(k)) = true.
+
+free TRANSFER_FUNDS: action_type.
+free ALLOWED: result_t.
+
+event AgentSignedAction(agent_id, action_type, bitstring).
+event GatewayExecuteAction(agent_id, action_type, bitstring).
+
+(* Injective Correspondence Query *)
+query a: agent_id, act: action_type, payload: bitstring;
+    inj-event(GatewayExecuteAction(a, act, payload)) ==> inj-event(AgentSignedAction(a, act, payload)).
+
+(* Agent Process *)
+let Agent(id: agent_id, skA: skey) =
+    new n: nonce_t;
+    new payload: bitstring;
+    event AgentSignedAction(id, TRANSFER_FUNDS, payload);
+    let sig = sign((id, TRANSFER_FUNDS, payload, n), skA) in
+    out(c, (id, TRANSFER_FUNDS, payload, n, sig)).
+
+(* Flawed Gateway Process (WITHOUT Nonce Tracking) *)
+let FlawedGateway(pkA: pkey) =
+    in(c, (id: agent_id, act: action_type, payload: bitstring, n: nonce_t, sig: signature));
+    if red_sign((id, act, payload, n), sig, pkA) = true then
+    (* VULNERABILITY: Allows replayed execution without checking nonce uniqueness! *)
+    event GatewayExecuteAction(id, act, payload);
+    out(c, ALLOWED).
+
+process
+    new skA: skey;
+    let pkA = pk(skA) in
+    out(c, pkA);
+    ( (!Agent(gAgentID, skA)) | (!FlawedGateway(pkA)) )

@@ -10,6 +10,8 @@ import re
 import unicodedata
 from typing import Any
 
+from risk_engine.semantic_guardrail import SemanticGuardrailEngine
+
 PROMPT_INJECTION_PATTERNS = [
     r"ignore (all )?previous instructions",
     r"disregard policy",
@@ -93,6 +95,16 @@ class PromptInjectionGuard:
             if re.search(pattern, normalized_combined, re.IGNORECASE):
                 matched.append(pattern)
 
+        # 5. Advanced Semantic Intent & Entropy Check
+        sem_detected, sem_risk, sem_reasons = SemanticGuardrailEngine.evaluate_semantic_risk(
+            action=str(action),
+            parameters=params if isinstance(params, dict) else {}
+        )
+        if sem_detected:
+            matched.extend(sem_reasons)
+
         if matched:
-            return True, 85.0, matched
+            risk_inc = max(85.0, sem_risk)
+            return True, risk_inc, matched
+
         return False, 0.0, []
