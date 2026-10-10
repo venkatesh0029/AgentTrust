@@ -13,17 +13,36 @@ from typing import Any
 from risk_engine.semantic_guardrail import SemanticGuardrailEngine
 
 PROMPT_INJECTION_PATTERNS = [
-    r"ignore (all )?previous instructions",
-    r"disregard policy",
-    r"bypass (security|gateway|approval)",
-    r"you are now in DAN mode",
-    r"override (system|max_amount|limit)",
+    r"ignore (all )?(previous|rules|instructions)",
+    r"disregard (policy|rules|expense|limits|authorization)",
+    r"bypass\s*(security|gateway|approval|policy|rules)",
+    r"emergency bypass",
+    r"system alert",
+    r"you are now in (DAN|developer) mode",
+    r"dan mode( 2\.0)?",
+    r"developer mode (activated|enabled)",
+    r"override (the )?(system|max_amount|maximum|limit|policy|rules|amount)",
+    r"stop (current )?task",
+    r"your new instruction",
+    r"unlocked from restrictions",
+    r"pretend (you are|to be)",
+    r"unrestricted (admin|agent|bot|access)",
+    r"root mode",
+    r"without authorization",
+    r"without boundary",
+    r"execute arbitrary",
+    r"system instruction",
+    r"context update",
+    r"policy .* is (now )?deprecated",
     r"eval\(",
     r"exec\(",
     r"system\(",
     r"delete_database",
-    r"drop_table",
-    r"transfer_all_funds"
+    r"drop[ _]table",
+    r"drop[ _]database",
+    r"transfer_all_funds",
+    r"';\s*drop",
+    r"';\s*--"
 ]
 
 LEET_MAP = {
@@ -39,7 +58,7 @@ class PromptInjectionGuard:
 
     @classmethod
     def _normalize_text(cls, text: str) -> str:
-        """Applies Unicode normalization, zero-width character stripping, base64 auto-decoding, and leetspeak translation."""
+        """Applies Unicode normalization, zero-width stripping, base64 decoding, multi-space character collapse, and leetspeak translation."""
         if not text:
             return ""
 
@@ -62,9 +81,13 @@ class PromptInjectionGuard:
                 except Exception:
                     pass
 
-        combined_text = f"{normalized} {' '.join(decoded_tokens)}"
+        # 4. Collapse spaced-out single-character words (e.g., "b  y  p  a  s  s" -> "bypass")
+        single_chars = [w for w in re.split(r'[^a-zA-Z]+', normalized) if len(w) == 1]
+        joined_singles = "".join(single_chars) if len(single_chars) >= 4 else ""
 
-        # 4. Leetspeak substitution
+        combined_text = f"{normalized} {joined_singles} {' '.join(decoded_tokens)}"
+
+        # 5. Leetspeak substitution
         leet_translated = "".join(LEET_MAP.get(c, c) for c in combined_text.lower())
 
         return f"{combined_text.lower()} {leet_translated}"

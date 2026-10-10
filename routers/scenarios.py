@@ -2,8 +2,7 @@
 Adversarial Attack Lab & Benchmark Execution Router.
 """
 
-from typing import Any
-from fastapi import APIRouter, Body, Header, HTTPException
+from fastapi import APIRouter
 
 router = APIRouter(prefix="/scenarios", tags=["Adversarial Attack Lab & Benchmarks"])
 

@@ -269,7 +269,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from routers import health, agents, gateway, policies, approvals, audit, scenarios
+from routers import health, agents, gateway, policies, approvals, audit, scenarios  # noqa: E402
 app.include_router(health.router)
 app.include_router(agents.router)
 app.include_router(gateway.router)

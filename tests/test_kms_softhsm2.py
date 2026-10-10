@@ -1,14 +1,12 @@
-"""
-SoftHSM2 & PKCS#11 Hardware Security Module Integration Tests.
-Verifies RSA-2048 key generation, provider status reporting, and non-exportable signature execution.
-"""
-
+import base64
 import unittest
-from identity_manager.kms import KMSProvider, find_softhsm2_library
+import rsa
+
+from identity_manager.kms import KMSProvider
 
 
 class TestSoftHSM2Integration(unittest.TestCase):
-    """Test suite for SoftHSM2 / PKCS#11 key lifecycle and cryptographic isolation."""
+    """Test suite for SoftHSM2 / PKCS#11 key lifecycle, cryptographic isolation, and failure resilience."""
 
     def setUp(self):
         self.kms = KMSProvider(provider_type="AUTO_DETECT")
@@ -30,12 +28,24 @@ class TestSoftHSM2Integration(unittest.TestCase):
         self.assertNotIn("raw_priv_pem", meta)
         self.assertNotIn("private_key_pem", meta)
 
-    def test_hsm_payload_signing(self):
+    def test_hsm_payload_signing_and_independent_verification(self):
         pub_pem, hsm_handle = self.kms.generate_agent_keypair(self.test_agent_id, key_size=2048)
         payload_bytes = b"Canonical-JSON-Payload-For-PKCS11-Test"
         sig_b64 = self.kms.sign_payload_in_hsm(self.test_agent_id, payload_bytes)
         self.assertIsNotNone(sig_b64)
         self.assertGreater(len(sig_b64), 50)
+
+        # Independent signature verification using public key PEM
+        sig_bytes = base64.b64decode(sig_b64)
+        pub_key_obj = rsa.PublicKey.load_pkcs1(pub_pem.encode('utf-8'))
+        verify_result = rsa.verify(payload_bytes, sig_bytes, pub_key_obj)
+        self.assertEqual(verify_result, 'SHA-256')
+
+    def test_safe_failure_on_invalid_agent_or_missing_token(self):
+        """Verifies fail-closed behavior when signing with non-existent agent key handle."""
+        with self.assertRaises(ValueError) as ctx:
+            self.kms.sign_payload_in_hsm("UNREGISTERED_AGENT_999", b"payload")
+        self.assertIn("not found in KMS metadata vault", str(ctx.exception))
 
     def test_hsm_key_rotation(self):
         pub_1, handle_1 = self.kms.generate_agent_keypair(self.test_agent_id, key_size=2048)
