@@ -1,28 +1,33 @@
 """
 SoftHSM2 & PKCS#11 Hardware Security Module Integration Tests.
-Verifies RSA-2048 key generation, secure storage, and hardware-boundary signature generation.
+Verifies RSA-2048 key generation, non-exportable token handles, and hardware-boundary signature generation.
 """
 
 import unittest
-from identity_manager.kms import KMSProvider, kms_provider
+from identity_manager.kms import KMSProvider
 
 
 class TestSoftHSM2Integration(unittest.TestCase):
-    """Test suite for SoftHSM2 / PKCS#11 key lifecycle and cryptographic isolation."""
+    """Test suite for SoftHSM2 / PKCS#11 key lifecycle and cryptographic non-exportability."""
 
     def setUp(self):
-        self.kms = KMSProvider(provider_type="HSM_PKCS11")
+        self.kms = KMSProvider(provider_type="HSM_PKCS11", passphrase="Test-Explicit-Passphrase-2026")
         self.test_agent_id = "HSM-TEST-AGENT-001"
 
-    def test_hsm_keypair_generation(self):
-        pub_pem, priv_handle = self.kms.generate_agent_keypair(self.test_agent_id, key_size=2048)
+    def test_hsm_keypair_generation_non_exportable(self):
+        pub_pem, hsm_handle = self.kms.generate_agent_keypair(self.test_agent_id, key_size=2048)
         self.assertTrue(pub_pem.startswith("-----BEGIN RSA PUBLIC KEY-----") or pub_pem.startswith("-----BEGIN PUBLIC KEY-----"))
-        self.assertTrue(priv_handle.startswith("hsm://"))
-        self.assertIn("hsm-slot-", priv_handle)
+        self.assertTrue(hsm_handle.startswith("hsm://"))
+        self.assertIn("slot-", hsm_handle)
 
-    def test_hsm_payload_signing(self):
-        pub_pem, priv_handle = self.kms.generate_agent_keypair(self.test_agent_id, key_size=2048)
-        payload_bytes = b"Canonical-JSON-Payload-For-HSM-Test"
+        # Verify that application metadata vault ONLY stores public key and opaque handle (NO raw private key)
+        meta = self.kms._key_metadata_vault[self.test_agent_id]
+        self.assertNotIn("raw_priv_pem", meta)
+        self.assertNotIn("private_key_pem", meta)
+
+    def test_hsm_payload_signing_through_token_boundary(self):
+        pub_pem, hsm_handle = self.kms.generate_agent_keypair(self.test_agent_id, key_size=2048)
+        payload_bytes = b"Canonical-JSON-Payload-For-PKCS11-Test"
         sig_b64 = self.kms.sign_payload_in_hsm(self.test_agent_id, payload_bytes)
         self.assertIsNotNone(sig_b64)
         self.assertGreater(len(sig_b64), 50)
