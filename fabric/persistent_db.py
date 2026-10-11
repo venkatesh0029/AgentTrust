@@ -10,6 +10,30 @@ import sqlite3
 import threading
 from typing import Any
 
+class InvalidStateTransitionError(ValueError):
+    """Raised when an illegal transition is attempted in the transaction intent state machine."""
+    pass
+
+
+class ConcurrentTransitionConflictError(RuntimeError):
+    """Raised when a concurrent worker modifies an intent before the current transition completes."""
+    pass
+
+
+VALID_INTENT_TRANSITIONS: dict[str, set[str]] = {
+    "PENDING_AUTHORIZATION": {"AUTHORIZED_PENDING_EXECUTION", "REJECTED"},
+    "AUTHORIZED_PENDING_EXECUTION": {"EXECUTED_PENDING_LEDGER", "EXECUTION_FAILED", "REJECTED"},
+    "EXECUTED_PENDING_LEDGER": {"COMMITTED", "COMPLETED", "LEDGER_PENDING_RETRY", "FAILED"},
+    "LEDGER_PENDING_RETRY": {"COMMITTED", "COMPLETED", "LEDGER_PENDING_RETRY", "LEDGER_RETRY_EXHAUSTED"},
+    # Terminal states (no further transitions permitted)
+    "COMMITTED": set(),
+    "COMPLETED": set(),
+    "REJECTED": set(),
+    "EXECUTION_FAILED": set(),
+    "LEDGER_RETRY_EXHAUSTED": set(),
+    "FAILED": set()
+}
+
 
 class PersistentStorageEngine:
     """
@@ -146,8 +170,24 @@ class PersistentStorageEngine:
                     idempotency_key TEXT,
                     state TEXT NOT NULL,
                     outcome_json TEXT,
+                    request_fingerprint TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                )
+            """)
+
+            cursor.execute("PRAGMA table_info(transaction_intents)")
+            intent_cols = [row["name"] for row in cursor.fetchall()]
+            if "request_fingerprint" not in intent_cols:
+                cursor.execute("ALTER TABLE transaction_intents ADD COLUMN request_fingerprint TEXT")
+
+            # 11. Cross-Process In-Flight Distributed Locks Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS in_flight_locks (
+                    scoped_key TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    created_at REAL NOT NULL
                 )
             """)
 
@@ -372,6 +412,76 @@ class PersistentStorageEngine:
             conn.commit()
             conn.close()
 
+    def try_claim_request_nonce(self, request_id: str, nonce: str, timestamp_ts: float) -> bool:
+        """
+        Atomically claims request_id and nonce in SQLite.
+        Returns True if successfully claimed, False if request_id or nonce already exists.
+        Guarantees cross-process atomicity.
+        """
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN IMMEDIATE")
+                cursor.execute("SELECT 1 FROM request_nonces WHERE request_id = ? OR nonce = ?", (request_id, nonce))
+                if cursor.fetchone() is not None:
+                    conn.rollback()
+                    return False
+                cursor.execute(
+                    "INSERT INTO request_nonces (request_id, nonce, timestamp_ts) VALUES (?, ?, ?)",
+                    (request_id, nonce, timestamp_ts)
+                )
+                conn.commit()
+                return True
+            except sqlite3.IntegrityError:
+                conn.rollback()
+                return False
+            finally:
+                conn.close()
+
+    def try_acquire_in_flight_lock(self, agent_id: str, idempotency_key: str, timeout_seconds: float = 60.0) -> bool:
+        """
+        Atomically acquires an in-flight lock in SQLite across processes.
+        Evicts locks older than timeout_seconds.
+        Returns True if acquired, False if already locked.
+        """
+        scoped_key = f"{agent_id}:{idempotency_key}"
+        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        cutoff = now - timeout_seconds
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN IMMEDIATE")
+                cursor.execute("DELETE FROM in_flight_locks WHERE created_at < ?", (cutoff,))
+                cursor.execute("SELECT 1 FROM in_flight_locks WHERE scoped_key = ?", (scoped_key,))
+                if cursor.fetchone() is not None:
+                    conn.rollback()
+                    return False
+                cursor.execute(
+                    "INSERT INTO in_flight_locks (scoped_key, agent_id, idempotency_key, created_at) VALUES (?, ?, ?, ?)",
+                    (scoped_key, agent_id, idempotency_key, now)
+                )
+                conn.commit()
+                return True
+            except sqlite3.IntegrityError:
+                conn.rollback()
+                return False
+            finally:
+                conn.close()
+
+    def release_in_flight_lock(self, agent_id: str, idempotency_key: str) -> None:
+        """Releases an in-flight lock across processes."""
+        scoped_key = f"{agent_id}:{idempotency_key}"
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM in_flight_locks WHERE scoped_key = ?", (scoped_key,))
+                conn.commit()
+            finally:
+                conn.close()
+
     def is_nonce_used(self, nonce: str) -> bool:
         """Checks if nonce exists in SQLite."""
         with self._lock:
@@ -489,7 +599,17 @@ class PersistentStorageEngine:
             conn.commit()
             conn.close()
 
-    def save_intent(self, request_id: str, agent_id: str, action: str, amount: float, idempotency_key: str | None, state: str, outcome: dict[str, Any] | None = None) -> None:
+    def save_intent(
+        self,
+        request_id: str,
+        agent_id: str,
+        action: str,
+        amount: float,
+        idempotency_key: str | None,
+        state: str,
+        outcome: dict[str, Any] | None = None,
+        request_fingerprint: str | None = None
+    ) -> None:
         """Saves durable transaction intent."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         with self._lock:
@@ -497,8 +617,8 @@ class PersistentStorageEngine:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT OR REPLACE INTO transaction_intents (
-                    request_id, agent_id, action, amount, idempotency_key, state, outcome_json, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    request_id, agent_id, action, amount, idempotency_key, state, outcome_json, request_fingerprint, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 request_id,
                 agent_id,
@@ -507,28 +627,66 @@ class PersistentStorageEngine:
                 idempotency_key,
                 state,
                 json.dumps(outcome) if outcome else None,
+                request_fingerprint,
                 now,
                 now
             ))
             conn.commit()
             conn.close()
 
-    def update_intent_state(self, request_id: str, state: str, outcome: dict[str, Any] | None = None) -> None:
-        """Updates state and outcome of an existing transaction intent."""
+    def update_intent_state(
+        self,
+        request_id: str,
+        state: str,
+        outcome: dict[str, Any] | None = None,
+        expected_current_state: str | None = None
+    ) -> None:
+        """
+        Updates state and outcome of an existing transaction intent.
+        Validates transition legality against VALID_INTENT_TRANSITIONS.
+        Raises InvalidStateTransitionError if transition is illegal.
+        Raises ConcurrentTransitionConflictError if expected_current_state does not match.
+        """
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         with self._lock:
             conn = self._get_connection()
-            cursor = conn.cursor()
-            if outcome is not None:
-                cursor.execute("""
-                    UPDATE transaction_intents SET state = ?, outcome_json = ?, updated_at = ? WHERE request_id = ?
-                """, (state, json.dumps(outcome), now, request_id))
-            else:
-                cursor.execute("""
-                    UPDATE transaction_intents SET state = ?, updated_at = ? WHERE request_id = ?
-                """, (state, now, request_id))
-            conn.commit()
-            conn.close()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN IMMEDIATE")
+                cursor.execute("SELECT state FROM transaction_intents WHERE request_id = ?", (request_id,))
+                row = cursor.fetchone()
+                if not row:
+                    conn.rollback()
+                    raise ValueError(f"Transaction intent for request {request_id} does not exist")
+
+                current_state = row["state"]
+
+                # Check expected state for optimistic concurrency control
+                if expected_current_state and current_state != expected_current_state:
+                    conn.rollback()
+                    raise ConcurrentTransitionConflictError(
+                        f"Concurrent modification detected for {request_id}: expected state '{expected_current_state}', but was '{current_state}'"
+                    )
+
+                # Check valid transition
+                allowed = VALID_INTENT_TRANSITIONS.get(current_state, set())
+                if state not in allowed:
+                    conn.rollback()
+                    raise InvalidStateTransitionError(
+                        f"Illegal state transition for {request_id}: cannot transition from '{current_state}' to '{state}'. Allowed transitions: {sorted(allowed)}"
+                    )
+
+                if outcome is not None:
+                    cursor.execute("""
+                        UPDATE transaction_intents SET state = ?, outcome_json = ?, updated_at = ? WHERE request_id = ?
+                    """, (state, json.dumps(outcome), now, request_id))
+                else:
+                    cursor.execute("""
+                        UPDATE transaction_intents SET state = ?, updated_at = ? WHERE request_id = ?
+                    """, (state, now, request_id))
+                conn.commit()
+            finally:
+                conn.close()
 
     def get_intent(self, request_id: str) -> dict[str, Any] | None:
         """Retrieves intent record by request_id."""

@@ -1,5 +1,7 @@
 import copy
 import datetime
+import hashlib
+import json
 import math
 import uuid
 from typing import Any
@@ -56,6 +58,26 @@ class ActionGateway:
         self.retry_queue = retry_queue or RetryQueueManager(persistent_db=persistent_db)
         self.persistent_db = persistent_db
         self._event_counter = 1000
+
+    @staticmethod
+    def compute_request_fingerprint(
+        agent_id: str,
+        action: str,
+        resource: str,
+        parameters: dict[str, Any],
+        amount: float
+    ) -> str:
+        """Computes deterministic canonical SHA-256 fingerprint of business request parameters."""
+        clean_params = {k: v for k, v in parameters.items() if k != "amount"}
+        raw_dict = {
+            "agent_id": agent_id,
+            "action": action,
+            "resource": resource,
+            "parameters": clean_params,
+            "amount": round(float(amount), 4)
+        }
+        canonical_bytes = json.dumps(raw_dict, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(canonical_bytes).hexdigest()
 
     def process_request(self, request_payload: dict[str, Any]) -> dict[str, Any]:
         """Main entry point for processing signed AI agent requests."""
@@ -162,8 +184,38 @@ class ActionGateway:
                 api_result="DENIED"
             )
 
-        # Step 6.1: Check Idempotency Cache for previously completed requests
+        top_amt = request_payload.get("amount")
+        param_amt = parameters.get("amount")
+        raw_amt = top_amt if top_amt is not None else (param_amt if param_amt is not None else 0.0)
+        try:
+            req_amount = float(raw_amt)
+        except Exception:
+            req_amount = 0.0
+
+        request_fingerprint = self.compute_request_fingerprint(
+            agent_id=agent_id,
+            action=action,
+            resource=resource,
+            parameters=parameters,
+            amount=req_amount
+        )
+
+        # Step 6.1: Check Idempotency Cache for previously completed requests & canonical payload fingerprint
         if idempotency_key:
+            if self.persistent_db:
+                existing_intent = self.persistent_db.get_intent_by_idempotency_key(agent_id, idempotency_key)
+                if existing_intent:
+                    existing_fp = existing_intent.get("request_fingerprint")
+                    if existing_fp and existing_fp != request_fingerprint:
+                        return self._build_immediate_rejection(
+                            request_id=request_id,
+                            agent_id=agent_id,
+                            action=action,
+                            resource=resource,
+                            decision=PolicyDecision.BLOCKED.value,
+                            reason="IDEMPOTENCY_PAYLOAD_MISMATCH",
+                            api_result="NOT_EXECUTED"
+                        )
             cached_outcome = self.replay_tracker.get_idempotent_result(agent_id, idempotency_key)
             if cached_outcome:
                 res = copy.deepcopy(cached_outcome)
@@ -195,7 +247,8 @@ class ActionGateway:
                 timestamp=timestamp,
                 expires_at=expires_at,
                 idempotency_key=idempotency_key,
-                payload_to_verify=payload_to_verify
+                payload_to_verify=payload_to_verify,
+                request_fingerprint=request_fingerprint
             )
         finally:
             self.replay_tracker.release_in_flight(agent_id, idempotency_key)
@@ -213,7 +266,8 @@ class ActionGateway:
         timestamp: Any,
         expires_at: str,
         idempotency_key: str | None,
-        payload_to_verify: dict[str, Any]
+        payload_to_verify: dict[str, Any],
+        request_fingerprint: str | None = None
     ) -> dict[str, Any]:
         # Step 7: Strict Input Validation & Canonicalization for Authenticated Requests
         top_amount = request_payload.get("amount")
@@ -373,22 +427,76 @@ class ActionGateway:
         approval_ticket = None
 
         if decision == PolicyDecision.ALLOWED:
+            if self.persistent_db:
+                try:
+                    self.persistent_db.save_intent(
+                        request_id=request_id,
+                        agent_id=agent_id,
+                        action=action,
+                        amount=amount,
+                        idempotency_key=idempotency_key,
+                        state="AUTHORIZED_PENDING_EXECUTION",
+                        request_fingerprint=request_fingerprint
+                    )
+                except Exception:
+                    pass
+
             # Create signed service auth headers
             auth_headers = self.finance_api.create_gateway_auth_headers(request_id)
-            exec_res = self.finance_api.execute_action(
-                action=action,
-                parameters=parameters,
-                gateway_token=ProtectedFinanceAPI.GATEWAY_SECRET,
-                request_id=request_id,
-                agent_id=agent_id,
-                auth_headers=auth_headers,
-                idempotency_key=idempotency_key
-            )
+            try:
+                exec_res = self.finance_api.execute_action(
+                    action=action,
+                    parameters=parameters,
+                    gateway_token=ProtectedFinanceAPI.GATEWAY_SECRET,
+                    request_id=request_id,
+                    agent_id=agent_id,
+                    auth_headers=auth_headers,
+                    idempotency_key=idempotency_key
+                )
+            except Exception as e:
+                # Handle uncertain external outcome: query authoritative status by idempotency_key/request_id
+                status_res = self.finance_api.query_transaction_status(
+                    agent_id=agent_id,
+                    idempotency_key=idempotency_key,
+                    request_id=request_id
+                )
+                if status_res and status_res.get("success"):
+                    exec_res = status_res
+                else:
+                    if self.persistent_db:
+                        try:
+                            self.persistent_db.update_intent_state(
+                                request_id=request_id,
+                                state="EXECUTION_FAILED",
+                                expected_current_state="AUTHORIZED_PENDING_EXECUTION"
+                            )
+                        except Exception:
+                            pass
+                    raise e
+
             if exec_res.get("success"):
                 api_result = "EXECUTED"
                 tx_data = exec_res.get("transaction_data")
+                if self.persistent_db:
+                    try:
+                        self.persistent_db.update_intent_state(
+                            request_id=request_id,
+                            state="EXECUTED_PENDING_LEDGER",
+                            expected_current_state="AUTHORIZED_PENDING_EXECUTION"
+                        )
+                    except Exception:
+                        pass
             else:
                 api_result = f"FAILED: {exec_res.get('error')}"
+                if self.persistent_db:
+                    try:
+                        self.persistent_db.update_intent_state(
+                            request_id=request_id,
+                            state="EXECUTION_FAILED",
+                            expected_current_state="AUTHORIZED_PENDING_EXECUTION"
+                        )
+                    except Exception:
+                        pass
 
         elif decision == PolicyDecision.PENDING_HUMAN_APPROVAL:
             # Route to Human Approval Queue with immutable authorization context & delegation token
@@ -739,8 +847,33 @@ class ActionGateway:
             }
         }
 
+        if self.persistent_db and decision == PolicyDecision.ALLOWED.value:
+            try:
+                final_intent_state = "COMMITTED" if ledger_status == "COMMITTED" else "LEDGER_PENDING_RETRY"
+                self.persistent_db.update_intent_state(
+                    request_id=request_id,
+                    state=final_intent_state,
+                    outcome=outcome,
+                    expected_current_state="EXECUTED_PENDING_LEDGER"
+                )
+            except Exception:
+                pass
+
         if idempotency_key and decision == PolicyDecision.ALLOWED.value:
-            self.replay_tracker.record_idempotent_result(agent_id, idempotency_key, outcome)
+            req_amount = float(parameters.get("amount", 0.0))
+            req_fp = self.compute_request_fingerprint(
+                agent_id=agent_id,
+                action=action,
+                resource=resource,
+                parameters=parameters,
+                amount=req_amount
+            )
+            self.replay_tracker.record_idempotent_result(
+                agent_id=agent_id,
+                idempotency_key=idempotency_key,
+                result=outcome,
+                request_fingerprint=req_fp
+            )
 
         return outcome
 
@@ -753,6 +886,15 @@ class ActionGateway:
         results = []
         for item in pending:
             ok, msg = self.retry_queue.retry_commit(item["event_id"], self.fabric_client)
+            if ok and self.persistent_db:
+                try:
+                    self.persistent_db.update_intent_state(
+                        request_id=item["request_id"],
+                        state="COMMITTED",
+                        expected_current_state="LEDGER_PENDING_RETRY"
+                    )
+                except Exception:
+                    pass
             results.append({"event_id": item["event_id"], "success": ok, "message": msg})
         return {
             "reconciled_count": sum(1 for r in results if r["success"]),
