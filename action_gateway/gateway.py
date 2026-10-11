@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import uuid
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from action_gateway.request_validator import RequestValidator
@@ -60,21 +61,64 @@ class ActionGateway:
         self._event_counter = 1000
 
     @staticmethod
+    def canonicalize_financial_amount(amount: Any) -> tuple[int, str]:
+        """
+        Converts financial amount to integer minor units (scale 4, e.g. 1.2000 -> 12000 minor units)
+        and exact canonical decimal string ('1.2000').
+        Disallows negative amounts, NaN, Infinity, or malformed values.
+        Raises ValueError on invalid amount.
+        """
+        if amount is None:
+            return 0, "0.0000"
+        try:
+            d = Decimal(str(amount))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError(f"Malformed financial amount: {amount}")
+        if d.is_nan() or d.is_infinite():
+            raise ValueError("Financial amount cannot be NaN or Infinite")
+        if d < 0:
+            raise ValueError(f"Financial amount cannot be negative: {amount}")
+        quantized = d.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        minor_units = int(quantized * Decimal("10000"))
+        return minor_units, str(quantized)
+
+    @staticmethod
     def compute_request_fingerprint(
         agent_id: str,
         action: str,
         resource: str,
         parameters: dict[str, Any],
-        amount: float
+        amount: Any = 0.0,
+        currency: str | None = None,
+        destination: str | None = None,
+        tenant_id: str | None = None,
     ) -> str:
-        """Computes deterministic canonical SHA-256 fingerprint of business request parameters."""
-        clean_params = {k: v for k, v in parameters.items() if k != "amount"}
+        """
+        Computes deterministic canonical SHA-256 fingerprint of business request parameters.
+        Binds integer minor units, exact decimal string, currency, destination, tenant, and canonical parameters.
+        """
+        minor_units, amount_str = ActionGateway.canonicalize_financial_amount(amount)
+        clean_params = {
+            k: v for k, v in parameters.items()
+            if k not in ("amount", "currency", "destination", "to_account", "recipient", "tenant_id")
+        }
+        dest = (
+            destination
+            or str(parameters.get("to_account") or parameters.get("destination") or parameters.get("recipient") or "")
+        )
+        curr = currency or str(parameters.get("currency", "USD")).upper()
+        tenant = tenant_id or str(parameters.get("tenant_id", "default-tenant"))
+
         raw_dict = {
             "agent_id": agent_id,
             "action": action,
             "resource": resource,
+            "amount_minor_units": minor_units,
+            "amount_str": amount_str,
+            "currency": curr,
+            "destination": dest,
+            "tenant_id": tenant,
             "parameters": clean_params,
-            "amount": round(float(amount), 4)
         }
         canonical_bytes = json.dumps(raw_dict, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(canonical_bytes).hexdigest()
@@ -188,9 +232,18 @@ class ActionGateway:
         param_amt = parameters.get("amount")
         raw_amt = top_amt if top_amt is not None else (param_amt if param_amt is not None else 0.0)
         try:
-            req_amount = float(raw_amt)
-        except Exception:
-            req_amount = 0.0
+            minor_units, amount_str = self.canonicalize_financial_amount(raw_amt)
+            req_amount = float(Decimal(amount_str))
+        except ValueError:
+            return self._build_immediate_rejection(
+                request_id=request_id,
+                agent_id=agent_id,
+                action=action,
+                resource=resource,
+                decision=PolicyDecision.BLOCKED.value,
+                reason="INVALID_FINANCIAL_AMOUNT",
+                api_result="DENIED"
+            )
 
         request_fingerprint = self.compute_request_fingerprint(
             agent_id=agent_id,
@@ -223,7 +276,8 @@ class ActionGateway:
                 return res
 
         # Step 6.2: Acquire in-flight concurrency lock for idempotency key
-        if not self.replay_tracker.acquire_in_flight(agent_id, idempotency_key):
+        lock_res = self.replay_tracker.acquire_in_flight(agent_id, idempotency_key)
+        if not lock_res:
             return self._build_immediate_rejection(
                 request_id=request_id,
                 agent_id=agent_id,
@@ -251,7 +305,12 @@ class ActionGateway:
                 request_fingerprint=request_fingerprint
             )
         finally:
-            self.replay_tracker.release_in_flight(agent_id, idempotency_key)
+            self.replay_tracker.release_in_flight(
+                agent_id,
+                idempotency_key,
+                owner_id=lock_res.owner_id,
+                fencing_token=lock_res.fencing_token
+            )
 
     def _execute_request_pipeline(
         self,
@@ -860,7 +919,7 @@ class ActionGateway:
                 pass
 
         if idempotency_key and decision == PolicyDecision.ALLOWED.value:
-            req_amount = float(parameters.get("amount", 0.0))
+            req_amount = parameters.get("amount", 0.0)
             req_fp = self.compute_request_fingerprint(
                 agent_id=agent_id,
                 action=action,

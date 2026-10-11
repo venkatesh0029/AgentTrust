@@ -584,6 +584,35 @@ Detailed technical specifications and design guides are available in the [`docum
 
 ---
 
+## 🛡️ Distributed Systems & Live Integration Assurance
+
+AgentTrust enforces verifiable safety invariants across independent operating-system processes, distributed locks, network partitions, and financial computation boundaries:
+
+### 1. Real Multiprocess Stress Testing (`multiprocessing.Process`)
+- **OS Process Isolation**: Independent Python processes execute concurrent requests against a shared persistent SQLite store.
+- **WAL Mode Concurrency**: Uses `PRAGMA journal_mode=WAL;` and `PRAGMA busy_timeout=15000;` ensuring non-blocking reads and serialized atomic writes across separate operating system processes without locking deadlocks.
+- **Atomic Nonce Reservation**: SQLite `BEGIN IMMEDIATE` transactions with unique constraints ensure that racing independent processes claiming the same nonce result in exactly **1 success and N rejections**, guaranteeing at-most-once execution across multi-process deployments.
+
+### 2. Leased Distributed Locks with Monotonic Fencing Tokens
+- **Lease Expiration & TTL**: In-flight distributed locks in `in_flight_locks` have explicit time-to-live (`expires_at = now + ttl_seconds`).
+- **Crash Recovery**: If an active worker crashes or stalls beyond its lease TTL, competing workers automatically reclaim the lock.
+- **Monotonic Fencing Tokens**: Lock re-acquisition increments `fencing_token`. Stalled workers that wake up after their lease was reclaimed are blocked by `validate_lock_fencing`, preventing delayed executions from overwriting newer locks or committing stale state.
+
+### 3. Financial Amount Canonicalization & Payload Integrity
+- **Integer Minor Units**: Monetary values are quantized to standard integer minor units (scale 4, e.g. `$1,200.0001` $\to$ `12000001` minor units) and canonical decimal strings (`"1200.0001"`).
+- **Floating-Point Boundary Protection**: Negative amounts, `NaN`, and `Infinity` are rejected fail-closed before execution (`INVALID_FINANCIAL_AMOUNT` or `NON_POSITIVE_AMOUNT`).
+- **Canonical SHA-256 Fingerprinting**: Idempotency keys are cryptographically bound to `agent_id`, `action`, `resource`, `amount_minor_units`, `currency` (`USD` vs `EUR`), `destination` account, `tenant_id`, and canonical JSON parameters. Mutating any field under the same idempotency key causes immediate rejection with `IDEMPOTENCY_PAYLOAD_MISMATCH` (HTTP 409).
+
+### 4. Authoritative Status Reconciliation & Outbox Recovery
+- **Uncertain External Outcomes**: If a network timeout occurs after external API invocation, recovery workers query authoritative transaction status via `query_transaction_status` using stable identifiers before retrying, avoiding duplicate transfers.
+- **Multi-Worker Reconciliation Races**: Multiple independent workers processing the durable outbox queue commit pending ledger items without duplicating ledger entries.
+
+### 5. Architectural Guarantees & Deployment Boundaries
+- **Guaranteed Semantics**: **Durable reconciliation with at-most-once execution guarantees under specified assumptions** (authoritative status lookup, downstream idempotency keys, and crash-resilient intent state machines).
+- **Storage Topology Constraint**: SQLite provides atomic multi-worker coordination on a **single host**. For multi-host distributed gateway instances, a linearizable database or distributed lock manager (e.g., PostgreSQL with row-level locks, etcd, or Consul) is required.
+
+---
+
 ## ⚠️ Limitations & Honesty
 
 AgentTrust is committed to full transparency regarding research scope and engineering trade-offs:
@@ -591,7 +620,7 @@ AgentTrust is committed to full transparency regarding research scope and engine
 1. **Permissioned Ledger Simulator by Default**: The default runtime uses a high-performance Python simulator replicating the Hyperledger Fabric state model and chaincode interface. A production-ready Go chaincode contract and Docker deployment configuration are provided in `fabric/` for real network pairing.
 2. **KMS & HSM Operational Modes**: Supports SoftHSM2 via `python-pkcs11` (`CKA_EXTRACTABLE = FALSE`, `CKA_SENSITIVE = TRUE`). When no PKCS#11 dynamic library is detected, the provider transparently reports `LOCAL_SOFTWARE_STORE` mode without false hardware claims.
 3. **Prompt Injection Is Not a Standalone Silver Bullet**: As proven by Held-Out V2, pattern and heuristic guards achieve 33.33% recall on novel vectors. Complete system security is guaranteed by Layer 3 Policy Authorization and cryptographic non-repudiation, which block 100% of unauthorized side effects even upon detector bypass.
-4. **Tested vs. Formally Proven Invariants**: Security invariants are validated via extensive property-based fuzzer testing (Hypothesis) and a 112-test automated regression suite, but have not yet been verified via formal mathematical methods (e.g., TLA+ or ProVerif).
+4. **Tested vs. Formally Proven Invariants**: Security invariants are validated via extensive property-based fuzzer testing (Hypothesis) and a 144-test automated regression suite (144 passed, 2 skipped), but have not yet been verified via formal mathematical methods (e.g., TLA+ or ProVerif).
 
 ---
 
@@ -611,6 +640,7 @@ AgentTrust is committed to full transparency regarding research scope and engine
 - [x] Granular Component Ablation Benchmarking & Held-Out Generalization Suites
 - [x] Concurrency & Recovery Assurance (Milestone v0.4.0)
 - [x] Distributed-System Invariant Assurance (Cross-Process Atomicity, Outbox Reconciliation & State Machine)
+- [x] Live Integration & Security Boundary Assurance (Real OS Multiprocess Stress, Leased Fencing Tokens, Financial Minor-Unit Canonicalization)
 - [ ] Multi-Organization Hyperledger Fabric Live Testnet Deployment with Endorsement Policies
 - [ ] Formal Verification of Core Protocol Invariants using ProVerif / TLA+
 - [ ] Complete Next.js Enterprise Console with Live Telemetry WebSockets

@@ -8,7 +8,9 @@ import datetime
 import json
 import sqlite3
 import threading
+import uuid
 from typing import Any
+
 
 class InvalidStateTransitionError(ValueError):
     """Raised when an illegal transition is attempted in the transaction intent state machine."""
@@ -18,6 +20,37 @@ class InvalidStateTransitionError(ValueError):
 class ConcurrentTransitionConflictError(RuntimeError):
     """Raised when a concurrent worker modifies an intent before the current transition completes."""
     pass
+
+
+class FencingTokenError(RuntimeError):
+    """Raised when a worker's lock lease was preempted, stolen, or superseded by a newer fencing token."""
+    pass
+
+
+class LockLeaseExpiredError(RuntimeError):
+    """Raised when an operation is attempted after lock lease expiry."""
+    pass
+
+
+class LockAcquisitionResult:
+    """Encapsulates distributed lock acquisition result with fencing token and owner identity."""
+
+    def __init__(self, acquired: bool, fencing_token: int, owner_id: str):
+        self.acquired = acquired
+        self.fencing_token = fencing_token
+        self.owner_id = owner_id
+
+    def __bool__(self) -> bool:
+        return self.acquired
+
+    def __iter__(self):
+        return iter((self.acquired, self.fencing_token, self.owner_id))
+
+    def __getitem__(self, index: int):
+        return (self.acquired, self.fencing_token, self.owner_id)[index]
+
+    def __repr__(self) -> str:
+        return f"LockAcquisitionResult(acquired={self.acquired}, fencing_token={self.fencing_token}, owner_id='{self.owner_id}')"
 
 
 VALID_INTENT_TRANSITIONS: dict[str, set[str]] = {
@@ -46,8 +79,13 @@ class PersistentStorageEngine:
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=15000")
+        except Exception:
+            pass
         return conn
 
     def _init_db(self) -> None:
@@ -181,15 +219,27 @@ class PersistentStorageEngine:
             if "request_fingerprint" not in intent_cols:
                 cursor.execute("ALTER TABLE transaction_intents ADD COLUMN request_fingerprint TEXT")
 
-            # 11. Cross-Process In-Flight Distributed Locks Table
+            # 11. Cross-Process In-Flight Distributed Locks Table with Leases and Fencing Tokens
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS in_flight_locks (
                     scoped_key TEXT PRIMARY KEY,
                     agent_id TEXT NOT NULL,
                     idempotency_key TEXT NOT NULL,
-                    created_at REAL NOT NULL
+                    owner_id TEXT NOT NULL DEFAULT '',
+                    fencing_token INTEGER NOT NULL DEFAULT 1,
+                    created_at REAL NOT NULL,
+                    expires_at REAL NOT NULL DEFAULT 0.0
                 )
             """)
+
+            cursor.execute("PRAGMA table_info(in_flight_locks)")
+            lock_cols = [row["name"] for row in cursor.fetchall()]
+            if "owner_id" not in lock_cols:
+                cursor.execute("ALTER TABLE in_flight_locks ADD COLUMN owner_id TEXT DEFAULT ''")
+            if "fencing_token" not in lock_cols:
+                cursor.execute("ALTER TABLE in_flight_locks ADD COLUMN fencing_token INTEGER DEFAULT 1")
+            if "expires_at" not in lock_cols:
+                cursor.execute("ALTER TABLE in_flight_locks ADD COLUMN expires_at REAL DEFAULT 0.0")
 
             conn.commit()
             conn.close()
@@ -439,46 +489,135 @@ class PersistentStorageEngine:
             finally:
                 conn.close()
 
-    def try_acquire_in_flight_lock(self, agent_id: str, idempotency_key: str, timeout_seconds: float = 60.0) -> bool:
+    def try_acquire_in_flight_lock(
+        self,
+        agent_id: str,
+        idempotency_key: str,
+        owner_id: str | None = None,
+        ttl_seconds: float = 30.0
+    ) -> LockAcquisitionResult:
         """
-        Atomically acquires an in-flight lock in SQLite across processes.
-        Evicts locks older than timeout_seconds.
-        Returns True if acquired, False if already locked.
+        Atomically acquires an in-flight distributed lock in SQLite across processes.
+        Uses leases and monotonically increasing fencing tokens.
+        If an existing lock is active (expires_at > now), returns LockAcquisitionResult(False, cur_fencing, cur_owner).
+        If an existing lock has expired (expires_at <= now), reclaims the lock by
+        incrementing fencing_token and setting new owner_id.
+        Returns LockAcquisitionResult(acquired, fencing_token, owner_id).
         """
         scoped_key = f"{agent_id}:{idempotency_key}"
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
-        cutoff = now - timeout_seconds
+        actual_owner = owner_id or str(uuid.uuid4())
+        new_expires = now + ttl_seconds
+
         with self._lock:
             conn = self._get_connection()
             try:
                 cursor = conn.cursor()
                 cursor.execute("BEGIN IMMEDIATE")
-                cursor.execute("DELETE FROM in_flight_locks WHERE created_at < ?", (cutoff,))
-                cursor.execute("SELECT 1 FROM in_flight_locks WHERE scoped_key = ?", (scoped_key,))
-                if cursor.fetchone() is not None:
-                    conn.rollback()
-                    return False
                 cursor.execute(
-                    "INSERT INTO in_flight_locks (scoped_key, agent_id, idempotency_key, created_at) VALUES (?, ?, ?, ?)",
-                    (scoped_key, agent_id, idempotency_key, now)
+                    "SELECT owner_id, fencing_token, expires_at FROM in_flight_locks WHERE scoped_key = ?",
+                    (scoped_key,)
                 )
-                conn.commit()
-                return True
+                row = cursor.fetchone()
+                if row is not None:
+                    expires_at = float(row["expires_at"] or 0.0)
+                    cur_fencing = int(row["fencing_token"] or 1)
+                    cur_owner = str(row["owner_id"] or "")
+                    if expires_at > now:
+                        # Lock is actively held by a non-expired lease
+                        conn.rollback()
+                        return LockAcquisitionResult(False, cur_fencing, cur_owner)
+                    else:
+                        # Lock has expired! Reclaim lock with incremented fencing token
+                        new_fencing = cur_fencing + 1
+                        cursor.execute("""
+                            UPDATE in_flight_locks 
+                            SET owner_id = ?, fencing_token = ?, created_at = ?, expires_at = ?
+                            WHERE scoped_key = ?
+                        """, (actual_owner, new_fencing, now, new_expires, scoped_key))
+                        conn.commit()
+                        return LockAcquisitionResult(True, new_fencing, actual_owner)
+                else:
+                    new_fencing = 1
+                    cursor.execute("""
+                        INSERT INTO in_flight_locks (
+                            scoped_key, agent_id, idempotency_key, owner_id, fencing_token, created_at, expires_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (scoped_key, agent_id, idempotency_key, actual_owner, new_fencing, now, new_expires))
+                    conn.commit()
+                    return LockAcquisitionResult(True, new_fencing, actual_owner)
             except sqlite3.IntegrityError:
                 conn.rollback()
-                return False
+                return LockAcquisitionResult(False, 0, "")
             finally:
                 conn.close()
 
-    def release_in_flight_lock(self, agent_id: str, idempotency_key: str) -> None:
-        """Releases an in-flight lock across processes."""
+    def validate_lock_fencing(
+        self,
+        agent_id: str,
+        idempotency_key: str,
+        owner_id: str,
+        fencing_token: int
+    ) -> bool:
+        """
+        Verifies that the lock is currently held by owner_id with fencing_token and has not expired.
+        Returns True if valid, False otherwise.
+        """
+        scoped_key = f"{agent_id}:{idempotency_key}"
+        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT owner_id, fencing_token, expires_at FROM in_flight_locks WHERE scoped_key = ?",
+                    (scoped_key,)
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return False
+                if row["owner_id"] != owner_id or int(row["fencing_token"]) != fencing_token:
+                    return False
+                if float(row["expires_at"]) < now:
+                    return False
+                return True
+            finally:
+                conn.close()
+
+    def release_in_flight_lock(
+        self,
+        agent_id: str,
+        idempotency_key: str,
+        owner_id: str | None = None,
+        fencing_token: int | None = None
+    ) -> bool:
+        """
+        Releases an in-flight lock across processes.
+        If owner_id and fencing_token are provided, only deletes if the lock is still owned
+        by this worker and has not been stolen by another worker.
+        Returns True if released, False if lock was already stolen or expired.
+        """
         scoped_key = f"{agent_id}:{idempotency_key}"
         with self._lock:
             conn = self._get_connection()
             try:
                 cursor = conn.cursor()
-                cursor.execute("DELETE FROM in_flight_locks WHERE scoped_key = ?", (scoped_key,))
+                cursor.execute("BEGIN IMMEDIATE")
+                if owner_id is not None and fencing_token is not None:
+                    cursor.execute(
+                        "DELETE FROM in_flight_locks WHERE scoped_key = ? AND owner_id = ? AND fencing_token = ?",
+                        (scoped_key, owner_id, fencing_token)
+                    )
+                elif owner_id is not None:
+                    cursor.execute(
+                        "DELETE FROM in_flight_locks WHERE scoped_key = ? AND owner_id = ?",
+                        (scoped_key, owner_id)
+                    )
+                else:
+                    cursor.execute("DELETE FROM in_flight_locks WHERE scoped_key = ?", (scoped_key,))
+                released = cursor.rowcount > 0
                 conn.commit()
+                return released
             finally:
                 conn.close()
 
