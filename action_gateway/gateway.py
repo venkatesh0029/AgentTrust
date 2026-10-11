@@ -5,6 +5,7 @@ import uuid
 from typing import Any
 
 from action_gateway.request_validator import RequestValidator
+from action_gateway.retry_queue import RetryQueueManager
 from agent_registry.registration import AgentRegistry
 from audit_writer.chain_writer import AuditChainWriter
 from evidence_manager.evidence_store import EvidenceStore
@@ -39,7 +40,9 @@ class ActionGateway:
         approval_manager: HumanApprovalManager,
         evidence_store: EvidenceStore,
         fabric_client: FabricClient,
-        chain_writer: AuditChainWriter | None = None
+        chain_writer: AuditChainWriter | None = None,
+        retry_queue: RetryQueueManager | None = None,
+        persistent_db: Any | None = None
     ):
         self.registry = registry
         self.cert_manager = cert_manager
@@ -50,6 +53,8 @@ class ActionGateway:
         self.evidence_store = evidence_store
         self.fabric_client = fabric_client
         self.chain_writer = chain_writer or AuditChainWriter()
+        self.retry_queue = retry_queue or RetryQueueManager(persistent_db=persistent_db)
+        self.persistent_db = persistent_db
         self._event_counter = 1000
 
     def process_request(self, request_payload: dict[str, Any]) -> dict[str, Any]:
@@ -78,7 +83,7 @@ class ActionGateway:
         timestamp = request_payload["timestamp"]
         expires_at = request_payload.get("expires_at", "")
         key_version = request_payload.get("key_version")
-        idempotency_key = request_payload.get("idempotency_key") or request_payload.get("X-Idempotency-Key") or request_id
+        idempotency_key = request_payload.get("idempotency_key") or request_payload.get("X-Idempotency-Key")
         signature_b64 = request_payload["signature"]
 
         # Step 2: Verify Agent Identity & Registration
@@ -157,6 +162,59 @@ class ActionGateway:
                 api_result="DENIED"
             )
 
+        # Step 6.1: Check Idempotency Cache for previously completed requests
+        if idempotency_key:
+            cached_outcome = self.replay_tracker.get_idempotent_result(agent_id, idempotency_key)
+            if cached_outcome:
+                res = copy.deepcopy(cached_outcome)
+                res["idempotent_replay"] = True
+                return res
+
+        # Step 6.2: Acquire in-flight concurrency lock for idempotency key
+        if not self.replay_tracker.acquire_in_flight(agent_id, idempotency_key):
+            return self._build_immediate_rejection(
+                request_id=request_id,
+                agent_id=agent_id,
+                action=action,
+                resource=resource,
+                decision=PolicyDecision.BLOCKED.value,
+                reason="CONCURRENT_IDEMPOTENCY_CONFLICT",
+                api_result="NOT_EXECUTED"
+            )
+
+        try:
+            return self._execute_request_pipeline(
+                request_payload=request_payload,
+                agent_record=agent_record,
+                request_id=request_id,
+                agent_id=agent_id,
+                action=action,
+                resource=resource,
+                parameters=parameters,
+                nonce=nonce,
+                timestamp=timestamp,
+                expires_at=expires_at,
+                idempotency_key=idempotency_key,
+                payload_to_verify=payload_to_verify
+            )
+        finally:
+            self.replay_tracker.release_in_flight(agent_id, idempotency_key)
+
+    def _execute_request_pipeline(
+        self,
+        request_payload: dict[str, Any],
+        agent_record: dict[str, Any],
+        request_id: str,
+        agent_id: str,
+        action: str,
+        resource: str,
+        parameters: dict[str, Any],
+        nonce: str,
+        timestamp: Any,
+        expires_at: str,
+        idempotency_key: str | None,
+        payload_to_verify: dict[str, Any]
+    ) -> dict[str, Any]:
         # Step 7: Strict Input Validation & Canonicalization for Authenticated Requests
         top_amount = request_payload.get("amount")
         param_amount = parameters.get("amount")
@@ -167,7 +225,7 @@ class ActionGateway:
                 request_id=request_id, agent_id=agent_id, action=action, resource=resource,
                 parameters=parameters, decision=PolicyDecision.BLOCKED.value,
                 reason="INVALID_AMOUNT_FORMAT", policy_id=agent_record.get("policy_id", "NONE"), policy_version="1.0", agent_version="1.0",
-                api_result="NOT_EXECUTED", nonce=nonce
+                api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
             )
 
         if top_amount is not None and param_amount is not None:
@@ -179,21 +237,21 @@ class ActionGateway:
                         request_id=request_id, agent_id=agent_id, action=action, resource=resource,
                         parameters=parameters, decision=PolicyDecision.BLOCKED.value,
                         reason="INVALID_AMOUNT_NAN_OR_INF", policy_id="NONE", policy_version="1.0", agent_version="1.0",
-                        api_result="NOT_EXECUTED", nonce=nonce
+                        api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
                     )
                 if abs(top_f - param_f) > 1e-6:
                     return self._finalize_gateway_outcome(
                         request_id=request_id, agent_id=agent_id, action=action, resource=resource,
                         parameters=parameters, decision=PolicyDecision.BLOCKED.value,
                         reason="AMOUNT_MISMATCH", policy_id="NONE", policy_version="1.0", agent_version="1.0",
-                        api_result="NOT_EXECUTED", nonce=nonce
+                        api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
                     )
             except Exception:
                 return self._finalize_gateway_outcome(
                     request_id=request_id, agent_id=agent_id, action=action, resource=resource,
                     parameters=parameters, decision=PolicyDecision.BLOCKED.value,
                     reason="INVALID_AMOUNT_FORMAT", policy_id="NONE", policy_version="1.0", agent_version="1.0",
-                    api_result="NOT_EXECUTED", nonce=nonce
+                    api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
                 )
 
         try:
@@ -204,21 +262,21 @@ class ActionGateway:
                     request_id=request_id, agent_id=agent_id, action=action, resource=resource,
                     parameters=parameters, decision=PolicyDecision.BLOCKED.value,
                     reason="INVALID_AMOUNT_NAN_OR_INF", policy_id="NONE", policy_version="1.0", agent_version="1.0",
-                    api_result="NOT_EXECUTED", nonce=nonce
+                    api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
                 )
             if amount < 0 or (amount == 0 and action in ["CREATE_PURCHASE_ORDER", "TRANSFER_FUNDS", "CREATE_REIMBURSEMENT"]):
                 return self._finalize_gateway_outcome(
                     request_id=request_id, agent_id=agent_id, action=action, resource=resource,
                     parameters=parameters, decision=PolicyDecision.BLOCKED.value,
                     reason="NON_POSITIVE_AMOUNT", policy_id="NONE", policy_version="1.0", agent_version="1.0",
-                    api_result="NOT_EXECUTED", nonce=nonce
+                    api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
                 )
         except Exception:
             return self._finalize_gateway_outcome(
                 request_id=request_id, agent_id=agent_id, action=action, resource=resource,
                 parameters=parameters, decision=PolicyDecision.BLOCKED.value,
                 reason="INVALID_AMOUNT_FORMAT", policy_id="NONE", policy_version="1.0", agent_version="1.0",
-                api_result="NOT_EXECUTED", nonce=nonce
+                api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
             )
 
         request_payload["amount"] = amount
@@ -246,7 +304,8 @@ class ActionGateway:
                 agent_version=agent_record.get("agent_version", "1.0"),
                 api_result="NOT_EXECUTED",
                 cert_fingerprint=agent_record.get("certificate_fingerprint", ""),
-                nonce=nonce
+                nonce=nonce,
+                idempotency_key=idempotency_key
             )
 
         # Step 7: Trusted Risk Engine Evaluation (Executed BEFORE Policy Engine)
@@ -276,7 +335,7 @@ class ActionGateway:
                     parameters=parameters, decision=PolicyDecision.BLOCKED.value,
                     reason="UNKNOWN_DELEGATION_ISSUER", policy_id=agent_record.get("policy_id", "NONE"),
                     policy_version="1.0", agent_version=agent_record.get("agent_version", "1.0"),
-                    api_result="NOT_EXECUTED", nonce=nonce
+                    api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
                 )
 
             del_res = DelegationTokenManager.verify_delegation_chain(
@@ -293,7 +352,7 @@ class ActionGateway:
                     reason=del_res.get("reason", "DELEGATION_VERIFICATION_FAILED"),
                     policy_id=agent_record.get("policy_id", "NONE"),
                     policy_version="1.0", agent_version=agent_record.get("agent_version", "1.0"),
-                    api_result="NOT_EXECUTED", nonce=nonce
+                    api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
                 )
 
         # Step 8: Versioned Policy Engine Evaluation
@@ -377,7 +436,8 @@ class ActionGateway:
             cert_fingerprint=agent_record.get("certificate_fingerprint", ""),
             nonce=nonce,
             risk_result=risk_result,
-            matched_rules=matched_rules
+            matched_rules=matched_rules,
+            idempotency_key=idempotency_key
         )
 
     def process_human_approval_resume(self, approval_id: str, approver_id: str, provided_token: str | None = None) -> dict[str, Any]:
@@ -541,7 +601,8 @@ class ActionGateway:
         cert_fingerprint: str = "SHA256:DEFAULT",
         nonce: str = "",
         risk_result: dict[str, Any] | None = None,
-        matched_rules: list[str] | None = None
+        matched_rules: list[str] | None = None,
+        idempotency_key: str | None = None
     ) -> dict[str, Any]:
         """
         Creates off-chain evidence, records hash-chain audit log, and commits audit event to Fabric blockchain safely.
@@ -626,8 +687,27 @@ class ActionGateway:
                 "block_hash": "PENDING_RETRY",
                 "status": ledger_status
             }
+            # Enqueue failed commit into durable reconciliation outbox
+            self.retry_queue.enqueue_failed_commit(
+                event_id=event_id,
+                request_id=request_id,
+                payload={
+                    "event_id": event_id,
+                    "request_id": request_id,
+                    "agent_id": agent_id,
+                    "action": action,
+                    "resource": resource,
+                    "decision": decision,
+                    "reason": reason,
+                    "policy_id": policy_id,
+                    "policy_version": policy_version,
+                    "evidence_reference": evidence_ref,
+                    "evidence_hash": evidence_hash
+                },
+                error_msg=str(e)
+            )
 
-        return {
+        outcome = {
             "gateway_status": "PROCESSED",
             "request_id": request_id,
             "agent_id": agent_id,
@@ -657,6 +737,27 @@ class ActionGateway:
                 "block_hash": blockchain_commit["block_hash"],
                 "status": ledger_status
             }
+        }
+
+        if idempotency_key and decision == PolicyDecision.ALLOWED.value:
+            self.replay_tracker.record_idempotent_result(agent_id, idempotency_key, outcome)
+
+        return outcome
+
+    def reconcile_pending_commits(self) -> dict[str, Any]:
+        """
+        Reconciles pending ledger commits that succeeded externally in Protected API
+        but failed during Fabric blockchain commitment.
+        """
+        pending = self.retry_queue.list_pending_retries()
+        results = []
+        for item in pending:
+            ok, msg = self.retry_queue.retry_commit(item["event_id"], self.fabric_client)
+            results.append({"event_id": item["event_id"], "success": ok, "message": msg})
+        return {
+            "reconciled_count": sum(1 for r in results if r["success"]),
+            "pending_count": len(self.retry_queue.list_pending_retries()),
+            "details": results
         }
 
     def _build_immediate_rejection(self, request_id: str, agent_id: str, action: str, resource: str, decision: str, reason: str, api_result: str = "NOT_EXECUTED") -> dict[str, Any]:

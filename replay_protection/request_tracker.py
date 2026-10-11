@@ -10,15 +10,28 @@ class RequestTracker:
     """
     Unified Replay and Idempotency Protection Engine tracking Request IDs, Nonces,
     Expiration timestamps, and Idempotency Keys with Thread-Safety and Automatic Eviction.
+    Supports optional PersistentStorageEngine SQLite backing for restart resilience.
     """
 
-    def __init__(self, timestamp_window: int = 300):
+    def __init__(self, timestamp_window: int = 300, persistent_db=None):
         self.timestamp_window = timestamp_window
+        self.persistent_db = persistent_db
         self.nonce_manager = NonceManager()
         self.timestamp_validator = TimestampValidator(timestamp_window)
         self._processed_request_ids: dict[str, float] = {}
         self._idempotency_records: dict[str, dict[str, Any]] = {}
+        self._in_flight_keys: set[str] = set()
         self._lock = threading.Lock()
+
+        # Hydrate from persistent DB if available
+        if self.persistent_db:
+            try:
+                db_nonces = self.persistent_db.get_all_nonces()
+                for n in db_nonces:
+                    self.nonce_manager.register_nonce(n)
+                self._processed_request_ids.update(self.persistent_db.get_all_request_ids())
+            except Exception:
+                pass
 
     def check_and_track(
         self,
@@ -54,6 +67,12 @@ class RequestTracker:
             self._processed_request_ids[request_id] = now_ts
             self.nonce_manager.register_nonce(nonce)
 
+            if self.persistent_db:
+                try:
+                    self.persistent_db.save_nonce(request_id, nonce, now_ts)
+                except Exception:
+                    pass
+
             return True, "FRESH_REQUEST"
 
     def _evict_expired_entries(self) -> None:
@@ -63,6 +82,30 @@ class RequestTracker:
         expired_reqs = [r for r, ts in self._processed_request_ids.items() if ts > 0 and now - ts > self.timestamp_window]
         for r in expired_reqs:
             del self._processed_request_ids[r]
+        if self.persistent_db:
+            try:
+                self.persistent_db.evict_expired_nonces(self.timestamp_window)
+            except Exception:
+                pass
+
+    def acquire_in_flight(self, agent_id: str, idempotency_key: str | None) -> bool:
+        """Acquires lock for an in-flight idempotency key. Returns False if already in-flight."""
+        if not idempotency_key:
+            return True
+        scoped_key = f"{agent_id}:{idempotency_key}"
+        with self._lock:
+            if scoped_key in self._in_flight_keys:
+                return False
+            self._in_flight_keys.add(scoped_key)
+            return True
+
+    def release_in_flight(self, agent_id: str, idempotency_key: str | None) -> None:
+        """Releases lock for an in-flight idempotency key."""
+        if not idempotency_key:
+            return
+        scoped_key = f"{agent_id}:{idempotency_key}"
+        with self._lock:
+            self._in_flight_keys.discard(scoped_key)
 
     def get_idempotent_result(self, agent_id: str, idempotency_key: str) -> dict[str, Any] | None:
         """Returns cached execution result for duplicate idempotency key bound to the specific agent_id."""
@@ -70,7 +113,18 @@ class RequestTracker:
             return None
         scoped_key = f"{agent_id}:{idempotency_key}"
         with self._lock:
-            return self._idempotency_records.get(scoped_key)
+            if scoped_key in self._idempotency_records:
+                return self._idempotency_records[scoped_key]
+
+        if self.persistent_db:
+            try:
+                intent = self.persistent_db.get_intent_by_idempotency_key(agent_id, idempotency_key)
+                if intent and intent.get("outcome"):
+                    return intent["outcome"]
+            except Exception:
+                pass
+
+        return None
 
     def record_idempotent_result(self, agent_id: str, idempotency_key: str, result: dict[str, Any]) -> None:
         """Stores execution outcome for an idempotency key bound strictly to agent_id."""
@@ -78,4 +132,18 @@ class RequestTracker:
             scoped_key = f"{agent_id}:{idempotency_key}"
             with self._lock:
                 self._idempotency_records[scoped_key] = result
+
+            if self.persistent_db:
+                try:
+                    self.persistent_db.save_intent(
+                        request_id=result.get("request_id", ""),
+                        agent_id=agent_id,
+                        action=result.get("action", ""),
+                        amount=float(result.get("transaction_data", {}).get("amount", 0) if result.get("transaction_data") else 0),
+                        idempotency_key=idempotency_key,
+                        state="COMPLETED",
+                        outcome=result
+                    )
+                except Exception:
+                    pass
 
