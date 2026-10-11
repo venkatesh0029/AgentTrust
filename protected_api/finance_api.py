@@ -19,7 +19,16 @@ class ProcurementService:
         self._reimb_counter = 1000
 
     def create_purchase_order(
-        self, request_id: str, agent_id: str, supplier_id: str, item_name: str, amount: float, approval_ref: str | None = None
+        self,
+        request_id: str,
+        agent_id: str,
+        supplier_id: str,
+        item_name: str,
+        amount: float,
+        approval_ref: str | None = None,
+        amount_canonical: str | None = None,
+        amount_minor_units: int | None = None,
+        currency: str = "INR"
     ) -> dict[str, Any]:
         with self._lock:
             self._po_counter += 1
@@ -31,7 +40,9 @@ class ProcurementService:
                 "supplier_id": supplier_id,
                 "item_name": item_name,
                 "amount": amount,
-                "currency": "INR",
+                "amount_canonical": amount_canonical or str(amount),
+                "amount_minor_units": amount_minor_units,
+                "currency": currency,
                 "status": "ISSUED",
                 "approval_reference": approval_ref,
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -44,7 +55,15 @@ class ProcurementService:
             return self._purchase_orders.get(po_id)
 
     def create_fund_transfer(
-        self, request_id: str, agent_id: str, target_account: str, amount: float, approval_ref: str | None = None
+        self,
+        request_id: str,
+        agent_id: str,
+        target_account: str,
+        amount: float,
+        approval_ref: str | None = None,
+        amount_canonical: str | None = None,
+        amount_minor_units: int | None = None,
+        currency: str = "INR"
     ) -> dict[str, Any]:
         with self._lock:
             self._tf_counter += 1
@@ -55,7 +74,9 @@ class ProcurementService:
                 "agent_id": agent_id,
                 "target_account": target_account,
                 "amount": amount,
-                "currency": "INR",
+                "amount_canonical": amount_canonical or str(amount),
+                "amount_minor_units": amount_minor_units,
+                "currency": currency,
                 "status": "TRANSFERRED",
                 "approval_reference": approval_ref,
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -64,7 +85,15 @@ class ProcurementService:
             return record
 
     def create_reimbursement(
-        self, request_id: str, agent_id: str, employee_id: str, amount: float, approval_ref: str | None = None
+        self,
+        request_id: str,
+        agent_id: str,
+        employee_id: str,
+        amount: float,
+        approval_ref: str | None = None,
+        amount_canonical: str | None = None,
+        amount_minor_units: int | None = None,
+        currency: str = "INR"
     ) -> dict[str, Any]:
         with self._lock:
             self._reimb_counter += 1
@@ -75,7 +104,9 @@ class ProcurementService:
                 "agent_id": agent_id,
                 "employee_id": employee_id,
                 "amount": amount,
-                "currency": "INR",
+                "amount_canonical": amount_canonical or str(amount),
+                "amount_minor_units": amount_minor_units,
+                "currency": currency,
                 "status": "PROCESSED",
                 "approval_reference": approval_ref,
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -92,6 +123,7 @@ class ProtectedFinanceAPI:
     2. Action Gateway Service Identity ('AgentTrust-ActionGateway-Service')
     3. Action Gateway Service RSA Signature verification.
     4. Idempotency Key check.
+    5. Side-Effect Fencing Token check (Downstream boundary protection).
     """
 
     GATEWAY_SECRET = "AGT-GATEWAY-INTERNAL-SECRET-KEY-98765"
@@ -100,11 +132,20 @@ class ProtectedFinanceAPI:
         self.service = ProcurementService()
         self._idempotency_cache: dict[str, dict[str, Any]] = {}
         self._idempotency_lock = threading.Lock()
+        self._fencing_tokens: dict[str, int] = {}
+        self._fencing_lock = threading.Lock()
         # Generate Gateway Service RSA Keypair for Service-to-Service mTLS/Signing
         self.gateway_service_private_key = KeyManager.generate_key_pair(2048)
         self.gateway_service_public_key_pem = KeyManager.public_key_to_pem(
             self.gateway_service_private_key.public_key()
         )
+
+    def register_active_fencing_token(self, agent_id: str, scope: str, fencing_token: int) -> None:
+        """Registers or advances active fencing token for a specific scope at downstream boundary."""
+        with self._fencing_lock:
+            full_scope = f"{agent_id}:{scope}"
+            if fencing_token > self._fencing_tokens.get(full_scope, 0):
+                self._fencing_tokens[full_scope] = fencing_token
 
     def create_gateway_auth_headers(self, request_id: str) -> dict[str, str]:
         """Helper for Action Gateway to generate signed service-to-service headers."""
@@ -133,11 +174,13 @@ class ProtectedFinanceAPI:
         agent_id: str,
         approval_ref: str | None = None,
         auth_headers: dict[str, str] | None = None,
-        idempotency_key: str | None = None
+        idempotency_key: str | None = None,
+        fencing_token: int | None = None
     ) -> dict[str, Any]:
         """
         Executes protected business API operation.
         Verifies gateway token and service-to-service signature.
+        Enforces downstream fencing token validation to reject stale workers.
         Checks idempotency cache to prevent duplicate business executions.
         """
         # 1. Direct Access Check (Gateway Token)
@@ -179,6 +222,37 @@ class ProtectedFinanceAPI:
                 "message": "Gateway Service Signature Verification Failed."
             }
 
+        # 2.5 Downstream Side-Effect Fencing Protection (Check A)
+        # Prevents stale workers that paused and lost their lease from executing financial side effects.
+        if fencing_token is not None:
+            raw_key = idempotency_key or request_id
+            target_scope = (
+                parameters.get("target_account")
+                or parameters.get("supplier_id")
+                or parameters.get("employee_id")
+                or parameters.get("resource")
+            )
+            scopes = [f"{agent_id}:{raw_key}"]
+            if target_scope:
+                scopes.append(f"{agent_id}:{target_scope}")
+
+            with self._fencing_lock:
+                for sc in scopes:
+                    active_token = self._fencing_tokens.get(sc, 0)
+                    if fencing_token < active_token:
+                        return {
+                            "success": False,
+                            "error": "STALE_FENCING_TOKEN",
+                            "message": (
+                                f"Side-effect rejected at downstream boundary: provided fencing token "
+                                f"({fencing_token}) is lower than current active fencing token "
+                                f"({active_token}) for scope '{sc}'."
+                            )
+                        }
+                for sc in scopes:
+                    if fencing_token > self._fencing_tokens.get(sc, 0):
+                        self._fencing_tokens[sc] = fencing_token
+
         # 3. Scoped Idempotency Check per (agent_id, idempotency_key) with thread lock
         raw_key = idempotency_key or request_id
         cache_key = f"{agent_id}:{raw_key}"
@@ -191,6 +265,9 @@ class ProtectedFinanceAPI:
 
             # Execute business logic
             action_upper = action.upper()
+            amt_canon = parameters.get("amount_canonical")
+            amt_minor = parameters.get("amount_minor_units")
+            curr = parameters.get("currency", "INR")
 
             if action_upper == "CREATE_PURCHASE_ORDER":
                 supplier_id = parameters.get("supplier_id") or parameters.get("resource") or "SUPPLIER-001"
@@ -203,7 +280,10 @@ class ProtectedFinanceAPI:
                     supplier_id=supplier_id,
                     item_name=item_name,
                     amount=amount,
-                    approval_ref=approval_ref
+                    approval_ref=approval_ref,
+                    amount_canonical=amt_canon,
+                    amount_minor_units=amt_minor,
+                    currency=curr
                 )
                 res = {
                     "success": True,
@@ -222,7 +302,10 @@ class ProtectedFinanceAPI:
                     agent_id=agent_id,
                     target_account=target_account,
                     amount=amount,
-                    approval_ref=approval_ref
+                    approval_ref=approval_ref,
+                    amount_canonical=amt_canon,
+                    amount_minor_units=amt_minor,
+                    currency=curr
                 )
                 res = {
                     "success": True,
@@ -241,7 +324,10 @@ class ProtectedFinanceAPI:
                     agent_id=agent_id,
                     employee_id=employee_id,
                     amount=amount,
-                    approval_ref=approval_ref
+                    approval_ref=approval_ref,
+                    amount_canonical=amt_canon,
+                    amount_minor_units=amt_minor,
+                    currency=curr
                 )
                 res = {
                     "success": True,
