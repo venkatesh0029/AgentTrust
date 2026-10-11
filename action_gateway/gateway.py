@@ -95,7 +95,11 @@ class ActionGateway:
         Raises ValueError on invalid amount or excess precision.
         """
         curr_key = (currency or "DEFAULT").upper()
-        scale = cls.CURRENCY_PRECISION_SPECS.get(curr_key, cls.CURRENCY_PRECISION_SPECS["DEFAULT"])
+        if curr_key not in cls.CURRENCY_PRECISION_SPECS:
+            raise ValueError(
+                f"Unsupported currency '{curr_key}'. Currency must be explicitly registered in payment specification."
+            )
+        scale = cls.CURRENCY_PRECISION_SPECS[curr_key]
 
         if amount is None:
             zero_str = f"0.{'0' * scale}" if scale > 0 else "0"
@@ -154,7 +158,15 @@ class ActionGateway:
         }
         dest = (
             destination
-            or str(parameters.get("to_account") or parameters.get("destination") or parameters.get("recipient") or "")
+            or str(
+                parameters.get("to_account")
+                or parameters.get("destination")
+                or parameters.get("target_account")
+                or parameters.get("destination_account")
+                or parameters.get("supplier_id")
+                or parameters.get("recipient")
+                or ""
+            )
         )
         tenant = tenant_id or str(parameters.get("tenant_id", "default-tenant"))
 
@@ -297,7 +309,42 @@ class ActionGateway:
         raw_amt = top_amt if top_amt is not None else (param_amt if param_amt is not None else 0.0)
         top_curr = request_payload.get("currency")
         param_curr = parameters.get("currency")
-        req_curr = top_curr or param_curr or "DEFAULT"
+        if top_curr and param_curr and str(top_curr).upper() != str(param_curr).upper():
+            return self._build_immediate_rejection(
+                request_id=request_id,
+                agent_id=agent_id,
+                action=action,
+                resource=resource,
+                decision=PolicyDecision.BLOCKED.value,
+                reason="CURRENCY_MISMATCH",
+                api_result="DENIED"
+            )
+
+        top_dest = request_payload.get("destination") or request_payload.get("target_account")
+        param_dest = parameters.get("destination") or parameters.get("target_account")
+        if top_dest and param_dest and str(top_dest) != str(param_dest):
+            return self._build_immediate_rejection(
+                request_id=request_id,
+                agent_id=agent_id,
+                action=action,
+                resource=resource,
+                decision=PolicyDecision.BLOCKED.value,
+                reason="DESTINATION_MISMATCH",
+                api_result="DENIED"
+            )
+
+        req_curr = str(top_curr or param_curr or "DEFAULT").upper()
+        if req_curr not in self.CURRENCY_PRECISION_SPECS:
+            return self._build_immediate_rejection(
+                request_id=request_id,
+                agent_id=agent_id,
+                action=action,
+                resource=resource,
+                decision=PolicyDecision.BLOCKED.value,
+                reason="UNSUPPORTED_CURRENCY",
+                api_result="DENIED"
+            )
+
         try:
             minor_units, amount_str = self.canonicalize_financial_amount(raw_amt, currency=req_curr)
             req_amount = float(Decimal(amount_str))
@@ -313,10 +360,14 @@ class ActionGateway:
             )
 
         # Retain exact canonical representation in parameters to prevent float conversion drift
+        canonical_dest = str(top_dest or param_dest or "")
         parameters["amount_canonical"] = amount_str
         parameters["amount_minor_units"] = minor_units
         parameters["currency"] = req_curr
         parameters["amount"] = req_amount
+        if canonical_dest:
+            parameters["destination"] = canonical_dest
+            parameters["target_account"] = canonical_dest
 
         request_fingerprint = self.compute_request_fingerprint(
             agent_id=agent_id,

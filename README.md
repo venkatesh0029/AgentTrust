@@ -9,7 +9,7 @@
 [![Next.js 14](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![Hyperledger Fabric](https://img.shields.io/badge/Hyperledger_Fabric-2.5-2F3136?logo=hyperledger&logoColor=white)](https://www.hyperledger.org/use/fabric)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests Pass](https://img.shields.io/badge/Tests-155%20Passed-success?logo=pytest)](tests/)
+[![Tests Pass](https://img.shields.io/badge/Tests-160%20Passed-success?logo=pytest)](tests/)
 [![Security Invariants](https://img.shields.io/badge/Security-12%20Invariants%20Verified-blueviolet)](documentation/security_model.md)
 [![Attack Lab](https://img.shields.io/badge/Attack_Lab-20%20Scenarios-red)](attack_lab/)
 [![Benchmarks](https://img.shields.io/badge/Benchmarks-Wilson%20Score%20CI-blue)](benchmarks/DATASET_PROVENANCE.md)
@@ -29,7 +29,7 @@
 > ### 🛡️ AgentTrust — Security Assurance and Distributed Recovery
 > **AgentTrust is a modular security gateway for autonomous AI agents, combining cryptographic identity verification, policy enforcement, replay protection, durable transaction intents, idempotency controls, and auditable ledger reconciliation.**
 >
-> Its reported test suite covers adversarial authorization, financial input canonicalization, cross-process concurrency, leased locks with fencing tokens, crash recovery, uncertain external outcomes, and reconciliation races. The latest reported regression baseline is **155 passing tests and 2 skipped**, with clean Ruff linting and mypy type checking.
+> Its reported test suite covers adversarial authorization, financial input canonicalization, cross-process concurrency, leased locks with fencing tokens, crash recovery, uncertain external outcomes, and reconciliation races. The latest reported regression baseline is **160 passing tests and 2 skipped**, with clean Ruff linting and mypy type checking.
 >
 > The architecture targets durable reconciliation with at-most-once execution under explicitly defined downstream and persistence assumptions. Production readiness and real-network Hyperledger Fabric guarantees remain subject to independent verification and live integration testing.
 

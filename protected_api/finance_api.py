@@ -1,4 +1,6 @@
 import datetime
+import os
+import sqlite3
 import threading
 from typing import Any
 
@@ -128,24 +130,72 @@ class ProtectedFinanceAPI:
 
     GATEWAY_SECRET = "AGT-GATEWAY-INTERNAL-SECRET-KEY-98765"
 
-    def __init__(self):
+    def __init__(self, persistent_db_path: str | None = None):
         self.service = ProcurementService()
         self._idempotency_cache: dict[str, dict[str, Any]] = {}
         self._idempotency_lock = threading.Lock()
         self._fencing_tokens: dict[str, int] = {}
         self._fencing_lock = threading.Lock()
+        self._persistent_db_path = persistent_db_path
+        if persistent_db_path:
+            self._init_fencing_db()
+            self._load_fencing_tokens()
         # Generate Gateway Service RSA Keypair for Service-to-Service mTLS/Signing
         self.gateway_service_private_key = KeyManager.generate_key_pair(2048)
         self.gateway_service_public_key_pem = KeyManager.public_key_to_pem(
             self.gateway_service_private_key.public_key()
         )
 
+    def _init_fencing_db(self) -> None:
+        if not self._persistent_db_path:
+            return
+        os.makedirs(os.path.dirname(os.path.abspath(self._persistent_db_path)), exist_ok=True)
+        with sqlite3.connect(self._persistent_db_path) as conn:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS downstream_fencing_tokens (
+                    scope TEXT PRIMARY KEY,
+                    fencing_token INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+            """)
+            conn.commit()
+
+    def _load_fencing_tokens(self) -> None:
+        if not self._persistent_db_path or not os.path.exists(self._persistent_db_path):
+            return
+        with sqlite3.connect(self._persistent_db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT scope, fencing_token FROM downstream_fencing_tokens")
+            for row in cursor.fetchall():
+                self._fencing_tokens[row[0]] = int(row[1])
+
+    def _persist_fencing_token(self, scope: str, token: int) -> None:
+        if not self._persistent_db_path:
+            return
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with sqlite3.connect(self._persistent_db_path) as conn:
+            conn.execute("""
+                INSERT INTO downstream_fencing_tokens (scope, fencing_token, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(scope) DO UPDATE SET
+                    fencing_token = MAX(fencing_token, excluded.fencing_token),
+                    updated_at = excluded.updated_at
+            """, (scope, token, now_iso))
+            conn.commit()
+
     def register_active_fencing_token(self, agent_id: str, scope: str, fencing_token: int) -> None:
         """Registers or advances active fencing token for a specific scope at downstream boundary."""
         with self._fencing_lock:
-            full_scope = f"{agent_id}:{scope}"
-            if fencing_token > self._fencing_tokens.get(full_scope, 0):
-                self._fencing_tokens[full_scope] = fencing_token
+            scopes = [
+                f"{agent_id}:{scope}",
+                f"agent_resource:{agent_id}:{scope}",
+                f"resource:{scope}"
+            ]
+            for sc in scopes:
+                if fencing_token > self._fencing_tokens.get(sc, 0):
+                    self._fencing_tokens[sc] = fencing_token
+                    self._persist_fencing_token(sc, fencing_token)
 
     def create_gateway_auth_headers(self, request_id: str) -> dict[str, str]:
         """Helper for Action Gateway to generate signed service-to-service headers."""
@@ -228,13 +278,17 @@ class ProtectedFinanceAPI:
             raw_key = idempotency_key or request_id
             target_scope = (
                 parameters.get("target_account")
+                or parameters.get("destination_account")
+                or parameters.get("destination")
                 or parameters.get("supplier_id")
                 or parameters.get("employee_id")
                 or parameters.get("resource")
             )
-            scopes = [f"{agent_id}:{raw_key}"]
+            scopes = [f"{agent_id}:{raw_key}", f"idemp:{agent_id}:{raw_key}"]
             if target_scope:
                 scopes.append(f"{agent_id}:{target_scope}")
+                scopes.append(f"agent_resource:{agent_id}:{target_scope}")
+                scopes.append(f"resource:{target_scope}")
 
             with self._fencing_lock:
                 for sc in scopes:
@@ -252,6 +306,7 @@ class ProtectedFinanceAPI:
                 for sc in scopes:
                     if fencing_token > self._fencing_tokens.get(sc, 0):
                         self._fencing_tokens[sc] = fencing_token
+                        self._persist_fencing_token(sc, fencing_token)
 
         # 3. Scoped Idempotency Check per (agent_id, idempotency_key) with thread lock
         raw_key = idempotency_key or request_id
