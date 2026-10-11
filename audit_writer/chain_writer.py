@@ -155,6 +155,10 @@ class AuditChainWriter:
         with self._lock:
             return [r.to_dict() for r in self._records]
 
+    def get_chain_events(self) -> list[dict[str, Any]]:
+        """Alias for get_chain to return all chain event dictionaries."""
+        return self.get_chain()
+
     def verify_chain_integrity(self) -> dict[str, Any]:
         """
         Verifies entire hash chain from Genesis to latest block.

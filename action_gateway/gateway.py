@@ -60,30 +60,76 @@ class ActionGateway:
         self.persistent_db = persistent_db
         self._event_counter = 1000
 
-    @staticmethod
-    def canonicalize_financial_amount(amount: Any) -> tuple[int, str]:
+    CURRENCY_PRECISION_SPECS: dict[str, int] = {
+        "USD": 2,
+        "EUR": 2,
+        "GBP": 2,
+        "INR": 2,
+        "CAD": 2,
+        "AUD": 2,
+        "SGD": 2,
+        "CHF": 2,
+        "JPY": 0,
+        "KRW": 0,
+        "VND": 0,
+        "BHD": 3,
+        "KWD": 3,
+        "OMR": 3,
+        "JOD": 3,
+        "DEFAULT": 4,  # High-precision canonical testing / sub-cent unit scale
+    }
+
+    @classmethod
+    def canonicalize_financial_amount(
+        cls,
+        amount: Any,
+        currency: str | None = None,
+        strict_scale: bool = True
+    ) -> tuple[int, str]:
         """
-        Converts financial amount to integer minor units (scale 4, e.g. 1.2000 -> 12000 minor units)
-        and exact canonical decimal string ('1.2000').
+        Converts financial amount to integer minor units and exact canonical decimal string.
+        Enforces currency-specific precision (e.g. USD=2, JPY=0, BHD=3, DEFAULT=4).
+        Under strict_scale=True, rejects any input with excess fractional decimals beyond the currency scale
+        (preventing silent rounding drift or penny-shaving exploits).
         Disallows negative amounts, NaN, Infinity, or malformed values.
-        Raises ValueError on invalid amount.
+        Raises ValueError on invalid amount or excess precision.
         """
+        curr_key = (currency or "DEFAULT").upper()
+        scale = cls.CURRENCY_PRECISION_SPECS.get(curr_key, cls.CURRENCY_PRECISION_SPECS["DEFAULT"])
+
         if amount is None:
-            return 0, "0.0000"
+            zero_str = f"0.{'0' * scale}" if scale > 0 else "0"
+            return 0, zero_str
+
         try:
             d = Decimal(str(amount))
         except (InvalidOperation, TypeError, ValueError):
             raise ValueError(f"Malformed financial amount: {amount}")
+
         if d.is_nan() or d.is_infinite():
             raise ValueError("Financial amount cannot be NaN or Infinite")
         if d < 0:
             raise ValueError(f"Financial amount cannot be negative: {amount}")
-        quantized = d.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-        minor_units = int(quantized * Decimal("10000"))
-        return minor_units, str(quantized)
 
-    @staticmethod
+        quantum = Decimal("1") if scale == 0 else Decimal(f"1e-{scale}")
+        multiplier = Decimal(10) ** scale
+
+        if strict_scale:
+            quantized = d.quantize(quantum, rounding=ROUND_HALF_UP)
+            if d != quantized:
+                raise ValueError(
+                    f"Amount '{amount}' has excess fractional precision for currency '{curr_key}' (maximum scale: {scale} decimal places)"
+                )
+        else:
+            quantized = d.quantize(quantum, rounding=ROUND_HALF_UP)
+
+        minor_units = int(quantized * multiplier)
+        canonical_str = f"{quantized:f}" if scale > 0 else str(int(quantized))
+        return minor_units, canonical_str
+
+    @classmethod
     def compute_request_fingerprint(
+        cls,
         agent_id: str,
         action: str,
         resource: str,
@@ -97,16 +143,19 @@ class ActionGateway:
         Computes deterministic canonical SHA-256 fingerprint of business request parameters.
         Binds integer minor units, exact decimal string, currency, destination, tenant, and canonical parameters.
         """
-        minor_units, amount_str = ActionGateway.canonicalize_financial_amount(amount)
+        curr = currency or str(parameters.get("currency") or "DEFAULT").upper()
+        minor_units, amount_str = cls.canonicalize_financial_amount(amount, currency=curr)
         clean_params = {
             k: v for k, v in parameters.items()
-            if k not in ("amount", "currency", "destination", "to_account", "recipient", "tenant_id")
+            if k not in (
+                "amount", "currency", "destination", "to_account", "recipient",
+                "tenant_id", "amount_canonical", "amount_minor_units"
+            )
         }
         dest = (
             destination
             or str(parameters.get("to_account") or parameters.get("destination") or parameters.get("recipient") or "")
         )
-        curr = currency or str(parameters.get("currency", "USD")).upper()
         tenant = tenant_id or str(parameters.get("tenant_id", "default-tenant"))
 
         raw_dict = {
@@ -230,9 +279,27 @@ class ActionGateway:
 
         top_amt = request_payload.get("amount")
         param_amt = parameters.get("amount")
+        if top_amt is not None and param_amt is not None:
+            try:
+                if abs(float(top_amt) - float(param_amt)) > 1e-6:
+                    return self._build_immediate_rejection(
+                        request_id=request_id,
+                        agent_id=agent_id,
+                        action=action,
+                        resource=resource,
+                        decision=PolicyDecision.BLOCKED.value,
+                        reason="AMOUNT_MISMATCH",
+                        api_result="NOT_EXECUTED"
+                    )
+            except Exception:
+                pass
+
         raw_amt = top_amt if top_amt is not None else (param_amt if param_amt is not None else 0.0)
+        top_curr = request_payload.get("currency")
+        param_curr = parameters.get("currency")
+        req_curr = top_curr or param_curr or "DEFAULT"
         try:
-            minor_units, amount_str = self.canonicalize_financial_amount(raw_amt)
+            minor_units, amount_str = self.canonicalize_financial_amount(raw_amt, currency=req_curr)
             req_amount = float(Decimal(amount_str))
         except ValueError:
             return self._build_immediate_rejection(
@@ -245,12 +312,19 @@ class ActionGateway:
                 api_result="DENIED"
             )
 
+        # Retain exact canonical representation in parameters to prevent float conversion drift
+        parameters["amount_canonical"] = amount_str
+        parameters["amount_minor_units"] = minor_units
+        parameters["currency"] = req_curr
+        parameters["amount"] = req_amount
+
         request_fingerprint = self.compute_request_fingerprint(
             agent_id=agent_id,
             action=action,
             resource=resource,
             parameters=parameters,
-            amount=req_amount
+            amount=req_amount,
+            currency=req_curr
         )
 
         # Step 6.1: Check Idempotency Cache for previously completed requests & canonical payload fingerprint
@@ -302,7 +376,9 @@ class ActionGateway:
                 expires_at=expires_at,
                 idempotency_key=idempotency_key,
                 payload_to_verify=payload_to_verify,
-                request_fingerprint=request_fingerprint
+                request_fingerprint=request_fingerprint,
+                fencing_token=lock_res.fencing_token,
+                lock_owner=lock_res.owner_id
             )
         finally:
             self.replay_tracker.release_in_flight(
@@ -326,7 +402,9 @@ class ActionGateway:
         expires_at: str,
         idempotency_key: str | None,
         payload_to_verify: dict[str, Any],
-        request_fingerprint: str | None = None
+        request_fingerprint: str | None = None,
+        fencing_token: int | None = None,
+        lock_owner: str | None = None
     ) -> dict[str, Any]:
         # Step 7: Strict Input Validation & Canonicalization for Authenticated Requests
         top_amount = request_payload.get("amount")
@@ -500,6 +578,19 @@ class ActionGateway:
                 except Exception:
                     pass
 
+            # Fencing check at side-effect boundary: ensure worker still owns valid lease
+            if self.persistent_db and idempotency_key and lock_owner and fencing_token:
+                if not self.persistent_db.validate_lock_fencing(agent_id, idempotency_key, lock_owner, fencing_token):
+                    return self._build_immediate_rejection(
+                        request_id=request_id,
+                        agent_id=agent_id,
+                        action=action,
+                        resource=resource,
+                        decision=PolicyDecision.BLOCKED.value,
+                        reason="STALE_WORKER_FENCING_REJECTED",
+                        api_result="NOT_EXECUTED"
+                    )
+
             # Create signed service auth headers
             auth_headers = self.finance_api.create_gateway_auth_headers(request_id)
             try:
@@ -510,7 +601,8 @@ class ActionGateway:
                     request_id=request_id,
                     agent_id=agent_id,
                     auth_headers=auth_headers,
-                    idempotency_key=idempotency_key
+                    idempotency_key=idempotency_key,
+                    fencing_token=fencing_token
                 )
             except Exception as e:
                 # Handle uncertain external outcome: query authoritative status by idempotency_key/request_id
@@ -715,6 +807,7 @@ class ActionGateway:
 
         # Execute protected business action
         auth_headers = self.finance_api.create_gateway_auth_headers(request_id)
+        idemp_k = updated_record.get("idempotency_key")
         exec_res = self.finance_api.execute_action(
             action=action,
             parameters=parameters,
@@ -722,7 +815,9 @@ class ActionGateway:
             request_id=request_id,
             agent_id=agent_id,
             approval_ref=approval_ref,
-            auth_headers=auth_headers
+            auth_headers=auth_headers,
+            idempotency_key=idemp_k,
+            fencing_token=1
         )
 
         api_res_str = "EXECUTED" if exec_res.get("success") else f"FAILED: {exec_res.get('error', 'Execution Error')}"
@@ -887,6 +982,7 @@ class ActionGateway:
             "risk_factors": risk_eval["risk_factors"],
             "matched_rules": rules,
             "protected_api_result": api_result,
+            "api_result": api_result,
             "approval_reference": approval_ref,
             "approval_ticket": approval_ticket,
             "transaction_data": tx_data,
@@ -972,5 +1068,6 @@ class ActionGateway:
             "reason": reason,
             "risk_score": 100.0,
             "risk_level": "HIGH",
-            "protected_api_result": api_result
+            "protected_api_result": api_result,
+            "api_result": api_result
         }

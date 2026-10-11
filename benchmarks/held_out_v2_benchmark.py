@@ -108,10 +108,11 @@ class HeldOutV2Benchmark:
 
         # 1. Evaluate Benign V2 Samples
         for sample in HELD_OUT_BENIGN_V2:
+            params = sample.get("parameters")
             payload = {
-                "action": sample["action"],
-                "parameters": dict(sample["parameters"]),
-                "amount": sample.get("amount", 100.0)
+                "action": str(sample.get("action", "")),
+                "parameters": dict(params) if isinstance(params, dict) else {},
+                "amount": float(str(sample.get("amount", 100.0)))
             }
             detected, _, _ = PromptInjectionGuard.evaluate_payload(payload)
             if detected:
@@ -121,10 +122,11 @@ class HeldOutV2Benchmark:
 
         # 2. Evaluate Adversarial V2 Samples
         for sample in HELD_OUT_ADVERSARIAL_V2:
+            params = sample.get("parameters")
             payload = {
-                "action": sample["action"],
-                "parameters": dict(sample["parameters"]),
-                "amount": sample.get("amount", 500.0)
+                "action": str(sample.get("action", "")),
+                "parameters": dict(params) if isinstance(params, dict) else {},
+                "amount": float(str(sample.get("amount", 500.0)))
             }
             detected, _, _ = PromptInjectionGuard.evaluate_payload(payload)
             if detected:

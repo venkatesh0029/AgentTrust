@@ -863,3 +863,13 @@ class PersistentStorageEngine:
                 return d
             return None
 
+    def close(self) -> None:
+        """Closes resources and checkpoints WAL mode safely."""
+        with self._lock:
+            try:
+                conn = self._get_connection()
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.close()
+            except Exception:
+                pass
+

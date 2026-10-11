@@ -9,7 +9,7 @@
 [![Next.js 14](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![Hyperledger Fabric](https://img.shields.io/badge/Hyperledger_Fabric-2.5-2F3136?logo=hyperledger&logoColor=white)](https://www.hyperledger.org/use/fabric)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests Pass](https://img.shields.io/badge/Tests-112%20Passed-success?logo=pytest)](tests/)
+[![Tests Pass](https://img.shields.io/badge/Tests-155%20Passed-success?logo=pytest)](tests/)
 [![Security Invariants](https://img.shields.io/badge/Security-12%20Invariants%20Verified-blueviolet)](documentation/security_model.md)
 [![Attack Lab](https://img.shields.io/badge/Attack_Lab-20%20Scenarios-red)](attack_lab/)
 [![Benchmarks](https://img.shields.io/badge/Benchmarks-Wilson%20Score%20CI-blue)](benchmarks/DATASET_PROVENANCE.md)
@@ -26,7 +26,12 @@
 
 ---
 
-> ⚠️ **Project Status & Deployment Notice**: AgentTrust is a research prototype implementing complete cryptographic agent identity, versioned policy enforcement, human-in-the-loop approval, replay protection, prompt-injection heuristics, intent-bound MCP execution, SQLite state persistence, and a 20-scenario adversarial attack lab. It includes an in-memory & SQLite-backed Fabric-compatible permissioned ledger simulator (replicating Fabric key-value state and chaincode semantics) alongside reference Hyperledger Fabric Go chaincode and network deployment files (`docker-compose.yml`, `configtx.yaml`). See [Limitations](#-limitations).
+> ### 🛡️ AgentTrust — Security Assurance and Distributed Recovery
+> **AgentTrust is a modular security gateway for autonomous AI agents, combining cryptographic identity verification, policy enforcement, replay protection, durable transaction intents, idempotency controls, and auditable ledger reconciliation.**
+>
+> Its reported test suite covers adversarial authorization, financial input canonicalization, cross-process concurrency, leased locks with fencing tokens, crash recovery, uncertain external outcomes, and reconciliation races. The latest reported regression baseline is **155 passing tests and 2 skipped**, with clean Ruff linting and mypy type checking.
+>
+> The architecture targets durable reconciliation with at-most-once execution under explicitly defined downstream and persistence assumptions. Production readiness and real-network Hyperledger Fabric guarantees remain subject to independent verification and live integration testing.
 
 ---
 
@@ -620,7 +625,7 @@ AgentTrust is committed to full transparency regarding research scope and engine
 1. **Permissioned Ledger Simulator by Default**: The default runtime uses a high-performance Python simulator replicating the Hyperledger Fabric state model and chaincode interface. A production-ready Go chaincode contract and Docker deployment configuration are provided in `fabric/` for real network pairing.
 2. **KMS & HSM Operational Modes**: Supports SoftHSM2 via `python-pkcs11` (`CKA_EXTRACTABLE = FALSE`, `CKA_SENSITIVE = TRUE`). When no PKCS#11 dynamic library is detected, the provider transparently reports `LOCAL_SOFTWARE_STORE` mode without false hardware claims.
 3. **Prompt Injection Is Not a Standalone Silver Bullet**: As proven by Held-Out V2, pattern and heuristic guards achieve 33.33% recall on novel vectors. Complete system security is guaranteed by Layer 3 Policy Authorization and cryptographic non-repudiation, which block 100% of unauthorized side effects even upon detector bypass.
-4. **Tested vs. Formally Proven Invariants**: Security invariants are validated via extensive property-based fuzzer testing (Hypothesis) and a 144-test automated regression suite (144 passed, 2 skipped), but have not yet been verified via formal mathematical methods (e.g., TLA+ or ProVerif).
+4. **Tested vs. Formally Proven Invariants**: Security invariants are validated via extensive property-based fuzzer testing (Hypothesis) and a 155-test automated regression suite (155 passed, 2 skipped), but have not yet been verified via formal mathematical methods (e.g., TLA+ or ProVerif).
 
 ---
 
@@ -641,6 +646,7 @@ AgentTrust is committed to full transparency regarding research scope and engine
 - [x] Concurrency & Recovery Assurance (Milestone v0.4.0)
 - [x] Distributed-System Invariant Assurance (Cross-Process Atomicity, Outbox Reconciliation & State Machine)
 - [x] Live Integration & Security Boundary Assurance (Real OS Multiprocess Stress, Leased Fencing Tokens, Financial Minor-Unit Canonicalization)
+- [x] Production Readiness & Independent Verification (Downstream Fencing Enforcement, Currency Precision Rules, Reproducibility Guide & Fault Injection Campaign)
 - [ ] Multi-Organization Hyperledger Fabric Live Testnet Deployment with Endorsement Policies
 - [ ] Formal Verification of Core Protocol Invariants using ProVerif / TLA+
 - [ ] Complete Next.js Enterprise Console with Live Telemetry WebSockets
