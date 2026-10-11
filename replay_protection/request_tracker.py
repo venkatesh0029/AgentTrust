@@ -2,6 +2,7 @@ import datetime
 import threading
 from typing import Any
 
+from fabric.persistent_db import LockAcquisitionResult
 from replay_protection.nonce_manager import NonceManager
 from replay_protection.timestamp_validator import TimestampValidator
 
@@ -89,35 +90,63 @@ class RequestTracker:
             except Exception:
                 pass
 
-    def acquire_in_flight(self, agent_id: str, idempotency_key: str | None) -> bool:
-        """Acquires lock for an in-flight idempotency key across threads and processes. Returns False if already in-flight."""
+    def acquire_in_flight(
+        self,
+        agent_id: str,
+        idempotency_key: str | None,
+        owner_id: str | None = None,
+        ttl_seconds: float = 30.0
+    ) -> LockAcquisitionResult:
+        """
+        Acquires lock for an in-flight idempotency key across threads and processes.
+        Returns LockAcquisitionResult with boolean evaluation, fencing token, and owner identity.
+        """
         if not idempotency_key:
-            return True
+            return LockAcquisitionResult(True, 0, "")
         scoped_key = f"{agent_id}:{idempotency_key}"
         with self._lock:
             if scoped_key in self._in_flight_keys:
-                return False
+                return LockAcquisitionResult(False, 0, "")
+            actual_owner = owner_id or ""
+            fencing_token = 1
             if self.persistent_db:
                 try:
-                    if not self.persistent_db.try_acquire_in_flight_lock(agent_id, idempotency_key):
-                        return False
+                    res = self.persistent_db.try_acquire_in_flight_lock(
+                        agent_id, idempotency_key, owner_id=owner_id, ttl_seconds=ttl_seconds
+                    )
+                    if not res:
+                        return res
+                    fencing_token = res.fencing_token
+                    actual_owner = res.owner_id
                 except Exception:
                     pass
             self._in_flight_keys.add(scoped_key)
-            return True
+            return LockAcquisitionResult(True, fencing_token, actual_owner)
 
-    def release_in_flight(self, agent_id: str, idempotency_key: str | None) -> None:
-        """Releases lock for an in-flight idempotency key across threads and processes."""
+    def release_in_flight(
+        self,
+        agent_id: str,
+        idempotency_key: str | None,
+        owner_id: str | None = None,
+        fencing_token: int | None = None
+    ) -> bool:
+        """
+        Releases lock for an in-flight idempotency key across threads and processes.
+        If owner_id and fencing_token are provided, ensures stolen/expired locks cannot be deleted by stale workers.
+        """
         if not idempotency_key:
-            return
+            return True
         scoped_key = f"{agent_id}:{idempotency_key}"
         with self._lock:
             self._in_flight_keys.discard(scoped_key)
             if self.persistent_db:
                 try:
-                    self.persistent_db.release_in_flight_lock(agent_id, idempotency_key)
+                    return self.persistent_db.release_in_flight_lock(
+                        agent_id, idempotency_key, owner_id=owner_id, fencing_token=fencing_token
+                    )
                 except Exception:
                     pass
+            return True
 
     def get_idempotent_result(self, agent_id: str, idempotency_key: str) -> dict[str, Any] | None:
         """Returns cached execution result for duplicate idempotency key bound to the specific agent_id."""
