@@ -21,16 +21,46 @@ except ImportError:
     HAS_PKCS11_LIB = False
 
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOCAL_SOFTHSM_DIR = os.path.join(PROJECT_ROOT, ".softhsm2", "SoftHSM2")
+LOCAL_SOFTHSM_CONF = os.path.join(LOCAL_SOFTHSM_DIR, "etc", "softhsm2.conf")
+LOCAL_SOFTHSM_LIB_X64 = os.path.join(LOCAL_SOFTHSM_DIR, "lib", "softhsm2-x64.dll")
+LOCAL_SOFTHSM_LIB = os.path.join(LOCAL_SOFTHSM_DIR, "lib", "softhsm2.dll")
+
 SOFTHSM2_LIB_PATHS = [
+    LOCAL_SOFTHSM_LIB_X64,
+    LOCAL_SOFTHSM_LIB,
     "/usr/lib/softhsm/libsofthsm2.so",
     "/usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so",
     "/usr/local/lib/softhsm/libsofthsm2.so",
-    "C:\\Program Files\\SoftHSM2\\lib\\softhsm2.dll"
+    "C:\\Program Files\\SoftHSM2\\lib\\softhsm2-x64.dll",
+    "C:\\Program Files\\SoftHSM2\\lib\\softhsm2.dll",
 ]
+
+
+def configure_softhsm2_environment() -> None:
+    """Configures environment variables and DLL search paths for SoftHSM2."""
+    if "SOFTHSM2_CONF" not in os.environ and os.path.exists(LOCAL_SOFTHSM_CONF):
+        os.environ["SOFTHSM2_CONF"] = LOCAL_SOFTHSM_CONF
+
+    lib_dir = os.path.join(LOCAL_SOFTHSM_DIR, "lib")
+    bin_dir = os.path.join(LOCAL_SOFTHSM_DIR, "bin")
+    if os.path.exists(lib_dir):
+        if hasattr(os, "add_dll_directory"):
+            try:
+                os.add_dll_directory(lib_dir)
+                if os.path.exists(bin_dir):
+                    os.add_dll_directory(bin_dir)
+            except Exception:
+                pass
+        curr_path = os.environ.get("PATH", "")
+        if lib_dir not in curr_path:
+            os.environ["PATH"] = f"{lib_dir};{bin_dir};{curr_path}"
 
 
 def find_softhsm2_library() -> str | None:
     """Locates SoftHSM2 PKCS#11 dynamic shared library on host system."""
+    configure_softhsm2_environment()
     env_path = os.environ.get("SOFTHSM2_LIB")
     if env_path and os.path.exists(env_path):
         return env_path
@@ -78,6 +108,16 @@ class KMSProvider:
                     lib = pkcs11.lib(self.softhsm_lib)
                     token = lib.get_token(token_label=os.environ.get("SOFTHSM2_TOKEN", "AgentTrustToken"))
                     pin = self.passphrase or "1234"
+                    # Reset existing user login state so passphrase authentication is strictly enforced
+                    try:
+                        import ctypes
+                        cdll = ctypes.CDLL(self.softhsm_lib)
+                        probe_session = token.open(rw=True)
+                        cdll.C_Logout(ctypes.c_ulong(probe_session.handle))
+                        probe_session.close()
+                    except Exception:
+                        pass
+
                     self._pkcs11_session = token.open(rw=True, user_pin=pin)
                 except Exception as e:
                     if provider_type == "REAL_SOFT_HSM2_PKCS11":
@@ -122,8 +162,11 @@ class KMSProvider:
                     Attribute.SIGN: True,
                 }
             )
-            # Export public key PEM
-            pub_pem = KeyManager.public_key_to_pem(pub_key)
+            # Export public key PEM from PKCS#11 modulus and exponent
+            modulus = int.from_bytes(pub_key[Attribute.MODULUS], 'big')
+            exponent = int.from_bytes(pub_key[Attribute.PUBLIC_EXPONENT], 'big')
+            rsa_pub = rsa.PublicKey(modulus, exponent)
+            pub_pem = rsa_pub.save_pkcs1().decode('utf-8')
             hsm_handle = f"pkcs11://softhsm2/slot-0/{key_id.hex()}"
 
             self._key_metadata_vault[agent_id] = {

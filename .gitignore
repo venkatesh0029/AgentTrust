@@ -56,3 +56,6 @@ node_modules/
 .next/
 out/
 build/
+
+# Local SoftHSM2 tokens and portable binaries
+.softhsm2/
