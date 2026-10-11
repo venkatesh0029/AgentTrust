@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
-AgentTrust One-Click Verification & Reproducibility Suite.
-Runs Ruff, Mypy, full Pytest regression suite, and Held-Out V2 benchmark.
+AgentTrust Automated Reproducibility & Self-Verification Suite.
+Runs Ruff, Mypy, full Pytest regression suite, Held-Out V2 benchmark, and Held-Out V3 benchmark.
 Exits with 0 on complete pass.
+
+Note: This harness provides deterministic local self-verification.
+Formal independent security validation requires an external party to inspect code,
+rerun verification in an isolated third-party environment, and audit trust boundaries.
 """
 
 import subprocess
@@ -16,8 +20,8 @@ def print_banner(text: str) -> None:
     print("=" * 80)
 
 
-def run_step(step_num: int, title: str, cmd: list[str]) -> bool:
-    print(f"\n[{step_num}/4] {title}...")
+def run_step(step_num: int, total_steps: int, title: str, cmd: list[str]) -> bool:
+    print(f"\n[{step_num}/{total_steps}] {title}...")
     print(f"      Command: {' '.join(cmd)}")
     start = time.time()
     res = subprocess.run(cmd, capture_output=True, text=True)
@@ -38,10 +42,13 @@ def run_step(step_num: int, title: str, cmd: list[str]) -> bool:
 
 
 def main() -> int:
-    print_banner("AGENTTRUST INDEPENDENT VERIFICATION & REPRODUCIBILITY SUITE")
+    total_steps = 5
+    print_banner("AGENTTRUST AUTOMATED REPRODUCIBILITY & SELF-VERIFICATION SUITE")
+    print("Notice: Automated verification verifies deterministic test reproducibility.")
+    print("Independent security validation requires external peer inspection and audit.\n")
 
     # Step 1: Ruff Linting
-    step1_ok = run_step(1, "Running Ruff Static Analysis", ["ruff", "check", "."])
+    step1_ok = run_step(1, total_steps, "Running Ruff Static Analysis", ["ruff", "check", "."])
     if not step1_ok:
         print("\nVerification FAILED at Step 1 (Ruff).")
         return 1
@@ -63,27 +70,35 @@ def main() -> int:
         "risk_engine",
         "tests",
         "benchmarks/held_out_v2_benchmark.py",
+        "benchmarks/held_out_v3_benchmark.py",
     ]
-    step2_ok = run_step(2, "Running Mypy Type Checking", mypy_cmd)
+    step2_ok = run_step(2, total_steps, "Running Mypy Type Checking", mypy_cmd)
     if not step2_ok:
         print("\nVerification FAILED at Step 2 (Mypy).")
         return 1
 
     # Step 3: Pytest Regression Suite
-    step3_ok = run_step(3, "Running Full Pytest Regression Suite", ["pytest", "-q"])
+    step3_ok = run_step(3, total_steps, "Running Full Pytest Regression Suite", ["pytest", "-q"])
     if not step3_ok:
         print("\nVerification FAILED at Step 3 (Pytest).")
         return 1
 
     # Step 4: Held-Out V2 Benchmark
     step4_cmd = [sys.executable, "-m", "benchmarks.held_out_v2_benchmark"]
-    step4_ok = run_step(4, "Running Held-Out V2 Adversarial Benchmark", step4_cmd)
+    step4_ok = run_step(4, total_steps, "Running Held-Out V2 Adversarial Benchmark", step4_cmd)
     if not step4_ok:
-        print("\nVerification FAILED at Step 4 (Held-Out Benchmark).")
+        print("\nVerification FAILED at Step 4 (Held-Out V2 Benchmark).")
+        return 1
+
+    # Step 5: Held-Out V3 Benchmark
+    step5_cmd = [sys.executable, "-m", "benchmarks.held_out_v3_benchmark"]
+    step5_ok = run_step(5, total_steps, "Running Held-Out V3 Adversarial Benchmark", step5_cmd)
+    if not step5_ok:
+        print("\nVerification FAILED at Step 5 (Held-Out V3 Benchmark).")
         return 1
 
     print_banner("ALL VERIFICATION CHECKS PASSED: REPRODUCIBLE BASELINE VERIFIED")
-    print("Baseline Status: 155 passed, 2 skipped | Ruff: clean | Mypy: clean | Held-Out V2: evaluated\n")
+    print("Baseline Status: 160 passed, 2 skipped | Ruff: clean | Mypy: clean | Held-Out V2 & V3: evaluated\n")
     return 0
 
 

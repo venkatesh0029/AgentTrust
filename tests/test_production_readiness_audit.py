@@ -395,6 +395,124 @@ class TestProductionReadinessAudit(unittest.TestCase):
         self.assertFalse(res2["success"])
         self.assertEqual(res2["error"], "DIRECT_ACCESS_DENIED")
 
+    def test_downstream_fencing_token_survives_service_restart_and_state_restoration(self):
+        """
+        Check A: Verify that highest accepted fencing token survives downstream service restart.
+        1. ProtectedFinanceAPI initialized with persistent DB registers token 5 for a resource.
+        2. Service instance is terminated and state is restored in a fresh ProtectedFinanceAPI instance.
+        3. Stale worker arriving with token 4 is rejected with STALE_FENCING_TOKEN.
+        4. Fresh worker with token 6 succeeds and advances the persistent boundary.
+        """
+        fencing_db_path = os.path.join(self.test_dir, "downstream_fencing.db")
+        service_v1 = ProtectedFinanceAPI(persistent_db_path=fencing_db_path)
+        resource_target = "ACC-CORP-TREASURY-01"
+
+        # Advance token to 5
+        service_v1.register_active_fencing_token(
+            agent_id=self.agent_id,
+            scope=resource_target,
+            fencing_token=5
+        )
+
+        # Service restarts: create new instance from same DB
+        service_v2 = ProtectedFinanceAPI(persistent_db_path=fencing_db_path)
+
+        # Stale worker arrives with token 4
+        auth_headers_stale = service_v2.create_gateway_auth_headers("REQ-RESTART-STALE")
+        stale_res = service_v2.execute_action(
+            action="TRANSFER_FUNDS",
+            parameters={"target_account": resource_target, "amount": 1000.0, "currency": "USD"},
+            gateway_token=ProtectedFinanceAPI.GATEWAY_SECRET,
+            request_id="REQ-RESTART-STALE",
+            agent_id=self.agent_id,
+            auth_headers=auth_headers_stale,
+            fencing_token=4
+        )
+        self.assertFalse(stale_res["success"], "Stale token must be rejected even after service restart")
+        self.assertEqual(stale_res["error"], "STALE_FENCING_TOKEN")
+
+        # Valid worker arrives with token 6
+        auth_headers_valid = service_v2.create_gateway_auth_headers("REQ-RESTART-VALID")
+        valid_res = service_v2.execute_action(
+            action="TRANSFER_FUNDS",
+            parameters={"target_account": resource_target, "amount": 1000.0, "currency": "USD"},
+            gateway_token=ProtectedFinanceAPI.GATEWAY_SECRET,
+            request_id="REQ-RESTART-VALID",
+            agent_id=self.agent_id,
+            auth_headers=auth_headers_valid,
+            fencing_token=6
+        )
+        self.assertTrue(valid_res["success"], "Monotonically increasing token must be accepted after restart")
+
+    def test_unsupported_currency_rejected_fail_closed(self):
+        """
+        Check B: Verify that an unsupported or unapproved currency is rejected fail-closed,
+        and never silently treated under default scale.
+        """
+        req_unsupported = self._build_signed_request(
+            request_id="REQ-CURR-UNSUP-01",
+            amount=500.0,
+            currency="XYZ"  # Unregistered currency
+        )
+        res = self.gateway.process_request(req_unsupported)
+        self.assertEqual(res["decision"], "BLOCKED")
+        self.assertEqual(res["reason"], "UNSUPPORTED_CURRENCY")
+        self.assertEqual(res["api_result"], "DENIED")
+
+    def test_currency_and_destination_mismatch_rejected(self):
+        """
+        Check B: Parameter tampering & cross-layer consistency:
+        - Top-level currency mismatch vs parameters currency is rejected with CURRENCY_MISMATCH.
+        - Top-level destination mismatch vs parameters destination is rejected with DESTINATION_MISMATCH.
+        """
+        # 1. Currency mismatch (top USD vs param EUR)
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        payload_curr_mismatch = {
+            "request_id": "REQ-MISMATCH-CURR-01",
+            "agent_id": self.agent_id,
+            "action": "TRANSFER_FUNDS",
+            "resource": "BANK_RESERVE_IN",
+            "amount": 200.0,
+            "currency": "USD",
+            "parameters": {
+                "destination": "ACC-DEST-01",
+                "amount": 200.0,
+                "currency": "EUR"
+            },
+            "timestamp": now_iso,
+            "nonce": "NONCE-CURR-MISMATCH-01",
+            "key_version": 1
+        }
+        sig = SignatureManager.sign_request(payload_curr_mismatch, self.priv_key_pem)
+        payload_curr_mismatch["signature"] = sig
+        res_curr = self.gateway.process_request(payload_curr_mismatch)
+        self.assertEqual(res_curr["decision"], "BLOCKED")
+        self.assertEqual(res_curr["reason"], "CURRENCY_MISMATCH")
+
+        # 2. Destination mismatch (top ACC-DEST-01 vs param ACC-DEST-02)
+        payload_dest_mismatch = {
+            "request_id": "REQ-MISMATCH-DEST-01",
+            "agent_id": self.agent_id,
+            "action": "TRANSFER_FUNDS",
+            "resource": "BANK_RESERVE_IN",
+            "amount": 200.0,
+            "destination": "ACC-DEST-01",
+            "currency": "USD",
+            "parameters": {
+                "destination": "ACC-DEST-02",
+                "amount": 200.0,
+                "currency": "USD"
+            },
+            "timestamp": now_iso,
+            "nonce": "NONCE-DEST-MISMATCH-01",
+            "key_version": 1
+        }
+        sig2 = SignatureManager.sign_request(payload_dest_mismatch, self.priv_key_pem)
+        payload_dest_mismatch["signature"] = sig2
+        res_dest = self.gateway.process_request(payload_dest_mismatch)
+        self.assertEqual(res_dest["decision"], "BLOCKED")
+        self.assertEqual(res_dest["reason"], "DESTINATION_MISMATCH")
+
 
 if __name__ == "__main__":
     unittest.main()

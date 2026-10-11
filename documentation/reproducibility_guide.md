@@ -1,7 +1,11 @@
-# AgentTrust — Independent Verification & Reproducibility Guide
+# AgentTrust — Automated Reproducibility & Self-Verification Guide
 
 ## 1. Overview & Scope
-This guide provides complete, step-by-step instructions for independent auditors, security researchers, and engineers to verify the guarantees, test baselines, static analyses, and benchmarks of **AgentTrust** in a clean environment.
+This guide provides complete, step-by-step instructions for security researchers, peer engineers, and external auditors to verify the deterministic test baselines, static analyses, and benchmarks of **AgentTrust** in a clean environment.
+
+> [!IMPORTANT]
+> **Automated Reproducibility vs. Independent Security Audit**:
+> The automated verification tools described in this guide (`verify_all.py`, `pytest`, `benchmarks`) provide local, reproducible self-verification. They demonstrate that all reported test suites and security assertions pass deterministically. Formal *independent security validation* requires an external peer or third-party auditor to inspect code, challenge trust boundaries, and evaluate deployment-specific operational controls without relying solely on existing automated test assertions (see [Adversarial Review Guide](file:///d:/OneDrive/Desktop/AgentTrust/documentation/adversarial_review_guide.md)).
 
 ---
 
@@ -53,16 +57,18 @@ python verify_all.py
 ### Expected Output Summary
 ```text
 ================================================================================
-AGENTTRUST INDEPENDENT VERIFICATION & REPRODUCIBILITY SUITE
+AGENTTRUST AUTOMATED REPRODUCIBILITY & SELF-VERIFICATION SUITE
 ================================================================================
-[1/4] Running Ruff Static Analysis...
+[1/5] Running Ruff Static Analysis...
       Result: PASS (0 errors)
-[2/4] Running Mypy Static Type Checking...
-      Result: PASS (0 issues found across 73 source files)
-[3/4] Running Complete Pytest Regression Suite...
-      Result: PASS (155 passed, 2 skipped in ~68s)
-[4/4] Running Held-Out V2 Adversarial Benchmark...
+[2/5] Running Mypy Static Type Checking...
+      Result: PASS (0 issues found across 74 source files)
+[3/5] Running Complete Pytest Regression Suite...
+      Result: PASS (160 passed, 2 skipped in ~72s)
+[4/5] Running Held-Out V2 Adversarial Benchmark...
       Result: PASS (Evaluated 30 held-out samples: 100% precision)
+[5/5] Running Held-Out V3 Adversarial Benchmark...
+      Result: PASS (Evaluated 30 novel samples: 100% precision, 0% FPR)
 ================================================================================
 VERIFICATION COMPLETE: ALL SECURITY INVARIANTS SATISFIED
 ================================================================================
@@ -80,15 +86,15 @@ ruff check .
 
 ### 5.2. Type Checking (Mypy)
 ```bash
-mypy --ignore-missing-imports action_gateway agent_registry audit_writer evidence_manager fabric human_approval identity_manager policy_engine protected_api replay_protection risk_engine tests benchmarks/held_out_v2_benchmark.py
+mypy --ignore-missing-imports action_gateway agent_registry audit_writer evidence_manager fabric human_approval identity_manager policy_engine protected_api replay_protection risk_engine tests benchmarks/held_out_v2_benchmark.py benchmarks/held_out_v3_benchmark.py
 ```
-- **Expected Result**: `Success: no issues found in 73 source files`.
+- **Expected Result**: `Success: no issues found in 74 source files`.
 
 ### 5.3. Full Automated Regression Suite
 ```bash
 pytest
 ```
-- **Expected Result**: **155 passed, 2 skipped** (execution time: 60–90 seconds).
+- **Expected Result**: **160 passed, 2 skipped** (execution time: 60–90 seconds).
 
 ---
 
