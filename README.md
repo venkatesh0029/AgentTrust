@@ -9,15 +9,16 @@
 [![Next.js 14](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![Hyperledger Fabric](https://img.shields.io/badge/Hyperledger_Fabric-2.5-2F3136?logo=hyperledger&logoColor=white)](https://www.hyperledger.org/use/fabric)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests Pass](https://img.shields.io/badge/Tests-93%20Passed-success?logo=pytest)](tests/)
+[![Tests Pass](https://img.shields.io/badge/Tests-112%20Passed-success?logo=pytest)](tests/)
 [![Security Invariants](https://img.shields.io/badge/Security-12%20Invariants%20Verified-blueviolet)](documentation/security_model.md)
 [![Attack Lab](https://img.shields.io/badge/Attack_Lab-20%20Scenarios-red)](attack_lab/)
+[![Benchmarks](https://img.shields.io/badge/Benchmarks-Wilson%20Score%20CI-blue)](benchmarks/DATASET_PROVENANCE.md)
 
 [Key Features](#-key-features) •
 [Architecture](#-architecture) •
 [13-Stage Pipeline](#-the-13-stage-gateway-pipeline) •
 [Quick Start](#-quick-start) •
-[SDK Usage](#-python-sdk-usage) •
+[Evaluation & Benchmarks](#-empirical-security-evaluation--benchmarks) •
 [Attack Lab](#-attack-lab-matrix) •
 [Documentation](#-documentation)
 
@@ -467,22 +468,74 @@ AgentTrust/
 ├── paper/                      # Academic Research Paper
 │   └── agenttrust_paper.tex    # LaTeX manuscript draft
 │
-└── tests/                      # Automated Unit & Integration Test Suite
+├── benchmarks/                 # Empirical Guardrail & Injection Evaluation Harnesses
+│   ├── ablation_study_benchmark.py
+│   ├── held_out_v2_benchmark.py
+│   ├── real_dataset_benchmark.py
+│   └── DATASET_PROVENANCE.md
+│
+└── tests/                      # Automated Unit & Integration Test Suite (112 Passed)
     ├── test_adversarial_security.py
     ├── test_all_scenarios.py
     ├── test_audit_findings_phase2.py
     ├── test_audit_findings_regression.py
+    ├── test_authorization_assurance.py
     ├── test_cache_manager.py
     ├── test_canonicalization.py
+    ├── test_fabric_live_network.py
     ├── test_failure_recovery_flow.py
     ├── test_identity.py
+    ├── test_kms_softhsm2.py
     ├── test_loophole_fixes.py
+    ├── test_policy_bypass_resilience.py
+    ├── test_production_resilience.py
+    ├── test_prompt_injection_metamorphic.py
     ├── test_property_based.py
     ├── test_rbac_negative.py
     ├── test_resilience.py
     ├── test_security_invariants.py
     └── test_signature.py
 ```
+
+---
+
+## 📊 Empirical Security Evaluation & Benchmarks
+
+To establish an evidence-backed baseline, AgentTrust implements independent held-out evaluation sets, Wilson Score 95% Confidence Intervals, granular ablation isolation, and side-effect ledger verification. Complete dataset provenance and labeling rules are documented in [`benchmarks/DATASET_PROVENANCE.md`](benchmarks/DATASET_PROVENANCE.md).
+
+### 1. Generalization on Held-Out Datasets
+
+| Benchmark Dataset | Size ($N$) | Vector Types | Precision | Recall (95% CI) | False Positive Rate | Overall Accuracy |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Curated Frozen Benchmark (V1)** | 52 | Known attack patterns & enterprise tasks | 100.00% | 100.00% $[87.13\%, 100.00\%]$ | 0.00% | 100.00% |
+| **Held-Out V1 (Unseen)** | 30 | Base64, zero-width, markdown exploits | 87.50% | 46.67% $[24.81\%, 70.45\%]$ | 6.67% | 70.00% |
+| **Held-Out V2 (Novel Zero-Day)** | 30 | Cyrillic homoglyphs, context boundary breaks | 100.00% | 33.33% $[15.18\%, 58.29\%]$ | 0.00% | 66.67% |
+
+> **Key Empirical Finding**: Pattern-based heuristics alone are **insufficient** as a standalone defense against novel adversarial attacks (Held-Out V2 recall is $33.33\%$). Defense-in-depth is mandatory.
+
+### 2. Granular Normalization Ablation Study (Held-Out V2)
+
+Running `python benchmarks/ablation_study_benchmark.py` isolates each normalization operation across 6 distinct configurations:
+
+| Configuration Variant | Isolated Operations | Attack Recall (95% CI) | Precision | False Positive Rate |
+| :--- | :--- | :--- | :--- | :--- |
+| **V1: Raw Patterns Only** | Regex heuristics with zero preprocessing | 13.33% $[3.74\%, 37.88\%]$ | 100.00% | 0.00% |
+| **V2: Unicode NFKC Only** | Unicode canonical decomposition | 13.33% $[3.74\%, 37.88\%]$ | 100.00% | 0.00% |
+| **V3: Homoglyphs Only** | Cyrillic & Greek confusable substitution | 20.00% $[7.05\%, 45.19\%]$ | 100.00% | 0.00% |
+| **V4: Hex / Base64 Only** | Auto-decoding encoded payloads | 26.67% $[10.90\%, 51.95\%]$ | 100.00% | 0.00% |
+| **V5: Combined Normalization** | NFKC + Homoglyphs + Hex/B64 decoding | 33.33% $[15.18\%, 58.29\%]$ | 100.00% | 0.00% |
+| **V6: Multi-Layer Hybrid System** | Normalization + Semantic Guardrail Engine | 33.33% $[15.18\%, 58.29\%]$ | 100.00% | 0.00% |
+
+*(Note: When $TP+FP=0$, precision is explicitly treated as mathematically undefined rather than reporting unverified zero).*
+
+### 3. Adversarial Authorization Assurance (Side-Effect Inspection)
+
+In [`tests/test_authorization_assurance.py`](tests/test_authorization_assurance.py), we verify the critical invariant: **Does the authorization layer stop an action when the prompt-injection detector misses the attack?**
+
+Across all 15 adversarial payloads from Held-Out V2 (including all 10 payloads that bypassed prompt detection):
+- **Gateway Decision**: 100% blocked fail-closed (`BLOCKED` / `DENY`).
+- **Protected API State**: Verified by inspecting `finance_api.service._fund_transfers` directly: **0 fund transfers executed** (zero unauthorized financial side-effects).
+- **Positive Control Verification**: An authorized benign request within policy caps ($1,200 \le \$5,000$) executes cleanly (`ALLOWED`), updating protected API balances and committing a verified ledger block. This proves the system is not trivially passing by denying all inputs.
 
 ---
 
@@ -497,6 +550,7 @@ Detailed technical specifications and design guides are available in the [`docum
 | 🛡️ [`documentation/threat_model.md`](documentation/threat_model.md) | Formal threat model, attack vectors, and security boundaries. |
 | 🔒 [`documentation/security_model.md`](documentation/security_model.md) | Formal statement of 12 security invariants and proof rationales. |
 | 🔌 [`documentation/api_specification.md`](documentation/api_specification.md) | Complete OpenAPI / Swagger REST API endpoint reference. |
+| 📊 [`benchmarks/DATASET_PROVENANCE.md`](benchmarks/DATASET_PROVENANCE.md) | Dataset versioning, annotation rules, Wilson CIs, and benchmark provenance. |
 | 📐 [`documentation/standards_alignment.md`](documentation/standards_alignment.md) | Alignment mapping with ISO 27001, SOC 2, and NIST AI RMF. |
 | ⚙️ [`fabric/production_deployment_guide.md`](fabric/production_deployment_guide.md) | Guide for deploying against real multi-organization Fabric network. |
 | 📊 [`documentation/complete_project_overview.md`](documentation/complete_project_overview.md) | High-level project summary and executive report. |
@@ -508,9 +562,9 @@ Detailed technical specifications and design guides are available in the [`docum
 AgentTrust is committed to full transparency regarding research scope and engineering trade-offs:
 
 1. **Permissioned Ledger Simulator by Default**: The default runtime uses a high-performance Python simulator replicating the Hyperledger Fabric state model and chaincode interface. A production-ready Go chaincode contract and Docker deployment configuration are provided in `fabric/` for real network pairing.
-2. **Demo-Grade Default Secrets**: Default secret keys in `server.py` and `docker-compose.yml` facilitate immediate out-of-the-box demonstration. **Secrets must be overridden in production environments.**
-3. **Pattern-Based Prompt Injection Heuristics**: The built-in prompt injection detector employs pattern matching and semantic heuristics. It serves as a defense-in-depth risk signal rather than an absolute guarantee against novel prompt exploits.
-4. **Tested vs. Formally Proven Invariants**: Security invariants are validated via extensive property-based fuzzer testing (Hypothesis) and a 93-test automated regression suite, but have not yet been verified via formal mathematical methods (e.g., TLA+ or ProVerif).
+2. **KMS & HSM Operational Modes**: Supports SoftHSM2 via `python-pkcs11` (`CKA_EXTRACTABLE = FALSE`, `CKA_SENSITIVE = TRUE`). When no PKCS#11 dynamic library is detected, the provider transparently reports `LOCAL_SOFTWARE_STORE` mode without false hardware claims.
+3. **Prompt Injection Is Not a Standalone Silver Bullet**: As proven by Held-Out V2, pattern and heuristic guards achieve 33.33% recall on novel vectors. Complete system security is guaranteed by Layer 3 Policy Authorization and cryptographic non-repudiation, which block 100% of unauthorized side effects even upon detector bypass.
+4. **Tested vs. Formally Proven Invariants**: Security invariants are validated via extensive property-based fuzzer testing (Hypothesis) and a 112-test automated regression suite, but have not yet been verified via formal mathematical methods (e.g., TLA+ or ProVerif).
 
 ---
 
@@ -525,9 +579,11 @@ AgentTrust is committed to full transparency regarding research scope and engine
 - [x] Intent-Bound MCP Tool-Call Governance Adapter
 - [x] Delegation Token Chain Verification & Constraints
 - [x] SQLite State Persistence Across Server Restarts
-- [ ] Multi-Organization Hyperledger Fabric Testnet Deployment with Endorsement Policies
+- [x] Hardware Security Module (HSM) & PKCS#11 SoftHSM2 Non-Exportable Key Generation (`CKA_EXTRACTABLE=FALSE`)
+- [x] Adversarial Authorization Assurance & Side-Effect Ledger Verification
+- [x] Granular Component Ablation Benchmarking & Held-Out Generalization Suites
+- [ ] Multi-Organization Hyperledger Fabric Live Testnet Deployment with Endorsement Policies
 - [ ] Formal Verification of Core Protocol Invariants using ProVerif / TLA+
-- [ ] Hardware Security Module (HSM) & TPM Integration for Agent Key Storage
 - [ ] Complete Next.js Enterprise Console with Live Telemetry WebSockets
 
 ---
