@@ -25,8 +25,8 @@ class FabricGRPCClient:
         crypto_path: str | None = None,
         tls_cert_path: str | None = None
     ):
-        self.peer_endpoint = peer_endpoint or os.environ.get("FABRIC_PEER_ENDPOINT", "localhost:7051")
-        self.msp_id = msp_id or os.environ.get("FABRIC_MSP_ID", "Org1MSP")
+        self.peer_endpoint: str = peer_endpoint or os.environ.get("FABRIC_PEER_ENDPOINT") or "localhost:7051"
+        self.msp_id: str = msp_id or os.environ.get("FABRIC_MSP_ID") or "Org1MSP"
         self.crypto_path = crypto_path or os.environ.get("FABRIC_CRYPTO_PATH", "fabric/crypto-config")
         self.tls_cert_path = tls_cert_path or os.environ.get("FABRIC_TLS_CERT_PATH", "")
         self.channel_name = os.environ.get("FABRIC_CHANNEL", "agenttrust-channel")

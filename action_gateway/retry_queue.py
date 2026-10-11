@@ -59,6 +59,10 @@ class RetryQueueManager:
 
         return record
 
+    def pending_count(self) -> int:
+        """Returns the current number of pending failed commits in queue."""
+        return sum(1 for r in self._pending_queue.values() if r.status == "PENDING_RETRY")
+
     def list_pending_retries(self) -> list[dict[str, Any]]:
         return [
             {

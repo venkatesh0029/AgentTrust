@@ -273,3 +273,35 @@ class ProtectedFinanceAPI:
                     "error": "UNKNOWN_ACTION",
                     "message": f"Action '{action}' is not supported by Procurement/Finance API."
                 }
+
+    def query_transaction_status(
+        self,
+        agent_id: str,
+        idempotency_key: str | None = None,
+        request_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """
+        Authoritative external status check for uncertain outcomes (e.g. caller timeouts).
+        Queries transaction status by idempotency_key or request_id without repeating the transfer.
+        """
+        raw_key = idempotency_key or request_id
+        if not raw_key:
+            return None
+        cache_key = f"{agent_id}:{raw_key}"
+        with self._idempotency_lock:
+            if cache_key in self._idempotency_cache:
+                return self._idempotency_cache[cache_key].copy()
+
+        # Query service records directly for matching request_id / agent_id
+        with self.service._lock:
+            if request_id:
+                for tx in self.service._fund_transfers.values():
+                    if tx.get("request_id") == request_id and tx.get("agent_id") == agent_id:
+                        return {"success": True, "api_result": "EXECUTED", "transaction_data": tx}
+                for po in self.service._purchase_orders.values():
+                    if po.get("request_id") == request_id and po.get("agent_id") == agent_id:
+                        return {"success": True, "api_result": "EXECUTED", "transaction_data": po}
+                for reimb in self.service._reimbursements.values():
+                    if reimb.get("request_id") == request_id and reimb.get("agent_id") == agent_id:
+                        return {"success": True, "api_result": "EXECUTED", "transaction_data": reimb}
+        return None

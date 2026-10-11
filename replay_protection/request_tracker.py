@@ -62,16 +62,17 @@ class RequestTracker:
             if not valid_time:
                 return False, reason
 
-            # Register request ID and nonce upon successful verification
             now_ts = datetime.datetime.now(datetime.timezone.utc).timestamp()
+
+            # 4. Atomic cross-process nonce and request ID registration in SQLite
+            if self.persistent_db:
+                claimed = self.persistent_db.try_claim_request_nonce(request_id, nonce, now_ts)
+                if not claimed:
+                    return False, "REPLAY_DETECTED"
+
+            # Register request ID and nonce in local memory upon successful verification
             self._processed_request_ids[request_id] = now_ts
             self.nonce_manager.register_nonce(nonce)
-
-            if self.persistent_db:
-                try:
-                    self.persistent_db.save_nonce(request_id, nonce, now_ts)
-                except Exception:
-                    pass
 
             return True, "FRESH_REQUEST"
 
@@ -89,23 +90,34 @@ class RequestTracker:
                 pass
 
     def acquire_in_flight(self, agent_id: str, idempotency_key: str | None) -> bool:
-        """Acquires lock for an in-flight idempotency key. Returns False if already in-flight."""
+        """Acquires lock for an in-flight idempotency key across threads and processes. Returns False if already in-flight."""
         if not idempotency_key:
             return True
         scoped_key = f"{agent_id}:{idempotency_key}"
         with self._lock:
             if scoped_key in self._in_flight_keys:
                 return False
+            if self.persistent_db:
+                try:
+                    if not self.persistent_db.try_acquire_in_flight_lock(agent_id, idempotency_key):
+                        return False
+                except Exception:
+                    pass
             self._in_flight_keys.add(scoped_key)
             return True
 
     def release_in_flight(self, agent_id: str, idempotency_key: str | None) -> None:
-        """Releases lock for an in-flight idempotency key."""
+        """Releases lock for an in-flight idempotency key across threads and processes."""
         if not idempotency_key:
             return
         scoped_key = f"{agent_id}:{idempotency_key}"
         with self._lock:
             self._in_flight_keys.discard(scoped_key)
+            if self.persistent_db:
+                try:
+                    self.persistent_db.release_in_flight_lock(agent_id, idempotency_key)
+                except Exception:
+                    pass
 
     def get_idempotent_result(self, agent_id: str, idempotency_key: str) -> dict[str, Any] | None:
         """Returns cached execution result for duplicate idempotency key bound to the specific agent_id."""
@@ -126,7 +138,13 @@ class RequestTracker:
 
         return None
 
-    def record_idempotent_result(self, agent_id: str, idempotency_key: str, result: dict[str, Any]) -> None:
+    def record_idempotent_result(
+        self,
+        agent_id: str,
+        idempotency_key: str,
+        result: dict[str, Any],
+        request_fingerprint: str | None = None
+    ) -> None:
         """Stores execution outcome for an idempotency key bound strictly to agent_id."""
         if idempotency_key:
             scoped_key = f"{agent_id}:{idempotency_key}"
@@ -141,8 +159,9 @@ class RequestTracker:
                         action=result.get("action", ""),
                         amount=float(result.get("transaction_data", {}).get("amount", 0) if result.get("transaction_data") else 0),
                         idempotency_key=idempotency_key,
-                        state="COMPLETED",
-                        outcome=result
+                        state="COMMITTED",
+                        outcome=result,
+                        request_fingerprint=request_fingerprint
                     )
                 except Exception:
                     pass

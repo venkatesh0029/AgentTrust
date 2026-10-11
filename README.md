@@ -537,6 +537,33 @@ Across all 15 adversarial payloads from Held-Out V2 (including all 10 payloads t
 - **Protected API State**: Verified by inspecting `finance_api.service._fund_transfers` directly: **0 fund transfers executed** (zero unauthorized financial side-effects).
 - **Positive Control Verification**: An authorized benign request within policy caps ($1,200 \le \$5,000$) executes cleanly (`ALLOWED`), updating protected API balances and committing a verified ledger block. This proves the system is not trivially passing by denying all inputs.
 
+### 4. Concurrency & Recovery Assurance (Milestone `v0.4.0-recovery-assurance`)
+
+In [`tests/test_concurrency_and_recovery.py`](tests/test_concurrency_and_recovery.py), we evaluate resilience under high concurrency, process crashes, and partial infrastructure outages across 12 deterministic test scenarios:
+- **Atomic Nonce Races**: 10 simultaneous threads submitting identical signed payloads resulted in strictly 1 allowed execution and 9 fail-closed rejections (`REPLAY_DETECTED`), with exactly 1 financial transfer created.
+- **4 Transaction Crash Boundaries**: Deterministic crash injection before authorization, after authorization, after financial transfer, and after ledger commit. Service restart from SQLite (`agenttrust_persistent.db`) proved zero duplicate transfers and persistent nonce replay prevention.
+- **Dual-Write Outbox Reconciliation**: When external transfers succeed but Fabric commit fails, gateway stores evidence in a durable SQLite outbox (`reconciliation_queue`) with status `LEDGER_COMMIT_PENDING_RETRY`. Calling `reconcile_pending_commits()` replays the commit to Fabric without re-charging the client.
+- **Safe Idempotent Retries**: Timeout retries (both identical envelopes and fresh envelopes with identical `idempotency_key`) return cached execution outcomes (`idempotent_replay: True`) without repeated external side-effects.
+
+### 5. Distributed-System Invariant Assurance
+
+In [`tests/test_distributed_system_invariants.py`](tests/test_distributed_system_invariants.py), we verify safety guarantees across multi-process deployments and uncertain external dependencies:
+
+#### Architectural Semantics
+> **Architectural Guarantee**: AgentTrust provides **durable reconciliation with at-most-once execution guarantees under specified assumptions**, not unconditional exactly-once execution against arbitrary external systems.
+> Safe recovery during uncertain outcomes (e.g., caller timeouts where external execution is ambiguous) requires:
+> 1. An external API that honors a durable idempotency key,
+> 2. An authoritative external transaction-status lookup (`query_transaction_status`), and
+> 3. Reconciliation that establishes the external outcome prior to any retry attempt.
+
+#### Verified Invariants
+- **Cross-Process Atomicity**: Multiple independent gateway instances running with disjoint in-memory states against the shared SQLite database enforce atomic nonce consumption (`try_claim_request_nonce`) and distributed in-flight locking (`in_flight_locks`), guaranteeing at-most-once execution across multi-process workers.
+- **Idempotency-Key Misuse Prevention**: Idempotency keys are bound to a canonical request fingerprint (SHA-256 of canonicalized parameters, action, resource, and amount). Submitting a different payload with an existing key is rejected fail-closed with `IDEMPOTENCY_PAYLOAD_MISMATCH`, preventing key collision attacks.
+- **Uncertain External Outcomes**: Simulated external API timeouts during execution trigger an authoritative status query (`query_transaction_status`) using the stable transaction identifier before proceeding, recovering the transaction without duplicate financial deductions.
+- **Formal State Machine Invariants**: Transaction intents follow a strict directed state graph (`PENDING_AUTHORIZATION` $\to$ `AUTHORIZED_PENDING_EXECUTION` $\to$ `EXECUTED_PENDING_LEDGER` $\to$ `COMMITTED`). Illegal backward transitions (e.g., `COMMITTED` $\to$ `EXECUTED_PENDING_LEDGER`) raise `InvalidStateTransitionError`, and optimistic locking detects stale workers via `ConcurrentTransitionConflictError`.
+- **Durability & Rollback**: SQLite transactional rollback ensures uncommitted in-flight conflicts leave no dirty rows. Complete online database backup and restore preserves all nonces, intents, and ledger blocks.
+- **Fabric Commit Semantics**: The system distinguishes transaction proposal/endorsement from final validated block inclusion in the block ledger.
+
 ---
 
 ## 📄 Documentation Index
@@ -582,6 +609,8 @@ AgentTrust is committed to full transparency regarding research scope and engine
 - [x] Hardware Security Module (HSM) & PKCS#11 SoftHSM2 Non-Exportable Key Generation (`CKA_EXTRACTABLE=FALSE`)
 - [x] Adversarial Authorization Assurance & Side-Effect Ledger Verification
 - [x] Granular Component Ablation Benchmarking & Held-Out Generalization Suites
+- [x] Concurrency & Recovery Assurance (Milestone v0.4.0)
+- [x] Distributed-System Invariant Assurance (Cross-Process Atomicity, Outbox Reconciliation & State Machine)
 - [ ] Multi-Organization Hyperledger Fabric Live Testnet Deployment with Endorsement Policies
 - [ ] Formal Verification of Core Protocol Invariants using ProVerif / TLA+
 - [ ] Complete Next.js Enterprise Console with Live Telemetry WebSockets
