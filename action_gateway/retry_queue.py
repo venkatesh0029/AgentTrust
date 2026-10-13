@@ -43,6 +43,25 @@ class RetryQueueManager:
                 )
                 self._pending_queue[rec.event_id] = rec
 
+            if hasattr(self.persistent_db, "list_dead_letter_retries"):
+                dead_letters = self.persistent_db.list_dead_letter_retries()
+                for record_data in dead_letters:
+                    if record_data.get("corrupt") or not isinstance(
+                        record_data.get("payload"), dict
+                    ):
+                        # Keep corrupt records in persistent storage for diagnosis.
+                        # Never hydrate them into the executable retry queue.
+                        continue
+                    record = FailedCommitRecord(
+                        event_id=record_data["event_id"],
+                        request_id=record_data["request_id"],
+                        payload=record_data["payload"],
+                        error_msg=record_data["error_msg"],
+                        status=record_data["status"],
+                        retry_count=record_data["retry_count"],
+                    )
+                    self._dead_letter_queue[record.event_id] = record
+
     def enqueue_failed_commit(self, event_id: str, request_id: str, payload: dict[str, Any], error_msg: str) -> FailedCommitRecord:
         """Enqueues failed transaction into retry queue and durable DB."""
         record = FailedCommitRecord(event_id, request_id, payload, error_msg)
