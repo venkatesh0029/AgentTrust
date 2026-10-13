@@ -1,5 +1,6 @@
 import datetime
 import os
+import uuid
 from typing import Any
 
 
@@ -113,12 +114,23 @@ class RetryQueueManager:
 
     def retry_commit(self, event_id: str, fabric_client) -> tuple[bool, str]:
         """Reconcile uncertain commits before attempting a retry."""
+        if self.persistent_db:
+            return self._retry_commit_with_lease(event_id, fabric_client)
+        return self._retry_commit_without_persistence(event_id, fabric_client)
+
+    def _retry_commit_with_lease(self, event_id: str, fabric_client) -> tuple[bool, str]:
+        """Reconcile and retry commits under a database-backed distributed lease."""
         record = self._pending_queue.get(event_id)
         if not record and self.persistent_db:
-            # Attempt to rehydrate from DB
-            persisted = self.persistent_db.list_pending_retries()
-            for r in persisted:
-                if r["event_id"] == event_id:
+            if hasattr(self.persistent_db, "get_retry_record"):
+                try:
+                    r = self.persistent_db.get_retry_record(event_id)
+                except Exception as exc:
+                    return (
+                        False,
+                        f"RETRY_FAILED: PERSISTED_RECORD_READ_ERROR: {type(exc).__name__}",
+                    )
+                if r and r.get("status") == "PENDING_RETRY":
                     record = FailedCommitRecord(
                         event_id=r["event_id"],
                         request_id=r["request_id"],
@@ -128,8 +140,239 @@ class RetryQueueManager:
                         retry_count=r["retry_count"],
                     )
                     self._pending_queue[event_id] = record
-                    break
+            else:
+                persisted = self.persistent_db.list_pending_retries()
+                for r in persisted:
+                    if r["event_id"] == event_id:
+                        record = FailedCommitRecord(
+                            event_id=r["event_id"],
+                            request_id=r["request_id"],
+                            payload=r["payload"],
+                            error_msg=r["error_msg"],
+                            status=r["status"],
+                            retry_count=r["retry_count"],
+                        )
+                        self._pending_queue[event_id] = record
+                        break
 
+        if not record:
+            return False, "EVENT_NOT_IN_RETRY_QUEUE"
+
+        # 1. Claim database lease before performing retry work
+        owner_id = str(uuid.uuid4())
+        claim = self.persistent_db.claim_retry_record(
+            event_id, owner_id=owner_id, ttl_seconds=30.0
+        )
+        if not claim.acquired:
+            return False, "RETRY_FAILED: LEASE_ACQUISITION_FAILED"
+
+        owner_id = claim.owner_id
+        fencing_token = claim.fencing_token
+
+        try:
+            # 2. Reload authoritative persisted record under lease
+            persisted_record = None
+            if hasattr(self.persistent_db, "get_retry_record"):
+                try:
+                    persisted_record = self.persistent_db.get_retry_record(event_id)
+                except Exception as exc:
+                    return (
+                        False,
+                        f"RETRY_FAILED: PERSISTED_RECORD_READ_ERROR: {type(exc).__name__}",
+                    )
+            else:
+                for r in self.persistent_db.list_pending_retries():
+                    if r["event_id"] == event_id:
+                        persisted_record = r
+                        break
+
+            if not persisted_record or persisted_record.get("status") != "PENDING_RETRY":
+                return False, "RETRY_FAILED: RECORD_NOT_PENDING_AFTER_CLAIM"
+
+            record.retry_count = persisted_record["retry_count"]
+            record.payload = persisted_record["payload"]
+            record.error_msg = persisted_record["error_msg"]
+            record.status = persisted_record["status"]
+            record.request_id = persisted_record["request_id"]
+
+            # 3. Check maximum retries
+            if record.retry_count >= record.max_retries:
+                finalized = self.persistent_db.finalize_retry_record(
+                    event_id,
+                    owner_id,
+                    fencing_token,
+                    status="DEAD_LETTER_QUEUE",
+                    retry_count=record.retry_count,
+                    error_msg=record.error_msg,
+                )
+                if not finalized:
+                    return False, "RETRY_FAILED: LEASE_LOST_BEFORE_FINALIZATION"
+                record.status = "DEAD_LETTER_QUEUE"
+                self._dead_letter_queue[event_id] = record
+                self._pending_queue.pop(event_id, None)
+                return False, "MAX_RETRIES_EXCEEDED_MOVED_TO_DLQ"
+
+            # 4. Mode validation
+            mode = os.environ.get("FABRIC_GATEWAY_MODE", "simulator").strip().lower()
+            if mode not in {"simulator", "live"}:
+                raise ValueError(
+                    "Invalid FABRIC_GATEWAY_MODE. Expected 'simulator' or 'live'."
+                )
+
+            p = record.payload
+            evidence_data = p.get("evidence") or {}
+            ev_ref = (
+                evidence_data.get("evidence_id")
+                or p.get("evidence_reference")
+                or f"EVID-RETRY-{event_id}"
+            )
+            ev_hash = (
+                evidence_data.get("evidence_hash")
+                or p.get("evidence_hash")
+                or f"HASH-RETRY-{event_id}"
+            )
+            pol_id = p.get("policy_id") or "FIN-POLICY-001"
+            pol_ver = p.get("policy_version") or "1.0.0"
+
+            expected_fields = {
+                "event_id": p.get("event_id", event_id),
+                "request_id": p.get("request_id", record.request_id),
+                "agent_id": p.get("agent_id", "AGENT-UNKNOWN"),
+                "action": p.get("action", "TRANSFER_FUNDS"),
+                "resource": p.get("resource", "BANK_RESERVE_IN"),
+                "decision": p.get("decision", "ALLOWED"),
+                "reason": p.get("reason", "VALID"),
+                "policy_id": pol_id,
+                "policy_version": pol_ver,
+                "evidence_reference": ev_ref,
+                "evidence_hash": ev_hash,
+            }
+
+            # 5. Ledger reconciliation
+            if hasattr(fabric_client, "get_event"):
+                try:
+                    existing_event = fabric_client.get_event(event_id)
+                except Exception as exc:
+                    # Live query failure / timeout preserves uncertainty: do not increment retry count
+                    return False, f"RETRY_FAILED: {exc!s}"
+
+                if existing_event is not None:
+                    if isinstance(existing_event, dict) and all(
+                        existing_event.get(k) == v for k, v in expected_fields.items()
+                    ):
+                        finalized = self.persistent_db.finalize_retry_record(
+                            event_id,
+                            owner_id,
+                            fencing_token,
+                            delete_record=True,
+                        )
+                        if not finalized:
+                            return False, "RETRY_FAILED: LEASE_LOST_BEFORE_FINALIZATION"
+                        record.status = "RETRIED_SUCCESS"
+                        self._pending_queue.pop(event_id, None)
+                        return True, "RETRY_SUCCESSFUL"
+                    else:
+                        finalized = self.persistent_db.finalize_retry_record(
+                            event_id,
+                            owner_id,
+                            fencing_token,
+                            status="DEAD_LETTER_QUEUE",
+                            retry_count=record.retry_count,
+                            error_msg="RECONCILIATION_CONFLICT",
+                        )
+                        if not finalized:
+                            return False, "RETRY_FAILED: LEASE_LOST_BEFORE_FINALIZATION"
+                        record.status = "DEAD_LETTER_QUEUE"
+                        self._dead_letter_queue[event_id] = record
+                        self._pending_queue.pop(event_id, None)
+                        return False, "RETRY_FAILED: RECONCILIATION_CONFLICT"
+                else:
+                    if mode == "live":
+                        return False, "RETRY_FAILED: LIVE_LEDGER_STATE_UNCERTAIN"
+
+            # 6. Safe write attempt (simulator mode with absent event, or fallback)
+            if not self.persistent_db.validate_retry_claim(
+                event_id,
+                owner_id,
+                fencing_token,
+            ):
+                return False, "RETRY_FAILED: LEASE_LOST_BEFORE_WRITE"
+
+            new_retry_count = record.retry_count + 1
+            try:
+                _res = fabric_client.record_action_event(
+                    event_id=expected_fields["event_id"],
+                    request_id=expected_fields["request_id"],
+                    agent_id=expected_fields["agent_id"],
+                    action=expected_fields["action"],
+                    resource=expected_fields["resource"],
+                    decision=expected_fields["decision"],
+                    reason=expected_fields["reason"],
+                    policy_id=expected_fields["policy_id"],
+                    policy_version=expected_fields["policy_version"],
+                    evidence_reference=expected_fields["evidence_reference"],
+                    evidence_hash=expected_fields["evidence_hash"],
+                )
+            except Exception as exc:
+                record.retry_count = new_retry_count
+                record.error_msg = str(exc)
+                if record.retry_count >= record.max_retries:
+                    finalized = self.persistent_db.finalize_retry_record(
+                        event_id,
+                        owner_id,
+                        fencing_token,
+                        status="DEAD_LETTER_QUEUE",
+                        retry_count=record.retry_count,
+                        error_msg=str(exc),
+                    )
+                    if not finalized:
+                        return False, "RETRY_FAILED: LEASE_LOST_BEFORE_FINALIZATION"
+                    record.status = "DEAD_LETTER_QUEUE"
+                    self._dead_letter_queue[event_id] = record
+                    self._pending_queue.pop(event_id, None)
+                else:
+                    finalized = self.persistent_db.finalize_retry_record(
+                        event_id,
+                        owner_id,
+                        fencing_token,
+                        status="PENDING_RETRY",
+                        retry_count=record.retry_count,
+                        error_msg=str(exc),
+                    )
+                    if not finalized:
+                        return False, "RETRY_FAILED: LEASE_LOST_BEFORE_FINALIZATION"
+                return False, f"RETRY_FAILED: {exc!s}"
+
+            # Finalization is outside the Fabric-write exception handler
+            try:
+                finalized = self.persistent_db.finalize_retry_record(
+                    event_id,
+                    owner_id,
+                    fencing_token,
+                    delete_record=True,
+                )
+            except Exception:
+                return False, "RETRY_FAILED: FINALIZATION_ERROR_RECONCILE_REQUIRED"
+
+            if not finalized:
+                return False, "RETRY_FAILED: LEASE_LOST_BEFORE_FINALIZATION"
+
+            record.status = "RETRIED_SUCCESS"
+            self._pending_queue.pop(event_id, None)
+            return True, "RETRY_SUCCESSFUL"
+        finally:
+            try:
+                self.persistent_db.release_retry_claim(
+                    event_id,
+                    owner_id,
+                    fencing_token,
+                )
+            except Exception:
+                pass
+
+    def _retry_commit_without_persistence(self, event_id: str, fabric_client) -> tuple[bool, str]:
+        """In-memory retry reconciliation path for instances without persistent DB."""
+        record = self._pending_queue.get(event_id)
         if not record:
             return False, "EVENT_NOT_IN_RETRY_QUEUE"
 
@@ -137,10 +380,6 @@ class RetryQueueManager:
             record.status = "DEAD_LETTER_QUEUE"
             self._dead_letter_queue[event_id] = record
             self._pending_queue.pop(event_id, None)
-            if self.persistent_db:
-                self.persistent_db.update_retry_status(
-                    event_id, "DEAD_LETTER_QUEUE", record.retry_count
-                )
             return False, "MAX_RETRIES_EXCEEDED_MOVED_TO_DLQ"
 
         mode = os.environ.get("FABRIC_GATEWAY_MODE", "simulator").strip().lower()
@@ -183,36 +422,25 @@ class RetryQueueManager:
             try:
                 existing_event = fabric_client.get_event(event_id)
             except Exception as exc:
-                # Live query failure / timeout preserves uncertainty: do not increment retry count, do not resubmit
                 return False, f"RETRY_FAILED: {exc!s}"
 
             if existing_event is not None:
                 if isinstance(existing_event, dict) and all(
                     existing_event.get(k) == v for k, v in expected_fields.items()
                 ):
-                    # Successfully reconciled: already committed on ledger
                     record.status = "RETRIED_SUCCESS"
                     self._pending_queue.pop(event_id, None)
-                    if self.persistent_db:
-                        self.persistent_db.delete_retry_record(event_id)
                     return True, "RETRY_SUCCESSFUL"
                 else:
-                    # Conflicting data under the same event ID
                     record.status = "DEAD_LETTER_QUEUE"
                     self._dead_letter_queue[event_id] = record
                     self._pending_queue.pop(event_id, None)
-                    if self.persistent_db:
-                        self.persistent_db.update_retry_status(
-                            event_id, "DEAD_LETTER_QUEUE", record.retry_count
-                        )
                     return False, "RETRY_FAILED: RECONCILIATION_CONFLICT"
             else:
-                # Event is absent from ledger
                 if mode == "live":
-                    # In live mode, absence is treated as uncertain; do not blindly resubmit
                     return False, "RETRY_FAILED: LIVE_LEDGER_STATE_UNCERTAIN"
 
-        # Step 2: Safe to attempt write (simulator mode with absent event, or fallback)
+        # Step 2: Safe to attempt write
         record.retry_count += 1
         try:
             _res = fabric_client.record_action_event(
@@ -230,21 +458,10 @@ class RetryQueueManager:
             )
             record.status = "RETRIED_SUCCESS"
             self._pending_queue.pop(event_id, None)
-            if self.persistent_db:
-                self.persistent_db.delete_retry_record(event_id)
             return True, "RETRY_SUCCESSFUL"
         except Exception as e:
             if record.retry_count >= record.max_retries:
                 record.status = "DEAD_LETTER_QUEUE"
                 self._dead_letter_queue[event_id] = record
                 self._pending_queue.pop(event_id, None)
-                if self.persistent_db:
-                    self.persistent_db.update_retry_status(
-                        event_id, "DEAD_LETTER_QUEUE", record.retry_count
-                    )
-            else:
-                if self.persistent_db:
-                    self.persistent_db.update_retry_status(
-                        event_id, "PENDING_RETRY", record.retry_count
-                    )
             return False, f"RETRY_FAILED: {e!s}"

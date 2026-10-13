@@ -194,9 +194,31 @@ class PersistentStorageEngine:
                     error_msg TEXT NOT NULL,
                     retry_count INTEGER DEFAULT 0,
                     status TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    lease_owner TEXT DEFAULT '',
+                    lease_expires_at REAL DEFAULT 0.0,
+                    fencing_token INTEGER DEFAULT 0
                 )
             """)
+
+            # Backward-compatible retry lease migration.
+            cursor.execute("PRAGMA table_info(reconciliation_queue)")
+            recon_cols = [row["name"] for row in cursor.fetchall()]
+            if "lease_owner" not in recon_cols:
+                cursor.execute(
+                    "ALTER TABLE reconciliation_queue "
+                    "ADD COLUMN lease_owner TEXT DEFAULT ''"
+                )
+            if "lease_expires_at" not in recon_cols:
+                cursor.execute(
+                    "ALTER TABLE reconciliation_queue "
+                    "ADD COLUMN lease_expires_at REAL DEFAULT 0.0"
+                )
+            if "fencing_token" not in recon_cols:
+                cursor.execute(
+                    "ALTER TABLE reconciliation_queue "
+                    "ADD COLUMN fencing_token INTEGER DEFAULT 0"
+                )
 
             # 10. Durable Transaction Intent State Machine Table
             cursor.execute("""
@@ -674,49 +696,119 @@ class PersistentStorageEngine:
             return deleted
 
     def save_retry_record(self, event_id: str, request_id: str, payload: dict[str, Any], error_msg: str, status: str = "PENDING_RETRY", retry_count: int = 0) -> None:
-        """Persists failed commit record to durable reconciliation queue."""
+        """Persists failed commit record to durable reconciliation queue without resetting lease fields."""
+        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
         with self._lock:
             conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO reconciliation_queue (
-                    event_id, request_id, payload_json, error_msg, retry_count, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                event_id,
-                request_id,
-                json.dumps(payload),
-                error_msg,
-                retry_count,
-                status,
-                datetime.datetime.now(datetime.timezone.utc).isoformat()
-            ))
-            conn.commit()
-            conn.close()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN IMMEDIATE")
+                cursor.execute("""
+                    INSERT INTO reconciliation_queue (
+                        event_id, request_id, payload_json, error_msg, retry_count, status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(event_id) DO UPDATE SET
+                        request_id = excluded.request_id,
+                        payload_json = excluded.payload_json,
+                        error_msg = excluded.error_msg,
+                        retry_count = excluded.retry_count,
+                        status = excluded.status
+                    WHERE reconciliation_queue.lease_owner = ''
+                       OR reconciliation_queue.lease_expires_at <= ?
+                """, (
+                    event_id,
+                    request_id,
+                    json.dumps(payload),
+                    error_msg,
+                    retry_count,
+                    status,
+                    datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    now,
+                ))
+                if cursor.rowcount == 0:
+                    raise RuntimeError(
+                        f"Cannot update retry record {event_id}: record is actively leased"
+                    )
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                conn.close()
+
+    def get_retry_record(self, event_id: str) -> dict[str, Any] | None:
+        """Retrieve a durable retry record, distinguishing missing rows from errors."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM reconciliation_queue WHERE event_id = ?",
+                    (event_id,),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    return None
+                # Allow SQLite and JSON decoding errors to propagate.
+                # A malformed payload must not masquerade as a missing record.
+                payload = json.loads(row["payload_json"])
+                record = {
+                    "event_id": row["event_id"],
+                    "request_id": row["request_id"],
+                    "payload": payload,
+                    "error_msg": row["error_msg"],
+                    "retry_count": row["retry_count"],
+                    "status": row["status"],
+                    "created_at": row["created_at"],
+                }
+                if "lease_owner" in row.keys():
+                    record["lease_owner"] = str(row["lease_owner"] or "")
+                if "lease_expires_at" in row.keys():
+                    record["lease_expires_at"] = float(
+                        row["lease_expires_at"] or 0.0
+                    )
+                if "fencing_token" in row.keys():
+                    record["fencing_token"] = int(row["fencing_token"] or 0)
+                return record
+            finally:
+                conn.close()
 
     def list_pending_retries(self) -> list[dict[str, Any]]:
         """Retrieves all pending retry records from durable reconciliation queue."""
         with self._lock:
             conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM reconciliation_queue WHERE status = 'PENDING_RETRY'")
-            rows = cursor.fetchall()
-            conn.close()
-            res = []
-            for r in rows:
-                try:
-                    res.append({
-                        "event_id": r["event_id"],
-                        "request_id": r["request_id"],
-                        "payload": json.loads(r["payload_json"]),
-                        "error_msg": r["error_msg"],
-                        "retry_count": r["retry_count"],
-                        "status": r["status"],
-                        "created_at": r["created_at"]
-                    })
-                except Exception:
-                    pass
-            return res
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM reconciliation_queue WHERE status = 'PENDING_RETRY'")
+                rows = cursor.fetchall()
+            finally:
+                conn.close()
+
+        res = []
+        for r in rows:
+            try:
+                record = {
+                    "event_id": r["event_id"],
+                    "request_id": r["request_id"],
+                    "payload": json.loads(r["payload_json"]),
+                    "error_msg": r["error_msg"],
+                    "retry_count": r["retry_count"],
+                    "status": r["status"],
+                    "created_at": r["created_at"],
+                }
+                if "lease_owner" in r.keys():
+                    record["lease_owner"] = str(r["lease_owner"] or "")
+                if "lease_expires_at" in r.keys():
+                    record["lease_expires_at"] = float(r["lease_expires_at"] or 0.0)
+                if "fencing_token" in r.keys():
+                    record["fencing_token"] = int(r["fencing_token"] or 0)
+                res.append(record)
+            except Exception:
+                pass
+        return res
 
     def list_dead_letter_retries(self) -> list[dict[str, Any]]:
         """Retrieve durable dead-letter records, including corrupt payloads."""
@@ -768,21 +860,246 @@ class PersistentStorageEngine:
         """Updates status of a reconciliation record."""
         with self._lock:
             conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE reconciliation_queue SET status = ?, retry_count = ? WHERE event_id = ?
-            """, (status, retry_count, event_id))
-            conn.commit()
-            conn.close()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE reconciliation_queue SET status = ?, retry_count = ? WHERE event_id = ?
+                """, (status, retry_count, event_id))
+                conn.commit()
+            finally:
+                conn.close()
 
     def delete_retry_record(self, event_id: str) -> None:
         """Removes a reconciled record from the queue."""
         with self._lock:
             conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM reconciliation_queue WHERE event_id = ?", (event_id,))
-            conn.commit()
-            conn.close()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM reconciliation_queue WHERE event_id = ?", (event_id,))
+                conn.commit()
+            finally:
+                conn.close()
+
+    def claim_retry_record(
+        self,
+        event_id: str,
+        owner_id: str | None = None,
+        ttl_seconds: float = 30.0,
+    ) -> LockAcquisitionResult:
+        """
+        Atomically claims a PENDING_RETRY record from the reconciliation queue using leases
+        and monotonically increasing fencing tokens.
+        - Rejects non-positive TTL values.
+        - Only claims records where status == 'PENDING_RETRY'.
+        - If an active unexpired lease exists (lease_owner != '' and lease_expires_at > now),
+          returns LockAcquisitionResult(False, cur_fencing, cur_owner).
+        - If the record is unclaimed or has an expired lease (lease_expires_at <= now),
+          claims/reclaims the record with incremented fencing_token and new lease expiration.
+        - Returns LockAcquisitionResult(acquired, fencing_token, owner_id).
+        """
+        if ttl_seconds <= 0:
+            raise ValueError(f"ttl_seconds must be positive, got {ttl_seconds}")
+
+        actual_owner = owner_id or str(uuid.uuid4())
+        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        new_expires = now + ttl_seconds
+
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN IMMEDIATE")
+                cursor.execute(
+                    """
+                    SELECT status, lease_owner, lease_expires_at, fencing_token
+                    FROM reconciliation_queue
+                    WHERE event_id = ?
+                    """,
+                    (event_id,),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    conn.rollback()
+                    return LockAcquisitionResult(False, 0, "")
+
+                if row["status"] != "PENDING_RETRY":
+                    conn.rollback()
+                    return LockAcquisitionResult(
+                        False,
+                        int(row["fencing_token"] or 0),
+                        str(row["lease_owner"] or ""),
+                    )
+
+                cur_owner = str(row["lease_owner"] or "")
+                cur_expires = float(row["lease_expires_at"] or 0.0)
+                cur_fencing = int(row["fencing_token"] or 0)
+
+                if cur_owner and cur_expires > now:
+                    # Active lease held by another or current worker
+                    conn.rollback()
+                    return LockAcquisitionResult(False, cur_fencing, cur_owner)
+
+                # Unclaimed or expired lease: increment fencing token and claim
+                new_fencing = cur_fencing + 1
+                cursor.execute(
+                    """
+                    UPDATE reconciliation_queue
+                    SET lease_owner = ?, lease_expires_at = ?, fencing_token = ?
+                    WHERE event_id = ?
+                    """,
+                    (actual_owner, new_expires, new_fencing, event_id),
+                )
+                conn.commit()
+                return LockAcquisitionResult(True, new_fencing, actual_owner)
+            except sqlite3.Error:
+                conn.rollback()
+                return LockAcquisitionResult(False, 0, "")
+            finally:
+                conn.close()
+
+    def validate_retry_claim(
+        self,
+        event_id: str,
+        owner_id: str,
+        fencing_token: int,
+    ) -> bool:
+        """
+        Validates that event_id is currently claimed by owner_id with fencing_token
+        and that the lease has not expired.
+        Returns True if claim is valid and unexpired, False otherwise.
+        """
+        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT lease_owner, lease_expires_at, fencing_token
+                    FROM reconciliation_queue
+                    WHERE event_id = ?
+                    """,
+                    (event_id,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return False
+                if str(row["lease_owner"] or "") != owner_id:
+                    return False
+                if int(row["fencing_token"] or 0) != fencing_token:
+                    return False
+                if float(row["lease_expires_at"] or 0.0) <= now:
+                    return False
+                return True
+            finally:
+                conn.close()
+
+    def release_retry_claim(
+        self,
+        event_id: str,
+        owner_id: str,
+        fencing_token: int,
+    ) -> bool:
+        """
+        Clears only the matching, still-valid (unexpired) lease.
+        Never releases a newer worker's lease or an expired/stale claim.
+        Returns True if released, False otherwise.
+        """
+        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN IMMEDIATE")
+                cursor.execute(
+                    """
+                    UPDATE reconciliation_queue
+                    SET lease_owner = '', lease_expires_at = 0.0
+                    WHERE event_id = ?
+                      AND lease_owner = ?
+                      AND fencing_token = ?
+                      AND lease_expires_at > ?
+                    """,
+                    (event_id, owner_id, fencing_token, now),
+                )
+                released = cursor.rowcount > 0
+                conn.commit()
+                return released
+            except sqlite3.Error:
+                conn.rollback()
+                return False
+            finally:
+                conn.close()
+
+    def finalize_retry_record(
+        self,
+        event_id: str,
+        owner_id: str,
+        fencing_token: int,
+        status: str | None = None,
+        retry_count: int | None = None,
+        error_msg: str | None = None,
+        delete_record: bool = False,
+    ) -> bool:
+        """
+        Atomically verifies current ownership and unexpired lease before updating or deleting
+        the retry record.
+        Rejects stale or expired claims.
+        - If delete_record is True, deletes the record from the queue.
+        - Otherwise, updates status and/or retry_count/error_msg and clears the lease fields
+          while preserving the fencing token.
+        Returns True if finalized, False otherwise.
+        """
+        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN IMMEDIATE")
+                if delete_record:
+                    cursor.execute(
+                        """
+                        DELETE FROM reconciliation_queue
+                        WHERE event_id = ?
+                          AND lease_owner = ?
+                          AND fencing_token = ?
+                          AND lease_expires_at > ?
+                        """,
+                        (event_id, owner_id, fencing_token, now),
+                    )
+                else:
+                    query = """
+                        UPDATE reconciliation_queue
+                        SET lease_owner = '',
+                            lease_expires_at = 0.0
+                    """
+                    params: list[Any] = []
+                    if status is not None:
+                        query += ", status = ?"
+                        params.append(status)
+                    if retry_count is not None:
+                        query += ", retry_count = ?"
+                        params.append(retry_count)
+                    if error_msg is not None:
+                        query += ", error_msg = ?"
+                        params.append(error_msg)
+                    query += """
+                        WHERE event_id = ?
+                          AND lease_owner = ?
+                          AND fencing_token = ?
+                          AND lease_expires_at > ?
+                    """
+                    params.extend([event_id, owner_id, fencing_token, now])
+                    cursor.execute(query, tuple(params))
+
+                finalized = cursor.rowcount > 0
+                conn.commit()
+                return finalized
+            except sqlite3.Error:
+                conn.rollback()
+                return False
+            finally:
+                conn.close()
 
     def save_intent(
         self,
