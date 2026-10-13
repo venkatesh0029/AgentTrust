@@ -34,13 +34,13 @@ def get_system_metadata() -> dict[str, Any]:
     cpu_cores = multiprocessing.cpu_count()
     os_info = f"{platform.system()} {platform.release()} ({platform.version()})"
     python_ver = sys.version.split()[0]
-    
+
     try:
         import cryptography
         crypto_ver = cryptography.__version__
     except ImportError:
         crypto_ver = "Unknown"
-        
+
     try:
         import pytest
         pytest_ver = pytest.__version__
@@ -70,7 +70,7 @@ def calculate_percentiles(data: list[float]) -> dict[str, float]:
     """Calculates Mean, StdDev, Min, Max, P50, P90, P95, and P99 percentiles."""
     sorted_data = sorted(data)
     n = len(sorted_data)
-    
+
     def percentile(p: float) -> float:
         k = (n - 1) * (p / 100.0)
         f = int(k)

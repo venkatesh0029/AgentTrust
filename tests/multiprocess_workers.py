@@ -74,7 +74,7 @@ def _build_worker_gateway(db_path: str) -> tuple[ActionGateway, ProtectedFinance
     cert_manager = CertificateManager(db_path=db_path)
     identity_store = IdentityStore(db_path=db_path)
     registry = AgentRegistry(cert_manager, identity_store)
-    
+
     policy_loader = PolicyLoader()
     policy = PolicyRecord(
         policy_id="FIN-POLICY-001",

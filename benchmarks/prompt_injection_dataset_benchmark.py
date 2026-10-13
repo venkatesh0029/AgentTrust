@@ -55,7 +55,7 @@ class PromptInjectionDatasetBenchmark:
             }
             # Add dynamic benign variation
             payload["parameters"]["reference_id"] = f"REF-{i:05d}"
-            
+
             detected, _, _ = PromptInjectionGuard.evaluate_payload(payload)
             if detected:
                 fp += 1

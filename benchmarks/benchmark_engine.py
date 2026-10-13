@@ -195,7 +195,7 @@ class BenchmarkEngine:
                 ag_id = f"SCALE-AGENT-{num_agents}-{i:03d}"
                 pol_id = f"POL-{ag_id}"
                 info = self.reg.register_agent(ag_id, f"ScaleAgent{i}", "Dept", ["CREATE_PURCHASE_ORDER"], pol_id)
-                
+
                 pol = PolicyRecord(
                     policy_id=pol_id, agent_id=ag_id,
                     allowed_actions=["CREATE_PURCHASE_ORDER"], allowed_resource="*",

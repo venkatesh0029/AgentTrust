@@ -111,7 +111,7 @@ def test_delegation_negative_amount_and_audience_binding():
     parent_key_obj = KeyManager.generate_key_pair(2048)
     parent_priv_key = KeyManager.private_key_to_pem(parent_key_obj)
     parent_pub_key = KeyManager.public_key_to_pem(parent_key_obj.public_key())
-    
+
     # 1. Negative amount should raise ValueError
     with pytest.raises(ValueError, match="cannot be negative"):
         DelegationTokenManager.create_delegated_token(
@@ -190,11 +190,11 @@ def test_sqlite_persistence_across_restarts():
         # 1. Instantiate services and create Root CA, revoke fingerprint, and register agent
         cm1 = CertificateManager(db_path=db_path)
         id1 = IdentityStore(db_path=db_path)
-        
+
         ca_cert_pem_1 = cm1.ca_certificate.public_bytes(CertificateManager.__module__ and __import__('cryptography.hazmat.primitives.serialization', fromlist=['Encoding']).Encoding.PEM).decode('utf-8')
-        
+
         cm1.revoke_certificate("FINGERPRINT-TEST-12345")
-        
+
         id1.save_agent({
             "agent_id": "PERSIST-AGENT-001",
             "agent_name": "PersistAgent",

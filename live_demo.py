@@ -97,7 +97,7 @@ def run_live_demo():
     }
     p1["signature"] = SignatureManager.sign_request(p1, priv_key)
     res1 = gw.process_request(p1)
-    print_step(1, "Valid Low-Value Reimbursement (Rs 7,500)", f"{res1['decision']} ({res1['protected_api_result']})", 
+    print_step(1, "Valid Low-Value Reimbursement (Rs 7,500)", f"{res1['decision']} ({res1['protected_api_result']})",
                f"Request within Rs 10,000 limit. Signed with RSA private key. Executed on Protected API & Committed to Block #{res1['blockchain']['block_index']}")
 
     # --- SCENARIO 2: ₹80,000 Reimbursement (Blocked) ---
@@ -113,7 +113,7 @@ def run_live_demo():
     }
     p2["signature"] = SignatureManager.sign_request(p2, priv_key)
     res2 = gw.process_request(p2)
-    print_step(2, "Excessive Amount Request (Rs 80,000)", f"{res2['decision']} ({res2['reason']})", 
+    print_step(2, "Excessive Amount Request (Rs 80,000)", f"{res2['decision']} ({res2['reason']})",
                "Request exceeds policy limit (Rs 10,000). Action Gateway blocked API execution and audited block event.")
 
     # --- SCENARIO 3: Invalid Cryptographic Signature ---
@@ -129,7 +129,7 @@ def run_live_demo():
         "signature": "INVALID_RSA_SIGNATURE_STRING_FORGED"
     }
     res3 = gw.process_request(p3)
-    print_step(3, "Invalid Signature Attempt", f"{res3['decision']} ({res3['reason']})", 
+    print_step(3, "Invalid Signature Attempt", f"{res3['decision']} ({res3['reason']})",
                "Gateway cryptographic verification failed signature validation. Request rejected prior to policy check.")
 
     # --- SCENARIO 4: Revoked Agent Execution Attempt ---
@@ -148,7 +148,7 @@ def run_live_demo():
     }
     p4["signature"] = SignatureManager.sign_request(p4, rev_agent_info["private_key"])
     res4 = gw.process_request(p4)
-    print_step(4, "Revoked Agent Execution", f"{res4['decision']} ({res4['reason']})", 
+    print_step(4, "Revoked Agent Execution", f"{res4['decision']} ({res4['reason']})",
                "Gateway checked agent registry state. Certificate is REVOKED. Request blocked instantly.")
 
     # --- SCENARIO 5: Replay Attack ---
@@ -167,10 +167,10 @@ def run_live_demo():
     p5["signature"] = SignatureManager.sign_request(p5, priv_key)
     res5_a = gw.process_request(p5)
     print(f"    * Original Request Execution : {res5_a['decision']} (Block #{res5_a['blockchain']['block_index']})")
-    
+
     # Replay same payload
     res5_b = gw.process_request(p5)
-    print_step(5, "Replayed Request Attempt", f"{res5_b['decision']} ({res5_b['reason']})", 
+    print_step(5, "Replayed Request Attempt", f"{res5_b['decision']} ({res5_b['reason']})",
                f"Duplicate request_id ({req_id_5}) and nonce ({nonce_5}) detected by RequestTracker within 300s window.")
 
     # --- SCENARIO 6: High-Value Request -> Human Approval ---
@@ -193,10 +193,10 @@ def run_live_demo():
     res6 = gw.process_request(p6)
     print(f"    * Gateway Evaluation : {res6['decision']} ({res6['reason']})")
     print(f"    * Approval Ticket ID : {res6['approval_ticket']['approval_id']}")
-    
+
     # Simulate CFO Approval
     appr_res = gw.process_human_approval_resume(res6['approval_ticket']['approval_id'], "CFO_EXECUTIVE_HUMAN")
-    print_step(6, "High-Value Workflow (Rs 25,000)", f"{appr_res['decision']} ({appr_res['protected_api_result']})", 
+    print_step(6, "High-Value Workflow (Rs 25,000)", f"{appr_res['decision']} ({appr_res['protected_api_result']})",
                "Held in human approval queue until CFO approval. Resumed and committed to ledger upon sign-off.")
 
     # --- SCENARIO 7: Evidence Modification & Tamper Detection ---
@@ -214,25 +214,25 @@ def run_live_demo():
     res7 = gw.process_request(p7)
     ev_id = res7["evidence"]["evidence_id"]
     stored_hash = res7["evidence"]["evidence_hash"]
-    
+
     print(f"    * Original Evidence Reference : {ev_id}")
     print(f"    * On-Chain Recorded SHA-256   : {stored_hash}")
-    
+
     # Simulate database tampering
     ev_store.simulate_tamper(ev_id, "amount", 999999.0)
     print("    * Malicious Database Action   : Changed 'amount' off-chain to Rs 999,999.00")
-    
+
     # Verify hash against Fabric ledger
     tampered_ev = ev_store.get_evidence(ev_id)
     recalc_hash = HashManager.calculate_evidence_hash(tampered_ev)
     v_res = fabric.verify_evidence_hash(ev_id, recalc_hash)
-    
-    print_step(7, "Off-Chain Evidence Verification", f"{v_res['status']} (Verified={v_res['verified']})", 
+
+    print_step(7, "Off-Chain Evidence Verification", f"{v_res['status']} (Verified={v_res['verified']})",
                f"Recalculated Hash ({recalc_hash[:16]}...) mismatched Stored Blockchain Hash ({stored_hash[:16]}...). Tampering flagged.")
 
     # --- SCENARIO 8: Ledger Failure -> Retry & DLQ Recovery ---
     print_header("Scenario 8: Orderer Outage & Durable Dead-Letter Queue (DLQ) Recovery")
-    
+
     # Simulate Orderer failure
     orig_record_fn = fabric.record_action_event
     def mock_orderer_down(*args, **kwargs):
@@ -250,10 +250,10 @@ def run_live_demo():
     }
     p8["signature"] = SignatureManager.sign_request(p8, priv_key)
     res8 = gw.process_request(p8)
-    
+
     print(f"    * Initial Execution Status : {res8['blockchain']['status']}")
     print(f"    * Off-Chain Evidence Status: {res8['evidence']['off_chain_status']}")
-    
+
     # Enqueue failed commit into DLQ
     event_id_8 = res8["blockchain"]["event_id"]
     retry_mgr.enqueue_failed_commit(
@@ -279,10 +279,10 @@ def run_live_demo():
     # Restore Orderer Service
     fabric.record_action_event = orig_record_fn
     print("    * Network Status Restored  : Hyperledger Fabric Orderer service back online.")
-    
+
     # Process Retry
     ok, msg = retry_mgr.retry_commit(event_id_8, fabric)
-    print_step(8, "Ledger Outage Recovery", f"RECOVERED ({msg})", 
+    print_step(8, "Ledger Outage Recovery", f"RECOVERED ({msg})",
                "API execution preserved off-chain during outage. Retry queue flushed transaction safely onto Fabric block chain.")
 
     print_header("Live Demonstration Successfully Completed (8/8 Scenarios Passed)")

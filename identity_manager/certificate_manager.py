@@ -22,7 +22,7 @@ class CertificateManager:
     def __init__(self, ca_common_name: str = "AgentTrust Root CA", db_path: str = "agenttrust_persistent.db"):
         self.ca_common_name = ca_common_name
         self.db_path = db_path
-        
+
         self.storage: Any | None = None
         try:
             from fabric.persistent_db import PersistentStorageEngine

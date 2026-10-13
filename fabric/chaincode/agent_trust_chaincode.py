@@ -157,7 +157,7 @@ class AgentTrustChaincode:
             raise ValueError(f"Immutability Violation: Evidence record for request '{request_id}' already committed to ledger.")
 
         tx_id = f"FAB-TX-{hashlib.sha256(f'{request_id}:{datetime.datetime.now()}'.encode()).hexdigest()[:12]}"
-        
+
         record = {
             "docType": "evidence_record",
             "tx_id": tx_id,

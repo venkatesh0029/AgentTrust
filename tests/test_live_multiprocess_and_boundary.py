@@ -219,7 +219,7 @@ class TestLiveMultiprocessAndBoundaryAssurance(unittest.TestCase):
 
         allowed_outcomes = [r for r in results if r.get("outcome", {}).get("decision") == "ALLOWED"]
         replay_outcomes = [
-            r for r in results 
+            r for r in results
             if r.get("outcome", {}).get("decision") == "BLOCKED" and r.get("outcome", {}).get("reason") == "REPLAY_DETECTED"
         ]
 

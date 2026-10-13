@@ -32,7 +32,7 @@ async def execute_action(payload: dict[str, Any] = Body(...)):
     gateway = get_action_gateway()
     # Offload blocking crypto verification to worker thread pool
     result = await asyncio.to_thread(gateway.process_request, payload)
-    
+
     decision = result.get("decision", "BLOCKED")
     increment_request_metrics(decision)
     return result
@@ -45,7 +45,7 @@ async def mcp_tool_call(mcp_request: dict[str, Any] = Body(...)):
     Prevents Confused Deputy attacks by verifying tool name and parameter intent binding against signed agent payload.
     """
     mcp_gw = get_mcp_gateway()
-    
+
     # Simple dummy executor for test tool calls
     def dummy_tool_executor(name: str, args: dict[str, Any]):
         return {"executed_tool": name, "arguments": args, "status": "COMPLETED"}

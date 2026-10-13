@@ -36,7 +36,7 @@ def test_regression_rbac_finance_approver_role():
     # Register pending approval
     agent_id = f"AGENT-APPR-{uuid.uuid4().hex[:4]}"
     agent_registry.register_agent(agent_id=agent_id, agent_name="ApprAgent")
-    
+
     app_record = action_gateway.approval_manager.create_approval_request(
         request_id=f"REQ-APPR-{uuid.uuid4().hex[:4]}",
         agent_id=agent_id,
@@ -61,7 +61,7 @@ def test_regression_nan_amount_rejection():
     """Verify that NaN amount requests are blocked at gateway with INVALID_AMOUNT_NAN_OR_INF."""
     agent_id = f"AGENT-NAN-{uuid.uuid4().hex[:4]}"
     reg = agent_registry.register_agent(agent_id=agent_id, agent_name="NanAgent")
-    
+
     payload = {
         "request_id": f"REQ-NAN-{uuid.uuid4().hex[:4]}",
         "agent_id": agent_id,
@@ -84,7 +84,7 @@ def test_regression_negative_amount_rejection():
     """Verify that negative amounts are blocked with NON_POSITIVE_AMOUNT."""
     agent_id = f"AGENT-NEG-{uuid.uuid4().hex[:4]}"
     reg = agent_registry.register_agent(agent_id=agent_id, agent_name="NegAgent")
-    
+
     payload = {
         "request_id": f"REQ-NEG-{uuid.uuid4().hex[:4]}",
         "agent_id": agent_id,
@@ -107,7 +107,7 @@ def test_regression_amount_mismatch_rejection():
     """Verify that requests with top-level amount != parameters.amount are blocked with AMOUNT_MISMATCH."""
     agent_id = f"AGENT-MIS-{uuid.uuid4().hex[:4]}"
     reg = agent_registry.register_agent(agent_id=agent_id, agent_name="MisAgent")
-    
+
     payload = {
         "request_id": f"REQ-MIS-{uuid.uuid4().hex[:4]}",
         "agent_id": agent_id,
@@ -154,7 +154,7 @@ def test_regression_revoked_agent_cannot_reactivate():
     """Verify that a REVOKED agent cannot transition back to ACTIVE."""
     agent_id = f"AGENT-REV-{uuid.uuid4().hex[:4]}"
     agent_registry.register_agent(agent_id=agent_id, agent_name="RevAgent")
-    
+
     # Revoke agent
     ok_revoke = agent_registry.revoke_agent(agent_id, "COMPROMISED")
     assert ok_revoke is True
@@ -235,7 +235,7 @@ def test_regression_string_amount_invalid_format():
     """Verify that non-numeric string amount is caught safely and audited as INVALID_AMOUNT_FORMAT."""
     agent_id = f"AGENT-STR-{uuid.uuid4().hex[:4]}"
     reg = agent_registry.register_agent(agent_id=agent_id, agent_name="StrAgent")
-    
+
     payload = {
         "request_id": f"REQ-STR-{uuid.uuid4().hex[:4]}",
         "agent_id": agent_id,

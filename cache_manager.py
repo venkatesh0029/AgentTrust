@@ -36,11 +36,11 @@ class CacheManager:
         self.port = redis_port or int(os.environ.get("REDIS_PORT", 6379))
         self.db = redis_db
         self.default_ttl = default_ttl
-        
+
         self._redis_client: Any | None = None
         self._in_memory_cache: dict[str, tuple[Any, float]] = {}
         self.is_redis_connected = False
-        
+
         self._init_redis()
 
     def _init_redis(self) -> None:
