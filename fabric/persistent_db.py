@@ -718,6 +718,52 @@ class PersistentStorageEngine:
                     pass
             return res
 
+    def list_dead_letter_retries(self) -> list[dict[str, Any]]:
+        """Retrieve durable dead-letter records, including corrupt payloads."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT *
+                    FROM reconciliation_queue
+                    WHERE status = ?
+                    """,
+                    ("DEAD_LETTER_QUEUE",),
+                )
+                rows = cursor.fetchall()
+            finally:
+                conn.close()
+
+        records: list[dict[str, Any]] = []
+        for row in rows:
+            raw_payload = row["payload_json"]
+            corrupt = False
+            try:
+                payload = json.loads(raw_payload)
+                if not isinstance(payload, dict):
+                    corrupt = True
+                    payload = None
+            except (json.JSONDecodeError, TypeError):
+                corrupt = True
+                payload = None
+
+            records.append(
+                {
+                    "event_id": row["event_id"],
+                    "request_id": row["request_id"],
+                    "payload": payload,
+                    "raw_payload": raw_payload,
+                    "corrupt": corrupt,
+                    "error_msg": row["error_msg"],
+                    "retry_count": row["retry_count"],
+                    "status": row["status"],
+                    "created_at": row["created_at"],
+                }
+            )
+        return records
+
     def update_retry_status(self, event_id: str, status: str, retry_count: int) -> None:
         """Updates status of a reconciliation record."""
         with self._lock:
