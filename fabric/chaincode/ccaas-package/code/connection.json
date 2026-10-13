@@ -1,0 +1,5 @@
+{
+    "tls_required":  false,
+    "dial_timeout":  "10s",
+    "address":  "agenttrust-ccaas:9999"
+}

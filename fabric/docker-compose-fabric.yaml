@@ -1,5 +1,9 @@
 version: '3.7'
 
+volumes:
+  peer0.org1-data:
+  peer0.org2-data:
+
 networks:
   agenttrust-net:
     name: agenttrust-net
@@ -67,9 +71,16 @@ services:
       - ORDERER_GENERAL_LOCALMSPID=OrdererMSP
       - ORDERER_GENERAL_LOCALMSPDIR=/var/hyperledger/orderer/msp
       - ORDERER_GENERAL_TLS_ENABLED=true
+      - ORDERER_GENERAL_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
       - ORDERER_GENERAL_CLUSTER_CLIENTCERTIFICATE=/var/hyperledger/orderer/tls/server.crt
       - ORDERER_GENERAL_CLUSTER_CLIENTPRIVATEKEY=/var/hyperledger/orderer/tls/server.key
       - ORDERER_GENERAL_CLUSTER_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+    volumes:
+      - ./channel-artifacts/orderer.genesis.block:/var/hyperledger/orderer/orderer.genesis.block:ro
+      - ./crypto-config/ordererOrganizations/agenttrust.com/orderers/orderer.agenttrust.com/msp:/var/hyperledger/orderer/msp:ro
+      - ./crypto-config/ordererOrganizations/agenttrust.com/orderers/orderer.agenttrust.com/tls:/var/hyperledger/orderer/tls:ro
     ports:
       - "7050:7050"
     container_name: orderer.agenttrust.com
@@ -97,6 +108,15 @@ services:
       - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb0.org1.agenttrust.com:5984
       - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
       - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+    volumes:
+      - ./crypto-config/peerOrganizations/org1.agenttrust.com/peers/peer0.org1.agenttrust.com/msp:/etc/hyperledger/fabric/msp:ro
+      - ./crypto-config/peerOrganizations/org1.agenttrust.com/peers/peer0.org1.agenttrust.com/tls:/etc/hyperledger/fabric/tls:ro
+      - peer0.org1-data:/var/hyperledger/production
+      - /var/run/:/host/var/run/
     ports:
       - "7051:7051"
     container_name: peer0.org1.agenttrust.com
@@ -126,10 +146,47 @@ services:
       - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb0.org2.agenttrust.com:5984
       - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
       - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+    volumes:
+      - ./crypto-config/peerOrganizations/org2.agenttrust.com/peers/peer0.org2.agenttrust.com/msp:/etc/hyperledger/fabric/msp:ro
+      - ./crypto-config/peerOrganizations/org2.agenttrust.com/peers/peer0.org2.agenttrust.com/tls:/etc/hyperledger/fabric/tls:ro
+      - peer0.org2-data:/var/hyperledger/production
+      - /var/run/:/host/var/run/
     ports:
       - "9051:9051"
     container_name: peer0.org2.agenttrust.com
     depends_on:
       - couchdb0.org2.agenttrust.com
+    networks:
+      - agenttrust-net
+
+  agenttrust-ccaas:
+    image: agenttrust-ccaas:local
+    build:
+      context: ./chaincode
+      dockerfile: Dockerfile
+    environment:
+      CHAINCODE_SERVER_ADDRESS: "0.0.0.0:9999"
+      CHAINCODE_ID: "agenttrust_cc_v2_ccaas:eccacb61d1eb397a7a9ebf6cb009e8a42293f8c68f147aaada22d998847fbf57"
+    expose:
+      - "9999"
+    restart: unless-stopped
+    networks:
+      - agenttrust-net
+
+  agenttrust-ccaas-v3:
+    image: agenttrust-ccaas:local
+    build:
+      context: ./chaincode
+      dockerfile: Dockerfile
+    environment:
+      CHAINCODE_SERVER_ADDRESS: "0.0.0.0:9999"
+      CHAINCODE_ID: "agenttrust_cc_v3_ccaas:a2ccf9d5bfe1e995e8c6aa8a07159f06440a60cdb4044eeaead551bd2c429527"
+    expose:
+      - "9999"
+    restart: unless-stopped
     networks:
       - agenttrust-net

@@ -33,6 +33,7 @@ ENV/
 env.bak/
 venv.bak/
 .venv/
+*.bak
 
 # Pytest / Testing
 .pytest_cache/
@@ -59,3 +60,16 @@ build/
 
 # Local SoftHSM2 tokens and portable binaries
 .softhsm2/
+
+# Hyperledger Fabric generated identities, certificates, and ledger artifacts
+fabric/crypto-config/
+fabric/organizations/
+fabric/channel-artifacts/
+fabric/system-genesis/
+
+# Local Fabric Gateway bridge binaries
+/fabric/gateway-bridge/*.exe
+
+# Generated Fabric CCAAS package archives
+/fabric/chaincode/ccaas-package/code.tar.gz
+/fabric/chaincode/ccaas-package-v3/code.tar.gz

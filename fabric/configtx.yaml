@@ -68,15 +68,15 @@ Application: &ApplicationDefaults
         Endorsement:
             Type: ImplicitMeta
             Rule: "MAJORITY Endorsement"
-        Read:
+        Readers:
             Type: ImplicitMeta
-            Rule: "ANY Read"
-        Write:
+            Rule: "ANY Readers"
+        Writers:
             Type: ImplicitMeta
-            Rule: "ANY Write"
-        Admin:
+            Rule: "ANY Writers"
+        Admins:
             Type: ImplicitMeta
-            Rule: "MAJORITY Admin"
+            Rule: "MAJORITY Admins"
     Capabilities:
         <<: *ApplicationCapabilities
 
@@ -97,30 +97,30 @@ Orderer: &OrdererDefaults
         PreferredMaxBytes: 512 KB
     Organizations:
     Policies:
-        Read:
+        Readers:
             Type: ImplicitMeta
-            Rule: "ANY Read"
-        Write:
+            Rule: "ANY Readers"
+        Writers:
             Type: ImplicitMeta
-            Rule: "ANY Write"
-        Admin:
+            Rule: "ANY Writers"
+        Admins:
             Type: ImplicitMeta
-            Rule: "MAJORITY Admin"
+            Rule: "MAJORITY Admins"
         BlockValidation:
             Type: ImplicitMeta
-            Rule: "ANY Write"
+            Rule: "ANY Writers"
 
 Channel: &ChannelDefaults
     Policies:
-        Read:
+        Readers:
             Type: ImplicitMeta
-            Rule: "ANY Read"
-        Write:
+            Rule: "ANY Readers"
+        Writers:
             Type: ImplicitMeta
-            Rule: "ANY Write"
-        Admin:
+            Rule: "ANY Writers"
+        Admins:
             Type: ImplicitMeta
-            Rule: "MAJORITY Admin"
+            Rule: "MAJORITY Admins"
     Capabilities:
         <<: *ChannelCapabilities
 

@@ -2,6 +2,8 @@ import os
 import socket
 from typing import Any
 
+import httpx
+
 from fabric.ledger_service import FabricLedgerService
 
 
@@ -118,7 +120,52 @@ class FabricClient:
         return self.chaincode.getTransactionMetadata(tx_id)
 
     def get_event(self, event_id: str) -> dict[str, Any] | None:
-        return self.chaincode.GetActionEvent(event_id)
+        mode = os.environ.get("FABRIC_GATEWAY_MODE", "simulator").strip().lower()
+        if mode not in {"simulator", "live"}:
+            raise ValueError(
+                "Invalid FABRIC_GATEWAY_MODE. Expected 'simulator' or 'live'."
+            )
+
+        if mode == "simulator":
+            return self.chaincode.GetActionEvent(event_id)
+
+        if not isinstance(event_id, str) or not event_id.strip():
+            raise ValueError("event_id must be a non-empty string")
+
+        base_url = os.environ.get(
+            "FABRIC_GATEWAY_URL", "http://127.0.0.1:8090"
+        ).rstrip("/")
+        endpoint = f"{base_url}/v1/action-events/{event_id}"
+
+        try:
+            with httpx.Client(timeout=5.0, trust_env=False) as client:
+                response = client.get(endpoint)
+                response.raise_for_status()
+                body = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise RuntimeError(
+                f"Live Fabric Gateway event query failed at {endpoint}; "
+                "the event state could not be confirmed. Do not assume the "
+                "event is absent or retry the write blindly."
+            ) from exc
+
+        if not isinstance(body, dict) or body.get("status") != "FOUND":
+            raise RuntimeError(
+                "Live Fabric Gateway returned an unsuccessful or malformed "
+                "event-query response; event state remains unconfirmed."
+            )
+
+        result = body.get("result")
+        if (
+            not isinstance(result, dict)
+            or result.get("event_id") != event_id
+        ):
+            raise RuntimeError(
+                "Live Fabric Gateway returned an invalid event object or "
+                "an event_id mismatch."
+            )
+
+        return result
 
     def query_by_agent(self, agent_id: str) -> list[dict[str, Any]]:
         return self.chaincode.QueryEventsByAgent(agent_id)
@@ -127,7 +174,74 @@ class FabricClient:
         return self.chaincode.QueryEventsByDecision(decision)
 
     def verify_evidence_hash(self, evidence_reference: str, recalculated_hash: str) -> dict[str, Any]:
-        return self.chaincode.VerifyEvidenceReference(evidence_reference, recalculated_hash)
+        mode = os.environ.get("FABRIC_GATEWAY_MODE", "simulator").strip().lower()
+
+        if mode not in {"simulator", "live"}:
+            raise ValueError(
+                "Invalid FABRIC_GATEWAY_MODE. Expected 'simulator' or 'live'."
+            )
+
+        if mode == "simulator":
+            return self.chaincode.VerifyEvidenceReference(
+                evidence_reference, recalculated_hash
+            )
+
+        base_url = os.environ.get(
+            "FABRIC_GATEWAY_URL", "http://127.0.0.1:8090"
+        ).rstrip("/")
+        endpoint = f"{base_url}/v1/evidence/verify"
+        payload = {
+            "evidence_ref": evidence_reference,
+            "expected_hash": recalculated_hash,
+        }
+
+        try:
+            with httpx.Client(timeout=5.0, trust_env=False) as client:
+                response = client.post(endpoint, json=payload)
+                response.raise_for_status()
+                body = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise RuntimeError(
+                f"Live Fabric Gateway verification failed at {endpoint}; "
+                "no verification result was obtained. Check the bridge and "
+                "Fabric network. The request was not replaced with a "
+                "simulator result."
+            ) from exc
+
+        if not isinstance(body, dict) or body.get("status") != "SUCCESS":
+            raise RuntimeError(
+                "Live Fabric Gateway returned an unsuccessful or malformed response."
+            )
+
+        result = body.get("result")
+        required_fields = {
+            "found", "stored_hash", "recalculated_hash", "verified", "status"
+        }
+        if not isinstance(result, dict) or not required_fields.issubset(result):
+            raise RuntimeError(
+                "Live Fabric Gateway response is missing required verification fields."
+            )
+
+        if (
+            not isinstance(result["found"], bool)
+            or not isinstance(result["verified"], bool)
+            or not all(
+                isinstance(result[key], str)
+                for key in ("stored_hash", "recalculated_hash", "status")
+            )
+        ):
+            raise RuntimeError(
+                "Live Fabric Gateway returned invalid verification field types."
+            )
+
+        return {
+            "found": result["found"],
+            "stored_hash": result["stored_hash"],
+            "recalculated_hash": result["recalculated_hash"],
+            "verified": result["verified"],
+            "status": result["status"],
+            "source": "hyperledger_fabric_gateway",
+        }
 
     def get_blocks(self) -> dict[str, Any]:
         return self.ledger_service.get_ledger_summary()
