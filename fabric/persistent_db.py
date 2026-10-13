@@ -553,7 +553,7 @@ class PersistentStorageEngine:
                         # Lock has expired! Reclaim lock with incremented fencing token
                         new_fencing = cur_fencing + 1
                         cursor.execute("""
-                            UPDATE in_flight_locks 
+                            UPDATE in_flight_locks
                             SET owner_id = ?, fencing_token = ?, created_at = ?, expires_at = ?
                             WHERE scoped_key = ?
                         """, (actual_owner, new_fencing, now, new_expires, scoped_key))

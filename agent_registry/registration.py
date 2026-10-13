@@ -36,7 +36,7 @@ class AgentRegistry:
         Returns agent registration record. Private key is NEVER returned if public_key_pem is supplied.
         """
         capabilities = capabilities or ["CREATE_PURCHASE_ORDER", "CREATE_REIMBURSEMENT", "TRANSFER_FUNDS"]
-        
+
         if public_key_pem:
             cert_pem, fingerprint = self.cert_manager.issue_agent_certificate_from_pubkey(
                 agent_id=agent_id,

@@ -25,7 +25,7 @@ def test_finding_1_atomic_resume_validator_prevents_toctou():
     """Verify that atomic resume validator prevents TOCTOU race conditions."""
     agent_id = f"AGENT-TOCTOU-{uuid.uuid4().hex[:4]}"
     agent_registry.register_agent(agent_id=agent_id, agent_name="TOCTOUAgent")
-    
+
     # Create ticket
     app_record = action_gateway.approval_manager.create_approval_request(
         request_id=f"REQ-TOCTOU-{uuid.uuid4().hex[:4]}",
@@ -44,10 +44,10 @@ def test_finding_1_atomic_resume_validator_prevents_toctou():
 
     # Attempt resume approval
     res = action_gateway.process_human_approval_resume(app_id, approver_id="HUMAN_SUPERVISOR_01", provided_token=token)
-    
+
     assert res["decision"] == "BLOCKED"
     assert "RESUME_VALIDATION_FAILED" in res["reason"]
-    
+
     # Confirm ticket was NOT consumed because atomic validation failed
     ticket_after = action_gateway.approval_manager.get_approval_by_id(app_id)
     assert ticket_after["status"] != "APPROVED"
@@ -57,7 +57,7 @@ def test_finding_2_top_level_delegation_token_revalidated_on_resume():
     """Verify that top-level delegation tokens are captured and re-validated during approval resume."""
     issuer_id = f"AGENT-ISSUER-{uuid.uuid4().hex[:4]}"
     delegate_id = f"AGENT-DEL-{uuid.uuid4().hex[:4]}"
-    
+
     reg_issuer = agent_registry.register_agent(agent_id=issuer_id, agent_name="IssuerAgent")
     agent_registry.register_agent(agent_id=delegate_id, agent_name="DelegateAgent")
 

@@ -354,7 +354,7 @@ def login_for_access_token(req: LoginRequest):
         admin_role = AdminRole(req.role)
     except Exception:
         raise HTTPException(status_code=400, detail=f"Invalid Admin Role '{req.role}'. Must be one of {[r.value for r in AdminRole]}")
-    
+
     token = JWTAuthManager.create_admin_token(role=admin_role.value, identity_id=req.username)
     return {
         "access_token": token,
@@ -677,7 +677,7 @@ def create_purchase_order(req: PurchaseOrderRequest, role: AdminRole = Depends(c
     agent_rec = agent_registry.get_agent(req.agent_id)
     if not agent_rec:
         raise HTTPException(status_code=404, detail=f"Agent '{req.agent_id}' not registered.")
-    
+
     req_id = f"REQ-PO-{uuid.uuid4().hex[:6]}"
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     nonce = f"N-PO-{uuid.uuid4().hex[:8]}"
@@ -711,7 +711,7 @@ def create_fund_transfer(req: FundTransferRequest, role: AdminRole = Depends(che
     agent_rec = agent_registry.get_agent(req.agent_id)
     if not agent_rec:
         raise HTTPException(status_code=404, detail=f"Agent '{req.agent_id}' not registered.")
-    
+
     req_id = f"REQ-FT-{uuid.uuid4().hex[:6]}"
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     nonce = f"N-FT-{uuid.uuid4().hex[:8]}"
@@ -963,7 +963,7 @@ def get_fabric_network_status():
     latest_block = blocks_data.get("blocks", [{}])[-1] if blocks_data.get("blocks") else {}
     txs = latest_block.get("transactions", [])
     latest_tx_id = txs[0].get("tx_id", "tx-genesis-000") if txs else "tx-genesis-000"
-    
+
     return {
         "network": "Fabric-Compatible Permissioned Ledger Simulator",
         "channel": "agenttrust-channel",

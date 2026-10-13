@@ -21,7 +21,7 @@ class TestProductionResilience(unittest.TestCase):
             # Check secret validation logic
             env_profile = os.environ.get("AGENTTRUST_ENV", "development").lower()
             gateway_secret = os.environ.get("GATEWAY_SECRET")
-            
+
             is_violating = env_profile in ("production", "prod") and (
                 not gateway_secret or gateway_secret in ("default_secret_key_change_in_production", "secret")
             )
