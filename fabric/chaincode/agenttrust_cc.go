@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/hyperledger/fabric-chaincode-go/shim"
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
@@ -220,6 +222,31 @@ func (c *AgentTrustContract) RecordActionEvent(
 	return &eventRecord, nil
 }
 
+func (c *AgentTrustContract) GetActionEvent(
+	ctx contractapi.TransactionContextInterface,
+	eventID string,
+) (*ActionEvent, error) {
+	if eventID == "" {
+		return nil, fmt.Errorf("event ID must not be empty")
+	}
+
+	key := fmt.Sprintf("EVENT_%s", eventID)
+	eventBytes, err := ctx.GetStub().GetState(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read action event: %w", err)
+	}
+	if eventBytes == nil {
+		return nil, fmt.Errorf("action event '%s' not found", eventID)
+	}
+
+	var event ActionEvent
+	if err := json.Unmarshal(eventBytes, &event); err != nil {
+		return nil, fmt.Errorf("failed to decode action event '%s': %w", eventID, err)
+	}
+
+	return &event, nil
+}
+
 // VerifyEvidenceReference verifies an off-chain recalculated evidence hash against ledger state
 func (c *AgentTrustContract) VerifyEvidenceReference(
 	ctx contractapi.TransactionContextInterface,
@@ -274,6 +301,28 @@ func main() {
 		return
 	}
 
+	// CCAAS mode: run as a standalone chaincode service when configured.
+	if address := os.Getenv("CHAINCODE_SERVER_ADDRESS"); address != "" {
+		ccid := os.Getenv("CHAINCODE_ID")
+		if ccid == "" {
+			fmt.Println("Error starting CCAAS: CHAINCODE_ID is required")
+			return
+		}
+
+		server := &shim.ChaincodeServer{
+			CCID:     ccid,
+			Address:  address,
+			CC:       cc,
+			TLSProps: shim.TLSProperties{Disabled: true},
+		}
+
+		if err := server.Start(); err != nil {
+			fmt.Printf("Error starting CCAAS chaincode server: %s\n", err)
+		}
+		return
+	}
+
+	// Preserve the existing default startup behavior.
 	if err := cc.Start(); err != nil {
 		fmt.Printf("Error starting AgentTrust chaincode: %s\n", err)
 	}
