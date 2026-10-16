@@ -7,7 +7,7 @@ Enforces non-exportable private key handles and explicit passphrase authenticati
 import base64
 import os
 import secrets
-from typing import Any
+from typing import Any, cast
 import rsa
 
 from identity_manager.key_manager import KeyManager
@@ -113,7 +113,7 @@ class KMSProvider:
                         import ctypes
                         cdll = ctypes.CDLL(self.softhsm_lib)
                         probe_session = token.open(rw=True)
-                        cdll.C_Logout(ctypes.c_ulong(probe_session.handle))
+                        cdll.C_Logout(ctypes.c_ulong(getattr(probe_session, "_handle")))
                         probe_session.close()
                     except Exception:
                         pass
@@ -211,11 +211,17 @@ class KMSProvider:
 
         if meta.get("provider") == "REAL_SOFT_HSM2_PKCS11" and self._pkcs11_session:
             key_id = meta["pkcs11_key_id"]
-            priv_key = self._pkcs11_session.get_key(
-                object_class=pkcs11.ObjectClass.PRIVATE_KEY,
-                id=key_id
+            priv_key = cast(
+                pkcs11.PrivateKey,
+                self._pkcs11_session.get_key(
+                    object_class=pkcs11.ObjectClass.PRIVATE_KEY,
+                    id=key_id,
+                ),
             )
-            raw_sig = priv_key.sign(payload_bytes, mechanism=Mechanism.SHA256_RSA_PKCS)
+            raw_sig = priv_key.sign(
+                payload_bytes,
+                mechanism=Mechanism.SHA256_RSA_PKCS,
+            )
             return base64.b64encode(raw_sig).decode('utf-8')
         else:
             priv_key_obj = meta.get("_priv_key_obj")
