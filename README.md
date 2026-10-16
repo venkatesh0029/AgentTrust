@@ -585,6 +585,7 @@ Detailed technical specifications and design guides are available in the [`docum
 | 📊 [`benchmarks/DATASET_PROVENANCE.md`](benchmarks/DATASET_PROVENANCE.md) | Dataset versioning, annotation rules, Wilson CIs, and benchmark provenance. |
 | 📐 [`documentation/standards_alignment.md`](documentation/standards_alignment.md) | Alignment mapping with ISO 27001, SOC 2, and NIST AI RMF. |
 | ⚙️ [`fabric/production_deployment_guide.md`](fabric/production_deployment_guide.md) | Guide for deploying against real multi-organization Fabric network. |
+| 📘 [`fabric/retry_recovery_runbook.md`](fabric/retry_recovery_runbook.md) | Operational incident response and recovery runbook for retry and reconciliation events. |
 | 📊 [`documentation/complete_project_overview.md`](documentation/complete_project_overview.md) | High-level project summary and executive report. |
 
 ---
@@ -612,8 +613,24 @@ AgentTrust enforces verifiable safety invariants across independent operating-sy
 - **Uncertain External Outcomes**: If a network timeout occurs after external API invocation, recovery workers query authoritative transaction status via `query_transaction_status` using stable identifiers before retrying, avoiding duplicate transfers.
 - **Multi-Worker Reconciliation Races**: Multiple independent workers processing the durable outbox queue commit pending ledger items without duplicating ledger entries.
 
-### 5. Architectural Guarantees & Deployment Boundaries
-- **Guaranteed Semantics**: **Durable reconciliation with at-most-once execution guarantees under specified assumptions** (authoritative status lookup, downstream idempotency keys, and crash-resilient intent state machines).
+### 5. Retry Reliability and Delivery Semantics
+AgentTrust coordinates retry workers using persistent leases and monotonic fencing tokens. Before a retry write, the worker validates its lease and reconciles the event against the ledger. Database finalization is guarded by the lease owner and fencing token.
+
+**Reliability boundary**: a lease controls ownership of a retry record; it does not cancel an external Fabric transaction that has already been submitted. A lease may expire while a write is still in flight. Fencing tokens prevent stale workers from performing guarded database mutations, but they cannot revoke an external operation already accepted by a downstream system.
+
+The retry workflow therefore uses ledger reconciliation to resolve uncertain outcomes:
+- **Matching ledger event**: finalize the retry record under the active fencing token.
+- **Conflicting ledger event**: route the record to the dead-letter queue for investigation.
+- **Ledger query failure or timeout**: preserve uncertainty, keep the record pending, and do not issue a new write.
+- **Absent event in live mode**: return `RETRY_FAILED: LIVE_LEDGER_STATE_UNCERTAIN`; do not blindly resubmit.
+- **Write succeeded but finalization failed**: return `RETRY_FAILED: FINALIZATION_ERROR_RECONCILE_REQUIRED` and reconcile the event before any subsequent submission.
+
+These controls improve recovery safety but do not establish universal exactly-once execution. Safe recovery depends on authoritative ledger queries, deterministic event identity, persistent state integrity, and the downstream ledger's actual transaction and deduplication semantics.
+
+For incident response and operator procedures, see [`fabric/retry_recovery_runbook.md`](fabric/retry_recovery_runbook.md).
+
+### 6. Architectural Guarantees & Deployment Boundaries
+- **Delivery semantics and deployment boundary**: AgentTrust uses persistent retry records, leases, fencing tokens, and ledger reconciliation to recover from uncertain outcomes. These mechanisms do not independently guarantee at-most-once external execution or universal exactly-once processing. A write may remain in flight after its retry lease expires; uncertain live-ledger outcomes must be reconciled before resubmission. Multi-host deployment also requires a shared persistence layer with the required atomicity and consistency properties.
 - **Storage Topology Constraint**: SQLite provides atomic multi-worker coordination on a **single host**. For multi-host distributed gateway instances, a linearizable database or distributed lock manager (e.g., PostgreSQL with row-level locks, etcd, or Consul) is required.
 
 ---

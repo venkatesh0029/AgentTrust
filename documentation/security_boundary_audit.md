@@ -97,6 +97,31 @@ The audit evaluates six discrete execution paths:
 - **Test Evidence**:
   - `tests/test_production_readiness_audit.py`: `test_clock_assumptions_and_lock_reclamation_across_restarts`.
 
+### 3.7. Retry Lease Expiry and External Side-Effect Boundary
+- **Assets and State**: Persistent retry records, lease ownership, monotonic fencing tokens, external Fabric action events, and dead-letter records.
+- **Threat**: A retry worker submits an external Fabric write, becomes delayed or loses connectivity, and its lease expires before the write's outcome is finalized. A second worker may then acquire a newer fencing token while the first external operation remains in flight.
+- **Enforced Controls**:
+  1. Atomic retry claims establish the current lease owner and increment the fencing token.
+  2. Retry-record reads fail closed when persisted state cannot be read or decoded.
+  3. The worker validates its claim immediately before the retry write.
+  4. Retry finalization and dead-letter transitions are guarded by the active owner and fencing token.
+  5. Ledger query failures preserve uncertainty and do not increment the retry count.
+  6. In live mode, an absent event is treated as uncertain rather than permission to blindly resubmit.
+  7. If the external write succeeds but finalization fails, the record remains subject to reconciliation.
+- **Boundary**: Fencing protects guarded database mutations. It cannot cancel or retroactively fence an external Fabric write already submitted by a stale worker. Pre-write validation narrows the race window but does not eliminate the possibility that a lease expires immediately after validation.
+- **Recovery Requirements**:
+  - Reconcile using the deterministic event identity and compare the expected event fields.
+  - Finalize a matching event only under a valid current claim.
+  - Route conflicting events to the dead-letter queue and investigate the discrepancy.
+  - On query failure or timeout, preserve the pending state and retry reconciliation later.
+  - Do not manually delete, reset, or resubmit an uncertain live-mode record solely because a query returned no event.
+  - Treat persistent-storage errors and finalization failures as recovery events requiring investigation rather than evidence that the external operation did not occur.
+- **Residual Risk**: Recovery depends on the ledger query being authoritative for the relevant event and on the ledger's actual commit, visibility, and deduplication semantics. These controls do not establish universal exactly-once execution. Any stronger claim requires additional downstream guarantees and evidence.
+- **Operational Reference**: [`../fabric/retry_recovery_runbook.md`](../fabric/retry_recovery_runbook.md).
+- **Test Evidence**:
+  - `tests/test_retry_lease.py`: `test_two_competing_workers_exactly_one_acquires_lease`, `test_expired_owner_finalization_fails_even_before_reclamation`.
+  - `tests/test_retry_reconciliation.py`: `test_finalization_error_after_successful_write_requires_reconciliation`, `test_claim_superseded_during_ledger_query_blocks_write`, `test_live_absent_event_releases_lease_without_write`.
+
 ---
 
 ## 4. Audit Conclusion & Production Readiness Verdict

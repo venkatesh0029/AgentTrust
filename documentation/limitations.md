@@ -23,6 +23,14 @@ While AgentTrust provides a robust, empirical 10/10 security framework for AI pr
 - **Current State**: Agent private keys are stored in encrypted PEM format on local disk using AES-256-GCM.
 - **Limitation**: High-security enterprise environments require Hardware Security Modules (HSM) or AWS KMS / HashiCorp Vault key management integrations.
 
+### 5. In-Flight External Writes and Retry Recovery
+- **Current State**: AgentTrust uses persistent retry records, worker lease acquisition with explicit TTLs, monotonic fencing tokens, and authoritative ledger queries to reconcile uncertain submission outcomes.
+- **Limitation**: A retry lease governs ownership of a persistent retry record; it does not cancel an external Fabric write that is already in flight. If a lease expires while a write is pending, another worker may acquire the record even though the earlier operation can still complete.
+  - Monotonic fencing tokens protect guarded persistence operations, but they cannot revoke a write already submitted to the external ledger. Pre-write lease validation reduces the race window without eliminating it.
+  - AgentTrust mitigates this condition through ledger reconciliation, guarded finalization, fail-closed handling of persistence errors, and dead-letter routing for conflicting events. In live mode, an absent event is treated as uncertain, and query failures do not authorize a new write.
+  - Consequently, the implementation does not guarantee universal exactly-once external execution. Recovery depends on authoritative ledger visibility, deterministic event identity, and downstream transaction semantics. If the ledger cannot resolve the outcome, the retry record must remain subject to reconciliation or operator investigation rather than being blindly resubmitted.
+  - Operational recovery procedures are documented in [`../fabric/retry_recovery_runbook.md`](../fabric/retry_recovery_runbook.md).
+
 ---
 
 ## 2. Future Scope & Research Directions
