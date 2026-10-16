@@ -15,3 +15,4 @@ ruff>=0.1.0
 mypy>=1.7.0
 redis>=5.0.0
 python-pkcs11>=0.7.0
+rsa>=4.9.0
