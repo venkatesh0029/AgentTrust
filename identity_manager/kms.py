@@ -212,7 +212,7 @@ class KMSProvider:
         if meta.get("provider") == "REAL_SOFT_HSM2_PKCS11" and self._pkcs11_session:
             key_id = meta["pkcs11_key_id"]
             priv_key = cast(
-                pkcs11.PrivateKey,
+                Any,
                 self._pkcs11_session.get_key(
                     object_class=pkcs11.ObjectClass.PRIVATE_KEY,
                     id=key_id,
