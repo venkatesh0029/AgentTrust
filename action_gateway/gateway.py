@@ -3,6 +3,7 @@ import datetime
 import hashlib
 import json
 import math
+import os
 import uuid
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
@@ -998,7 +999,9 @@ class ActionGateway:
             blockchain_commit = {
                 "block_index": -1,
                 "block_hash": "PENDING_RETRY",
-                "status": ledger_status
+                "status": ledger_status,
+                "mode": os.environ.get("FABRIC_GATEWAY_MODE", "simulator").strip().lower(),
+                "source": "outbox_pending_retry"
             }
             # Enqueue failed commit into durable reconciliation outbox
             self.retry_queue.enqueue_failed_commit(
@@ -1049,7 +1052,9 @@ class ActionGateway:
                 "event_id": event_id,
                 "block_index": blockchain_commit["block_index"],
                 "block_hash": blockchain_commit["block_hash"],
-                "status": ledger_status
+                "status": ledger_status,
+                "mode": blockchain_commit.get("mode", "simulator") if isinstance(blockchain_commit, dict) else "simulator",
+                "source": blockchain_commit.get("source", "fabric_simulator") if isinstance(blockchain_commit, dict) else "unknown"
             }
         }
 
