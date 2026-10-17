@@ -168,5 +168,119 @@ class TestFabricClientGetEvent(unittest.TestCase):
             self.client.get_event("EVT-1")
 
 
+class TestFabricClientRecordActionEvent(unittest.TestCase):
+    def setUp(self):
+        self.client = FabricClient()
+        self.sample_event = {
+            "event_id": "EVT-AUDIT-100",
+            "request_id": "REQ-AUDIT-100",
+            "agent_id": "AGENT-001",
+            "action": "TRANSFER_FUNDS",
+            "resource": "BANK_RESERVE_IN",
+            "decision": "ALLOWED",
+            "reason": "VALID_POLICY",
+            "policy_id": "POL-FIN-01",
+            "policy_version": "1.0",
+            "evidence_reference": "EVID-100",
+            "evidence_hash": "a" * 64,
+        }
+
+    def test_record_action_event_simulator_mode(self):
+        with patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "simulator"}):
+            result = self.client.record_action_event(**self.sample_event)
+
+        self.assertEqual(result["status"], "COMMITTED")
+        self.assertEqual(result["mode"], "simulator")
+        self.assertEqual(result["source"], "fabric_simulator")
+        self.assertIn("chaincode_result", result)
+
+    def test_record_action_event_live_mode_success(self):
+        expected_chaincode_result = {
+            "docType": "action_event",
+            "event_id": self.sample_event["event_id"],
+            "decision": "ALLOWED",
+        }
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "status": "COMMITTED",
+            "result": expected_chaincode_result,
+        }
+
+        with (
+            patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live", "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090"}),
+            patch.object(httpx.Client, "post", return_value=mock_response) as post_mock,
+        ):
+            result = self.client.record_action_event(**self.sample_event)
+
+        self.assertEqual(result["status"], "COMMITTED")
+        self.assertEqual(result["mode"], "live")
+        self.assertEqual(result["source"], "hyperledger_fabric_gateway")
+        self.assertEqual(result["chaincode_result"], expected_chaincode_result)
+        post_mock.assert_called_once_with(
+            "http://127.0.0.1:8090/v1/action-events",
+            json=self.sample_event,
+        )
+
+    def test_record_action_event_live_mode_uncertain_502(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 502
+        mock_response.json.return_value = {
+            "status": "FABRIC_SUBMISSION_UNCERTAIN",
+            "error": "Fabric transaction was not confirmed; reconcile event_id before retrying",
+        }
+
+        with (
+            patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live", "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090"}),
+            patch.object(httpx.Client, "post", return_value=mock_response),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            self.client.record_action_event(**self.sample_event)
+
+        self.assertIn("uncertain", str(ctx.exception).lower())
+        self.assertIn("reconcile event_id", str(ctx.exception).lower())
+
+    def test_record_action_event_live_mode_network_failure(self):
+        with (
+            patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live"}),
+            patch.object(httpx.Client, "post", side_effect=httpx.ConnectError("Connection refused")),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            self.client.record_action_event(**self.sample_event)
+
+        self.assertIn("submission failed", str(ctx.exception).lower())
+
+    def test_record_action_event_live_mode_missing_fields_validation(self):
+        invalid_event = dict(self.sample_event)
+        invalid_event["event_id"] = "   "
+
+        with (
+            patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live"}),
+            self.assertRaises(ValueError) as ctx,
+        ):
+            self.client.record_action_event(**invalid_event)
+
+        self.assertIn("event_id must be a non-empty string", str(ctx.exception))
+
+    def test_record_action_event_live_mode_non_committed_status(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "status": "PENDING_CONSENSUS",
+        }
+
+        with (
+            patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live"}),
+            patch.object(httpx.Client, "post", return_value=mock_response),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            self.client.record_action_event(**self.sample_event)
+
+        self.assertIn("non-committed status", str(ctx.exception).lower())
+
+
 if __name__ == "__main__":
     unittest.main()
+

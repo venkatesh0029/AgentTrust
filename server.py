@@ -48,9 +48,34 @@ CURRENT_MODE = os.environ.get("AGENTTRUST_MODE", "MODE_D_AGENTTRUST_FABRIC")
 ENV_PROFILE = os.environ.get("AGENTTRUST_ENV", "development").lower()
 
 _ENV_GATEWAY_SECRET = os.environ.get("GATEWAY_SECRET")
-if ENV_PROFILE in ("production", "prod"):
-    if not _ENV_GATEWAY_SECRET or _ENV_GATEWAY_SECRET in ("default_secret_key_change_in_production", "secret"):
-        raise RuntimeError("SECURITY VIOLATION: Production environment requires explicit secure GATEWAY_SECRET. Refusing to initialize with default secrets.")
+
+
+def validate_production_configuration(env_profile: str, current_mode: str) -> None:
+    """Validates that production environment configuration fails closed against unsafe settings."""
+    if env_profile in ("production", "prod"):
+        gateway_secret = os.environ.get("GATEWAY_SECRET")
+        if not gateway_secret or gateway_secret in ("default_secret_key_change_in_production", "secret"):
+            raise RuntimeError(
+                "SECURITY VIOLATION: Production environment requires explicit secure GATEWAY_SECRET. "
+                "Refusing to initialize with default secrets."
+            )
+        if current_mode == "MODE_D_AGENTTRUST_FABRIC":
+            fabric_mode = os.environ.get("FABRIC_GATEWAY_MODE", "").strip().lower()
+            if fabric_mode != "live":
+                raise RuntimeError(
+                    "SECURITY VIOLATION: Production Mode D requires live Fabric gateway mode "
+                    f"(FABRIC_GATEWAY_MODE=live). Found '{fabric_mode or 'unset'}'. "
+                    "Refusing to run in production with simulator ledger."
+                )
+            fabric_url = os.environ.get("FABRIC_GATEWAY_URL", "").strip()
+            if not fabric_url:
+                raise RuntimeError(
+                    "SECURITY VIOLATION: Production Mode D requires explicit FABRIC_GATEWAY_URL. "
+                    "Refusing to run in production with missing gateway URL."
+                )
+
+
+validate_production_configuration(ENV_PROFILE, CURRENT_MODE)
 
 if not _ENV_GATEWAY_SECRET:
     import secrets
@@ -530,13 +555,28 @@ def process_request_with_mode(payload: dict[str, Any]) -> dict[str, Any]:
         res = action_gateway.process_request(payload)
         res["mode"] = "MODE_C_AGENTTRUST_NO_FABRIC"
         res["fabric_committed"] = False
+        res["fabric_simulated"] = False
         return res
 
     else:
         # Mode D: Full AgentTrust w/ Fabric
         res = action_gateway.process_request(payload)
         res["mode"] = "MODE_D_AGENTTRUST_FABRIC"
-        res["fabric_committed"] = True
+        bc = res.get("blockchain") or {}
+        bc_status = bc.get("status")
+        bc_mode = bc.get("mode")
+
+        if bc_status == "COMMITTED" and bc_mode == "live":
+            res["fabric_committed"] = True
+            res["fabric_simulated"] = False
+        elif bc_status == "COMMITTED" and bc_mode == "simulator":
+            res["fabric_committed"] = False
+            res["fabric_simulated"] = True
+        else:
+            # Commit failed, pending retry in outbox, or uncertain
+            res["fabric_committed"] = False
+            res["fabric_simulated"] = False
+            res["fabric_pending_retry"] = True
         return res
 
 # --- REST API Endpoints ---
@@ -572,6 +612,10 @@ def set_operational_mode(req: ModeRequest, role: AdminRole = Depends(check_admin
     valid_modes = ["MODE_A_DIRECT_API", "MODE_B_AUTH_RBAC", "MODE_C_AGENTTRUST_NO_FABRIC", "MODE_D_AGENTTRUST_FABRIC"]
     if req.mode not in valid_modes:
         raise HTTPException(status_code=400, detail=f"Invalid mode. Must be one of {valid_modes}")
+    try:
+        validate_production_configuration(ENV_PROFILE, req.mode)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     CURRENT_MODE = req.mode
     return {"success": True, "current_mode": CURRENT_MODE, "authorized_by": role.value}
 
