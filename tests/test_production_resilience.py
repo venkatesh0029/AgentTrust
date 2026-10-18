@@ -160,13 +160,13 @@ class TestTruthfulFabricCommitReporting(unittest.TestCase):
     """Verifies server proxy truthfully reports live vs simulated vs retry states."""
 
     def test_truthful_reporting_for_simulated_commit(self):
-        """Simulated commit must report fabric_committed=False and fabric_simulated=True."""
+        """Simulated commit must report fabric_committed=False, fabric_simulated=True, and no retry/uncertainty."""
         import server
         mock_result = {
             "blockchain": {
                 "status": "COMMITTED",
                 "mode": "simulator",
-                "source": "fabric_simulator"
+                "source": "fabric_simulator",
             }
         }
         with (
@@ -178,15 +178,17 @@ class TestTruthfulFabricCommitReporting(unittest.TestCase):
 
         self.assertFalse(res["fabric_committed"])
         self.assertTrue(res["fabric_simulated"])
+        self.assertFalse(res["fabric_pending_retry"])
+        self.assertFalse(res["fabric_submission_uncertain"])
 
     def test_truthful_reporting_for_live_commit(self):
-        """Live commit confirmed by bridge must report fabric_committed=True and fabric_simulated=False."""
+        """Live commit confirmed by bridge must report fabric_committed=True, fabric_simulated=False, and no retry/uncertainty."""
         import server
         mock_result = {
             "blockchain": {
                 "status": "COMMITTED",
                 "mode": "live",
-                "source": "hyperledger_fabric_gateway"
+                "source": "hyperledger_fabric_gateway",
             }
         }
         with (
@@ -198,6 +200,8 @@ class TestTruthfulFabricCommitReporting(unittest.TestCase):
 
         self.assertTrue(res["fabric_committed"])
         self.assertFalse(res["fabric_simulated"])
+        self.assertFalse(res["fabric_pending_retry"])
+        self.assertFalse(res["fabric_submission_uncertain"])
 
     def test_truthful_reporting_for_pending_retry_or_failed_commit(self):
         """Failed commit enqueued to outbox must report fabric_committed=False and fabric_pending_retry=True."""
@@ -206,7 +210,7 @@ class TestTruthfulFabricCommitReporting(unittest.TestCase):
             "blockchain": {
                 "status": "COMMIT_FAILED: Live Fabric Gateway submission failed",
                 "mode": "live",
-                "source": "outbox_pending_retry"
+                "source": "outbox_pending_retry",
             }
         }
         with (
@@ -219,6 +223,52 @@ class TestTruthfulFabricCommitReporting(unittest.TestCase):
         self.assertFalse(res["fabric_committed"])
         self.assertFalse(res["fabric_simulated"])
         self.assertTrue(res["fabric_pending_retry"])
+        self.assertFalse(res["fabric_submission_uncertain"])
+
+    def test_truthful_reporting_for_failed_commit_not_in_outbox(self):
+        """Non-committed response without outbox marker must report fabric_pending_retry=False."""
+        import server
+        mock_result = {
+            "blockchain": {
+                "status": "COMMIT_FAILED: Local policy rejection",
+                "mode": "live",
+                "source": "direct_failure",
+            }
+        }
+        with (
+            patch.object(server.action_gateway, "process_request", return_value=mock_result),
+            patch.object(server, "CURRENT_MODE", "MODE_D_AGENTTRUST_FABRIC"),
+        ):
+            payload = {"action": "TRANSFER_FUNDS", "request_id": "REQ-4", "agent_id": "AGT-4"}
+            res = server.process_request_with_mode(payload)
+
+        self.assertFalse(res["fabric_committed"])
+        self.assertFalse(res["fabric_simulated"])
+        self.assertFalse(res["fabric_pending_retry"])
+        self.assertFalse(res["fabric_submission_uncertain"])
+
+    def test_truthful_reporting_for_uncertain_submission(self):
+        """Uncertain queued submission must report fabric_pending_retry=True and fabric_submission_uncertain=True."""
+        import server
+        mock_result = {
+            "blockchain": {
+                "status": "COMMIT_FAILED: FABRIC_SUBMISSION_UNCERTAIN: Timeout",
+                "mode": "live",
+                "source": "outbox_pending_retry",
+                "submission_uncertain": True,
+            }
+        }
+        with (
+            patch.object(server.action_gateway, "process_request", return_value=mock_result),
+            patch.object(server, "CURRENT_MODE", "MODE_D_AGENTTRUST_FABRIC"),
+        ):
+            payload = {"action": "TRANSFER_FUNDS", "request_id": "REQ-5", "agent_id": "AGT-5"}
+            res = server.process_request_with_mode(payload)
+
+        self.assertFalse(res["fabric_committed"])
+        self.assertFalse(res["fabric_simulated"])
+        self.assertTrue(res["fabric_pending_retry"])
+        self.assertTrue(res["fabric_submission_uncertain"])
 
 
 if __name__ == "__main__":

@@ -217,6 +217,8 @@ class TestFabricClientRecordActionEvent(unittest.TestCase):
         self.assertEqual(result["status"], "COMMITTED")
         self.assertEqual(result["mode"], "live")
         self.assertEqual(result["source"], "hyperledger_fabric_gateway")
+        self.assertIsNone(result["block_index"])
+        self.assertIsNone(result["block_hash"])
         self.assertEqual(result["chaincode_result"], expected_chaincode_result)
         post_mock.assert_called_once_with(
             "http://127.0.0.1:8090/v1/action-events",
@@ -249,7 +251,19 @@ class TestFabricClientRecordActionEvent(unittest.TestCase):
         ):
             self.client.record_action_event(**self.sample_event)
 
-        self.assertIn("submission failed", str(ctx.exception).lower())
+        self.assertIn("FABRIC_SUBMISSION_UNCERTAIN", str(ctx.exception))
+        self.assertIn("reconcile event_id", str(ctx.exception).lower())
+
+    def test_record_action_event_live_mode_timeout_raises_uncertain(self):
+        with (
+            patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live"}),
+            patch.object(httpx.Client, "post", side_effect=httpx.TimeoutException("Read timed out")),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            self.client.record_action_event(**self.sample_event)
+
+        self.assertIn("FABRIC_SUBMISSION_UNCERTAIN", str(ctx.exception))
+        self.assertIn("reconcile event_id", str(ctx.exception).lower())
 
     def test_record_action_event_live_mode_missing_fields_validation(self):
         invalid_event = dict(self.sample_event)
@@ -263,12 +277,59 @@ class TestFabricClientRecordActionEvent(unittest.TestCase):
 
         self.assertIn("event_id must be a non-empty string", str(ctx.exception))
 
-    def test_record_action_event_live_mode_non_committed_status(self):
+    def test_record_action_event_live_mode_http_400_rejected(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.text = '{"error": "Invalid action event payload"}'
+
+        with (
+            patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live", "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090"}),
+            patch.object(httpx.Client, "post", return_value=mock_response),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            self.client.record_action_event(**self.sample_event)
+
+        self.assertIn("FABRIC_SUBMISSION_REJECTED", str(ctx.exception))
+        self.assertNotIn("FABRIC_SUBMISSION_UNCERTAIN", str(ctx.exception))
+
+    def test_record_action_event_live_mode_http_500_uncertain(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+
+        with (
+            patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live", "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090"}),
+            patch.object(httpx.Client, "post", return_value=mock_response),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            self.client.record_action_event(**self.sample_event)
+
+        self.assertIn("FABRIC_SUBMISSION_UNCERTAIN", str(ctx.exception))
+
+    def test_record_action_event_live_mode_http_302_redirect_raises_uncertain(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 302
+        mock_response.json.return_value = {
+            "status": "COMMITTED",
+            "result": {"event_id": self.sample_event["event_id"]},
+        }
+
+        with (
+            patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live", "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090"}),
+            patch.object(httpx.Client, "post", return_value=mock_response),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            self.client.record_action_event(**self.sample_event)
+
+        self.assertIn("FABRIC_SUBMISSION_UNCERTAIN", str(ctx.exception))
+        self.assertIn("reconcile event_id", str(ctx.exception).lower())
+
+    def test_record_action_event_live_mode_unexpected_body_status_raises_uncertain(self):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.raise_for_status.return_value = None
         mock_response.json.return_value = {
-            "status": "PENDING_CONSENSUS",
+            "status": "SUBMITTED",
         }
 
         with (
@@ -278,7 +339,24 @@ class TestFabricClientRecordActionEvent(unittest.TestCase):
         ):
             self.client.record_action_event(**self.sample_event)
 
-        self.assertIn("non-committed status", str(ctx.exception).lower())
+        self.assertIn("FABRIC_SUBMISSION_UNCERTAIN", str(ctx.exception))
+        self.assertIn("reconcile event_id", str(ctx.exception).lower())
+
+    def test_record_action_event_live_mode_non_dict_body_raises_uncertain(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = ["not", "a", "dict"]
+
+        with (
+            patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live"}),
+            patch.object(httpx.Client, "post", return_value=mock_response),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            self.client.record_action_event(**self.sample_event)
+
+        self.assertIn("FABRIC_SUBMISSION_UNCERTAIN", str(ctx.exception))
+        self.assertIn("malformed", str(ctx.exception).lower())
 
 
 if __name__ == "__main__":

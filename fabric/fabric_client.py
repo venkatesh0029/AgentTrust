@@ -124,16 +124,42 @@ class FabricClient:
                         f"Live Fabric Gateway transaction uncertain ({err_status}): {err_msg}. "
                         "Reconcile event_id before retrying; do not assume event was uncommitted."
                     )
-                response.raise_for_status()
+                if 300 <= response.status_code < 400:
+                    raise RuntimeError(
+                        "FABRIC_SUBMISSION_UNCERTAIN: Live Fabric Gateway returned "
+                        f"unexpected redirect HTTP {response.status_code}. "
+                        "Reconcile event_id before retrying."
+                    )
+                if 400 <= response.status_code < 500:
+                    raise RuntimeError(
+                        "FABRIC_SUBMISSION_REJECTED: Live Fabric Gateway "
+                        f"rejected the request with HTTP {response.status_code}: "
+                        f"{response.text}. Check the request and gateway configuration."
+                    )
+                if response.status_code >= 500:
+                    raise RuntimeError(
+                        "FABRIC_SUBMISSION_UNCERTAIN: Live Fabric Gateway returned "
+                        f"HTTP {response.status_code}. Reconcile event_id before retrying."
+                    )
                 body = response.json()
         except (httpx.HTTPError, ValueError) as exc:
             raise RuntimeError(
-                f"Live Fabric Gateway action-event submission failed at {endpoint}: {exc!s}"
+                "FABRIC_SUBMISSION_UNCERTAIN: Live Fabric Gateway action-event "
+                f"outcome could not be confirmed at {endpoint}: {exc!s}. "
+                "Reconcile event_id before retrying; do not assume the event "
+                "was uncommitted."
             ) from exc
 
         if not isinstance(body, dict) or body.get("status") != "COMMITTED":
+            returned_status = (
+                body.get("status")
+                if isinstance(body, dict)
+                else "malformed"
+            )
             raise RuntimeError(
-                f"Live Fabric Gateway returned non-committed status: {body.get('status') if isinstance(body, dict) else 'malformed'}"
+                "FABRIC_SUBMISSION_UNCERTAIN: Live Fabric Gateway returned "
+                f"an unconfirmed transaction outcome (status={returned_status!r}). "
+                "Reconcile event_id before retrying."
             )
 
         result = body.get("result")
@@ -142,8 +168,8 @@ class FabricClient:
             "mode": "live",
             "source": "hyperledger_fabric_gateway",
             "event_id": event_id,
-            "block_index": 0,
-            "block_hash": "LIVE_FABRIC_TX",
+            "block_index": None,
+            "block_hash": None,
             "chaincode_result": result,
         }
 

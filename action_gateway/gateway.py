@@ -994,14 +994,24 @@ class ActionGateway:
                 evidence_hash=evidence_hash
             )
         except Exception as e:
-            # Failure Recovery: Preserve local evidence safely, do NOT silently claim success!
-            ledger_status = f"COMMIT_FAILED: {e!s}"
+            error_text = str(e)
+            uncertain_markers = (
+                "FABRIC_SUBMISSION_UNCERTAIN",
+                "COMMIT_RESULT_UNPARSEABLE",
+            )
+            submission_uncertain = any(
+                marker in error_text for marker in uncertain_markers
+            )
+            ledger_status = f"COMMIT_FAILED: {error_text}"
             blockchain_commit = {
-                "block_index": -1,
-                "block_hash": "PENDING_RETRY",
+                "block_index": None,
+                "block_hash": None,
                 "status": ledger_status,
-                "mode": os.environ.get("FABRIC_GATEWAY_MODE", "simulator").strip().lower(),
-                "source": "outbox_pending_retry"
+                "mode": os.environ.get(
+                    "FABRIC_GATEWAY_MODE", "simulator"
+                ).strip().lower(),
+                "source": "outbox_pending_retry",
+                "submission_uncertain": submission_uncertain,
             }
             # Enqueue failed commit into durable reconciliation outbox
             self.retry_queue.enqueue_failed_commit(
@@ -1020,7 +1030,7 @@ class ActionGateway:
                     "evidence_reference": evidence_ref,
                     "evidence_hash": evidence_hash
                 },
-                error_msg=str(e)
+                error_msg=error_text,
             )
 
         outcome = {

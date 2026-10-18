@@ -616,18 +616,24 @@ def process_request_with_mode(payload: dict[str, Any]) -> dict[str, Any]:
         bc = res.get("blockchain") or {}
         bc_status = bc.get("status")
         bc_mode = bc.get("mode")
-
-        if bc_status == "COMMITTED" and bc_mode == "live":
+        is_committed = bc_status == "COMMITTED"
+        res["fabric_pending_retry"] = (
+            not is_committed
+            and bc.get("source") == "outbox_pending_retry"
+        )
+        res["fabric_submission_uncertain"] = (
+            not is_committed
+            and bc.get("submission_uncertain") is True
+        )
+        if is_committed and bc_mode == "live":
             res["fabric_committed"] = True
             res["fabric_simulated"] = False
-        elif bc_status == "COMMITTED" and bc_mode == "simulator":
+        elif is_committed and bc_mode == "simulator":
             res["fabric_committed"] = False
             res["fabric_simulated"] = True
         else:
-            # Commit failed, pending retry in outbox, or uncertain
             res["fabric_committed"] = False
             res["fabric_simulated"] = False
-            res["fabric_pending_retry"] = True
         return res
 
 # --- REST API Endpoints ---
