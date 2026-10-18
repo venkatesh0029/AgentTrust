@@ -3,6 +3,7 @@ import datetime
 import os
 import uuid
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,6 +60,40 @@ def validate_production_configuration(env_profile: str, current_mode: str) -> No
                 "SECURITY VIOLATION: Production environment requires explicit secure GATEWAY_SECRET. "
                 "Refusing to initialize with default secrets."
             )
+        cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
+        if not cors_origins:
+            raise RuntimeError(
+                "SECURITY VIOLATION: Production environment requires explicit "
+                "CORS_ORIGINS. Refusing to use development localhost defaults."
+            )
+        parsed_origins = [
+            origin.strip().rstrip("/")
+            for origin in cors_origins.split(",")
+        ]
+        if (
+            not parsed_origins
+            or any(not origin for origin in parsed_origins)
+            or "*" in parsed_origins
+        ):
+            raise RuntimeError(
+                "SECURITY VIOLATION: Production CORS_ORIGINS must contain "
+                "only explicit, non-empty origins and must not contain '*'."
+            )
+        for origin in parsed_origins:
+            parsed = urlsplit(origin)
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise RuntimeError(
+                    "SECURITY VIOLATION: Production CORS_ORIGINS must contain "
+                    "valid HTTPS origins without paths, credentials, or query strings."
+                )
         if current_mode == "MODE_D_AGENTTRUST_FABRIC":
             fabric_mode = os.environ.get("FABRIC_GATEWAY_MODE", "").strip().lower()
             if fabric_mode != "live":

@@ -41,7 +41,8 @@ class TestProductionResilience(unittest.TestCase):
         env = {
             "AGENTTRUST_ENV": "production",
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
-            "FABRIC_GATEWAY_MODE": "simulator"
+            "CORS_ORIGINS": "https://agenttrust.corp.internal",
+            "FABRIC_GATEWAY_MODE": "simulator",
         }
         with patch.dict(os.environ, env):
             with self.assertRaises(RuntimeError) as ctx:
@@ -53,8 +54,9 @@ class TestProductionResilience(unittest.TestCase):
         env = {
             "AGENTTRUST_ENV": "production",
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "CORS_ORIGINS": "https://agenttrust.corp.internal",
             "FABRIC_GATEWAY_MODE": "live",
-            "FABRIC_GATEWAY_URL": ""
+            "FABRIC_GATEWAY_URL": "",
         }
         with patch.dict(os.environ, env):
             with self.assertRaises(RuntimeError) as ctx:
@@ -66,8 +68,9 @@ class TestProductionResilience(unittest.TestCase):
         env = {
             "AGENTTRUST_ENV": "production",
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "CORS_ORIGINS": "https://agenttrust.corp.internal",
             "FABRIC_GATEWAY_MODE": "live",
-            "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090"
+            "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090",
         }
         with patch.dict(os.environ, env):
             # Should not raise
@@ -78,11 +81,79 @@ class TestProductionResilience(unittest.TestCase):
         env = {
             "AGENTTRUST_ENV": "development",
             "GATEWAY_SECRET": "default_secret_key_change_in_production",
-            "FABRIC_GATEWAY_MODE": "simulator"
+            "FABRIC_GATEWAY_MODE": "simulator",
         }
         with patch.dict(os.environ, env):
             # Should not raise in development profile
             validate_production_configuration("development", "MODE_D_AGENTTRUST_FABRIC")
+
+    def test_production_fails_closed_when_cors_origins_missing(self):
+        env = {
+            "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "CORS_ORIGINS": "",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            with self.assertRaises(RuntimeError) as ctx:
+                validate_production_configuration(
+                    "production", "MODE_C_AGENTTRUST_NO_FABRIC"
+                )
+        self.assertIn("explicit CORS_ORIGINS", str(ctx.exception))
+
+    def test_production_rejects_wildcard_cors_origin(self):
+        env = {
+            "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "CORS_ORIGINS": "https://agenttrust.corp.internal,*",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            with self.assertRaises(RuntimeError) as ctx:
+                validate_production_configuration(
+                    "production", "MODE_C_AGENTTRUST_NO_FABRIC"
+                )
+        self.assertIn("must not contain '*'", str(ctx.exception))
+
+    def test_production_rejects_localhost_cors_origin(self):
+        env = {
+            "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "CORS_ORIGINS": "http://localhost:3000",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            with self.assertRaises(RuntimeError) as ctx:
+                validate_production_configuration(
+                    "production", "MODE_C_AGENTTRUST_NO_FABRIC"
+                )
+        self.assertIn("valid HTTPS origins", str(ctx.exception))
+
+    def test_production_rejects_origin_with_path(self):
+        env = {
+            "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "CORS_ORIGINS": "https://agenttrust.corp.internal/path",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            with self.assertRaises(RuntimeError):
+                validate_production_configuration(
+                    "production", "MODE_C_AGENTTRUST_NO_FABRIC"
+                )
+
+    def test_production_rejects_http_origin(self):
+        env = {
+            "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "CORS_ORIGINS": "http://agenttrust.corp.internal",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            with self.assertRaises(RuntimeError):
+                validate_production_configuration(
+                    "production", "MODE_C_AGENTTRUST_NO_FABRIC"
+                )
+
+    def test_production_accepts_explicit_https_cors_origin(self):
+        env = {
+            "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "CORS_ORIGINS": "https://agenttrust.corp.internal",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            validate_production_configuration(
+                "production", "MODE_C_AGENTTRUST_NO_FABRIC"
+            )
 
 
 class TestTruthfulFabricCommitReporting(unittest.TestCase):
