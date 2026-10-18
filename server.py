@@ -286,9 +286,25 @@ app = FastAPI(
     version="2.5.0-Enterprise"
 )
 
+def get_cors_origins() -> list[str]:
+    """Return explicitly configured browser origins; never allow a wildcard."""
+    raw_origins = os.environ.get(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    )
+    origins = [origin.strip().rstrip("/") for origin in raw_origins.split(",")]
+    origins = [origin for origin in origins if origin]
+    if not origins or "*" in origins:
+        raise RuntimeError(
+            "SECURITY VIOLATION: CORS_ORIGINS must contain explicit origins "
+            "and must not contain '*'."
+        )
+    return origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
