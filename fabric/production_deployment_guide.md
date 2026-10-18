@@ -62,13 +62,19 @@ peer lifecycle chaincode commit -o orderer.agenttrust.com:7050 --channelID agent
 
 ## 4. Connecting AgentTrust SDK Bridge
 
-Set the environment variable in `.env` or `config/settings.yaml`:
-```yaml
-blockchain:
-  mode: "PRODUCTION_FABRIC_SDK"
-  connection_profile: "fabric/connection-profile.json"
-  channel_name: "agenttrust-channel"
-  chaincode_name: "agenttrust-cc"
+Configure runtime process environment variables (or forward them explicitly through `docker-compose.yml`):
+
+```bash
+export AGENTTRUST_ENV="production"
+export AGENTTRUST_MODE="MODE_D_AGENTTRUST_FABRIC"
+export FABRIC_GATEWAY_MODE="live"
+export FABRIC_GATEWAY_URL="http://127.0.0.1:8090"
+export GATEWAY_SECRET="<secure-production-secret>"
+export CORS_ORIGINS="https://console.agenttrust.internal"
 ```
 
-When `mode` is set to `PRODUCTION_FABRIC_SDK`, `FabricClient` in `fabric/fabric_client.py` routes ledger commits through gRPC to the running Hyperledger Fabric network endpoints.
+> **Note on Network Topology:** `FABRIC_GATEWAY_URL` is topology-dependent. `http://127.0.0.1:8090` applies when running the server and bridge directly on the host. When running the server in Docker, `127.0.0.1` refers to the container itself; use the bridge's container service name (e.g. `http://fabric-gateway-bridge:8090`) or host gateway (`http://host.docker.internal:8090`).
+
+When deployed via Docker Compose, these variables must be explicitly defined in your environment or local `.env` and forwarded through the service's `environment:` mapping. The application does not load `.env` or `config/settings.yaml` directly at runtime.
+
+When `FABRIC_GATEWAY_MODE` is set to `live`, `FabricClient` in `fabric/fabric_client.py` routes ledger writes and queries through the Go Gateway Bridge at `FABRIC_GATEWAY_URL` to the running Hyperledger Fabric network endpoints.

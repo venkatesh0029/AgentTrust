@@ -1,7 +1,11 @@
+# Reference example only — AgentTrust does not load this file at runtime.
+# Runtime configuration is supplied through process environment variables.
+# Do not store credentials or production secrets in this file.
+# See documentation/configuration.md.
+
 system:
   name: "AgentTrust Security Framework"
   version: "1.0.0"
-  environment: "production"
 
 cryptography:
   key_size: 2048
@@ -13,19 +17,7 @@ replay_protection:
   timestamp_window_seconds: 120
   clean_interval_seconds: 300
 
-gateway:
-  require_signed_requests: true
-  allow_direct_api_access: false
-  gateway_secret_token: "AGT-GATEWAY-INTERNAL-SECRET-KEY-98765"
-
 blockchain:
   org_name: "AgentTrustOrg"
   channel_name: "agenttrust-channel"
   chaincode_name: "agenttrust-cc"
-
-redis:
-  host: "localhost"
-  port: 6379
-  db: 0
-  enabled: true
-  ttl_seconds: 300

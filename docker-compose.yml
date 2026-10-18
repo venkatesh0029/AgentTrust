@@ -7,10 +7,14 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - AGENTTRUST_MODE=MODE_D_AGENTTRUST_FABRIC
-      - GATEWAY_SECRET=AGENTTRUST_GATEWAY_HMAC_SECRET_v2_2026
-      - AGENTTRUST_DEMO_MODE=false
-      - AGENTTRUST_ALLOW_MODE_CHANGE=false
+      AGENTTRUST_ENV: ${AGENTTRUST_ENV:?Set AGENTTRUST_ENV to development or production}
+      AGENTTRUST_MODE: ${AGENTTRUST_MODE:-MODE_D_AGENTTRUST_FABRIC}
+      GATEWAY_SECRET: ${GATEWAY_SECRET:?Set GATEWAY_SECRET in your environment or .env}
+      AGENTTRUST_DEMO_MODE: ${AGENTTRUST_DEMO_MODE:-false}
+      AGENTTRUST_ALLOW_MODE_CHANGE: ${AGENTTRUST_ALLOW_MODE_CHANGE:-false}
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
+      FABRIC_GATEWAY_MODE: ${FABRIC_GATEWAY_MODE:-simulator}
+      FABRIC_GATEWAY_URL: ${FABRIC_GATEWAY_URL:-}
     volumes:
       - ./data:/app/data
     restart: unless-stopped

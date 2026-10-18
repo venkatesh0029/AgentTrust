@@ -212,7 +212,7 @@ AgentTrust/
 ├── audit_writer/           # Local SHA-256 hash-chained log writer with sequence numbering
 ├── benchmark.py            # CLI latency (P50-P99) and RPS throughput benchmarking tool
 ├── benchmarks/             # Benchmark calculation engine (P50/P90/P95/P99 latency math)
-├── config/                 # YAML configuration parameters (settings.yaml)
+├── config/                 # Reference configuration parameters (settings.example.yaml)
 ├── dashboard/              # Glassmorphism Single-Page Application (index.html, styles.css, app.js)
 ├── documentation/          # 12 comprehensive markdown guides & technical specifications
 ├── evidence_manager/       # Provenance Schema v2.0 generator & SHA-256 payload integrity manager
