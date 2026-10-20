@@ -4,6 +4,7 @@ import sqlite3
 import threading
 from typing import Any
 
+from database_config import resolve_database_path
 from identity_manager.key_manager import KeyManager
 from identity_manager.signature_manager import SignatureManager
 
@@ -136,8 +137,8 @@ class ProtectedFinanceAPI:
         self._idempotency_lock = threading.Lock()
         self._fencing_tokens: dict[str, int] = {}
         self._fencing_lock = threading.Lock()
-        self._persistent_db_path = persistent_db_path
-        if persistent_db_path:
+        self._persistent_db_path = resolve_database_path(persistent_db_path)
+        if self._persistent_db_path:
             self._init_fencing_db()
             self._load_fencing_tokens()
         # Generate Gateway Service RSA Keypair for Service-to-Service mTLS/Signing

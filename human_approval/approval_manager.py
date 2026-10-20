@@ -5,6 +5,8 @@ import threading
 import uuid
 from typing import Any
 
+from database_config import resolve_database_path
+
 
 class HumanApprovalManager:
     """
@@ -13,8 +15,8 @@ class HumanApprovalManager:
     Thread-safe concurrency protection with persistent SQLite state synchronization.
     """
 
-    def __init__(self, db_path: str = "agenttrust_persistent.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str | None = None):
+        self.db_path = resolve_database_path(db_path)
         self._pending_approvals: dict[str, dict[str, Any]] = {}
         self._approval_counter = 100
         self._used_approval_tokens: set[str] = set()

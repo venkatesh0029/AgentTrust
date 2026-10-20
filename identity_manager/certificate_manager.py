@@ -7,6 +7,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.x509.oid import NameOID
 
+from database_config import resolve_database_path
 from identity_manager.key_manager import KeyManager
 
 
@@ -19,14 +20,14 @@ class CertificateManager:
     Manages Root Certificate Authority (CA) and X.509 Certificate issuance/validation for AI Agents.
     """
 
-    def __init__(self, ca_common_name: str = "AgentTrust Root CA", db_path: str = "agenttrust_persistent.db"):
+    def __init__(self, ca_common_name: str = "AgentTrust Root CA", db_path: str | None = None):
         self.ca_common_name = ca_common_name
-        self.db_path = db_path
+        self.db_path = resolve_database_path(db_path)
 
         self.storage: Any | None = None
         try:
             from fabric.persistent_db import PersistentStorageEngine
-            self.storage = PersistentStorageEngine(db_path)
+            self.storage = PersistentStorageEngine(self.db_path)
             existing_ca = self.storage.get_ca_credentials("root_ca")
         except Exception:
             self.storage = None

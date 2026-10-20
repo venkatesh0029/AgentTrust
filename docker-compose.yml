@@ -15,11 +15,15 @@ services:
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
       FABRIC_GATEWAY_MODE: ${FABRIC_GATEWAY_MODE:-simulator}
       FABRIC_GATEWAY_URL: ${FABRIC_GATEWAY_URL:-}
+      AGENTTRUST_DB_PATH: ${AGENTTRUST_DB_PATH:-/app/data/agenttrust_persistent.db}
     volumes:
-      - ./data:/app/data
+      - agenttrust_data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 10s
       timeout: 5s
       retries: 3
+
+volumes:
+  agenttrust_data:

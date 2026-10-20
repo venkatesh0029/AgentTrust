@@ -6,10 +6,13 @@ Off-Chain Evidence Records, CRL Revocations, and Block Ledger State across serve
 
 import datetime
 import json
+import os
 import sqlite3
 import threading
 import uuid
 from typing import Any
+
+from database_config import resolve_database_path
 
 
 class InvalidStateTransitionError(ValueError):
@@ -73,8 +76,11 @@ class PersistentStorageEngine:
     SQLite Database Manager providing atomic, concurrency-safe persistence.
     """
 
-    def __init__(self, db_path: str = "agenttrust_persistent.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str | None = None):
+        self.db_path = resolve_database_path(db_path)
+        parent_dir = os.path.dirname(os.path.abspath(self.db_path))
+        if parent_dir and "invalid" not in parent_dir.lower():
+            os.makedirs(parent_dir, exist_ok=True)
         self._lock = threading.Lock()
         self._init_db()
 

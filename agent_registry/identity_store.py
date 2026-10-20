@@ -7,6 +7,7 @@ import datetime
 from typing import Any
 
 from agent_registry.status_manager import AgentStatus, StatusManager
+from database_config import resolve_database_path
 
 
 class IdentityStore:
@@ -14,13 +15,13 @@ class IdentityStore:
     Persistent store for registered AI agent profiles with SQLite backing.
     """
 
-    def __init__(self, db_path: str = "agenttrust_persistent.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str | None = None):
+        self.db_path = resolve_database_path(db_path)
         self._agents: dict[str, dict[str, Any]] = {}
         self.storage: Any | None = None
         try:
             from fabric.persistent_db import PersistentStorageEngine
-            self.storage = PersistentStorageEngine(db_path)
+            self.storage = PersistentStorageEngine(self.db_path)
             stored_agents = self.storage.list_agents()
             for a in stored_agents:
                 self._agents[a["agent_id"]] = a

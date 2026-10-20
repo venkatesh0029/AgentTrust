@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 
+from database_config import resolve_database_path
 from evidence_manager.hash_manager import HashManager
 
 logger = logging.getLogger(__name__)
@@ -14,8 +15,8 @@ class EvidencePersistenceError(Exception):
 class EvidenceStore:
     """Off-Chain Storage engine for detailed sensitive evidence records."""
 
-    def __init__(self, db_path: str = "agenttrust_persistent.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str | None = None):
+        self.db_path = resolve_database_path(db_path)
         self._store: dict[str, dict[str, Any]] = {}
         self._load_from_storage()
 
