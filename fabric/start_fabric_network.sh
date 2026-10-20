@@ -9,7 +9,8 @@ echo "🚀 Starting AgentTrust Real Hyperledger Fabric Network (2-Org, Raft, Cou
 export FABRIC_CFG_PATH=$PWD/fabric
 
 # 1. Bring up containers via Docker Compose
-docker compose -f fabric/docker-compose-fabric.yaml down -v || true
+# Non-destructive startup: preserve Fabric ledger and world-state volumes.
+# Volume deletion must be a deliberate maintenance operation with a backup.
 docker compose -f fabric/docker-compose-fabric.yaml up -d
 
 echo "⏳ Waiting for Fabric nodes and CouchDB World State containers to initialize..."
