@@ -57,20 +57,39 @@ class TestProductionResilience(unittest.TestCase):
             "CORS_ORIGINS": "https://agenttrust.corp.internal",
             "FABRIC_GATEWAY_MODE": "live",
             "FABRIC_GATEWAY_URL": "",
+            "FABRIC_GATEWAY_TOKEN": "test-fabric-gateway-token-123456789",
         }
         with patch.dict(os.environ, env):
             with self.assertRaises(RuntimeError) as ctx:
                 validate_production_configuration("production", "MODE_D_AGENTTRUST_FABRIC")
             self.assertIn("requires explicit FABRIC_GATEWAY_URL", str(ctx.exception))
 
+    def test_production_mode_d_fails_closed_without_gateway_token(self):
+        """Verifies Mode D in production aborts if FABRIC_GATEWAY_TOKEN is missing or short."""
+        base_env = {
+            "AGENTTRUST_ENV": "production",
+            "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "CORS_ORIGINS": "https://agenttrust.corp.internal",
+            "FABRIC_GATEWAY_MODE": "live",
+            "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090",
+        }
+        for invalid_token in ("", "too-short-token"):
+            with self.subTest(token=invalid_token):
+                env = dict(base_env, FABRIC_GATEWAY_TOKEN=invalid_token)
+                with patch.dict(os.environ, env):
+                    with self.assertRaises(RuntimeError) as ctx:
+                        validate_production_configuration("production", "MODE_D_AGENTTRUST_FABRIC")
+                    self.assertIn("FABRIC_GATEWAY_TOKEN", str(ctx.exception))
+
     def test_production_mode_d_succeeds_with_valid_configuration(self):
-        """Verifies Mode D in production succeeds when live mode and gateway URL are configured."""
+        """Verifies Mode D in production succeeds when live mode, gateway URL, and token are configured."""
         env = {
             "AGENTTRUST_ENV": "production",
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
             "CORS_ORIGINS": "https://agenttrust.corp.internal",
             "FABRIC_GATEWAY_MODE": "live",
             "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090",
+            "FABRIC_GATEWAY_TOKEN": "test-fabric-gateway-token-123456789",
         }
         with patch.dict(os.environ, env):
             # Should not raise

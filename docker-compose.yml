@@ -13,11 +13,14 @@ services:
       AGENTTRUST_DEMO_MODE: ${AGENTTRUST_DEMO_MODE:-false}
       AGENTTRUST_ALLOW_MODE_CHANGE: ${AGENTTRUST_ALLOW_MODE_CHANGE:-false}
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
+      FABRIC_GATEWAY_TOKEN: ${FABRIC_GATEWAY_TOKEN:-}
       FABRIC_GATEWAY_MODE: ${FABRIC_GATEWAY_MODE:-simulator}
-      FABRIC_GATEWAY_URL: ${FABRIC_GATEWAY_URL:-}
+      FABRIC_GATEWAY_URL: ${FABRIC_GATEWAY_URL:-http://fabric-gateway-bridge:8090}
       AGENTTRUST_DB_PATH: ${AGENTTRUST_DB_PATH:-/app/data/agenttrust_persistent.db}
     volumes:
       - agenttrust_data:/app/data
+    networks:
+      - agenttrust-fabric
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
@@ -27,3 +30,8 @@ services:
 
 volumes:
   agenttrust_data:
+
+networks:
+  agenttrust-fabric:
+    name: agenttrust-net
+    external: true

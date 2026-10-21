@@ -7,11 +7,18 @@ import httpx
 from fabric.fabric_client import FabricClient
 
 
+TEST_GATEWAY_TOKEN = "test_gateway_token_of_at_least_32_characters_12345"
+TEST_AUTH_HEADERS = {"Authorization": f"Bearer {TEST_GATEWAY_TOKEN}"}
+
+
 class TestFabricClientGetEvent(unittest.TestCase):
     def setUp(self):
         self.env_patch = patch.dict(
             os.environ,
-            {"FABRIC_GATEWAY_MODE": "simulator"},
+            {
+                "FABRIC_GATEWAY_MODE": "simulator",
+                "FABRIC_GATEWAY_TOKEN": TEST_GATEWAY_TOKEN,
+            },
             clear=False,
         )
         self.env_patch.start()
@@ -63,7 +70,8 @@ class TestFabricClientGetEvent(unittest.TestCase):
 
         self.assertEqual(result, expected)
         get.assert_called_once_with(
-            "http://127.0.0.1:8090/v1/action-events/EVT-1"
+            "http://127.0.0.1:8090/v1/action-events/EVT-1",
+            headers=TEST_AUTH_HEADERS,
         )
 
     def test_live_mode_http_502_error(self):
@@ -170,6 +178,14 @@ class TestFabricClientGetEvent(unittest.TestCase):
 
 class TestFabricClientRecordActionEvent(unittest.TestCase):
     def setUp(self):
+        self.env_patch = patch.dict(
+            os.environ,
+            {"FABRIC_GATEWAY_TOKEN": TEST_GATEWAY_TOKEN},
+            clear=False,
+        )
+        self.env_patch.start()
+        self.addCleanup(self.env_patch.stop)
+
         self.client = FabricClient()
         self.sample_event = {
             "event_id": "EVT-AUDIT-100",
@@ -223,6 +239,7 @@ class TestFabricClientRecordActionEvent(unittest.TestCase):
         post_mock.assert_called_once_with(
             "http://127.0.0.1:8090/v1/action-events",
             json=self.sample_event,
+            headers=TEST_AUTH_HEADERS,
         )
 
     def test_record_action_event_live_mode_uncertain_502(self):
@@ -357,6 +374,141 @@ class TestFabricClientRecordActionEvent(unittest.TestCase):
 
         self.assertIn("FABRIC_SUBMISSION_UNCERTAIN", str(ctx.exception))
         self.assertIn("malformed", str(ctx.exception).lower())
+
+
+class TestFabricClientAuthentication(unittest.TestCase):
+    def setUp(self):
+        self.client = FabricClient()
+        self.sample_event = {
+            "event_id": "EVT-AUDIT-200",
+            "request_id": "REQ-AUDIT-200",
+            "agent_id": "AGENT-002",
+            "action": "TRANSFER_FUNDS",
+            "resource": "BANK_RESERVE_IN",
+            "decision": "ALLOWED",
+            "reason": "VALID_POLICY",
+            "policy_id": "POL-FIN-01",
+            "policy_version": "1.0",
+            "evidence_reference": "EVID-200",
+            "evidence_hash": "b" * 64,
+        }
+
+    def test_missing_token_fails_before_http_request(self):
+        for method_name in ("get_event", "record_action_event", "verify_evidence_hash"):
+            with self.subTest(method=method_name):
+                with (
+                    patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live"}, clear=False),
+                    patch.dict(os.environ, {"FABRIC_GATEWAY_TOKEN": ""}),
+                    patch.object(httpx.Client, "get") as mock_get,
+                    patch.object(httpx.Client, "post") as mock_post,
+                    self.assertRaises(RuntimeError) as ctx,
+                ):
+                    if method_name == "get_event":
+                        self.client.get_event("EVT-200")
+                    elif method_name == "record_action_event":
+                        self.client.record_action_event(**self.sample_event)
+                    else:
+                        self.client.verify_evidence_hash("EVID-200", "b" * 64)
+
+                self.assertIn("FABRIC_GATEWAY_TOKEN must be configured", str(ctx.exception))
+                mock_get.assert_not_called()
+                mock_post.assert_not_called()
+
+    def test_short_token_fails_before_http_request(self):
+        short_token = "too_short_token_123"
+        for method_name in ("get_event", "record_action_event", "verify_evidence_hash"):
+            with self.subTest(method=method_name):
+                with (
+                    patch.dict(
+                        os.environ,
+                        {
+                            "FABRIC_GATEWAY_MODE": "live",
+                            "FABRIC_GATEWAY_TOKEN": short_token,
+                        },
+                        clear=False,
+                    ),
+                    patch.object(httpx.Client, "get") as mock_get,
+                    patch.object(httpx.Client, "post") as mock_post,
+                    self.assertRaises(RuntimeError) as ctx,
+                ):
+                    if method_name == "get_event":
+                        self.client.get_event("EVT-200")
+                    elif method_name == "record_action_event":
+                        self.client.record_action_event(**self.sample_event)
+                    else:
+                        self.client.verify_evidence_hash("EVID-200", "b" * 64)
+
+                self.assertIn("at least 32 characters", str(ctx.exception))
+                mock_get.assert_not_called()
+                mock_post.assert_not_called()
+
+    def test_bearer_token_sent_on_all_live_calls(self):
+        env = {
+            "FABRIC_GATEWAY_MODE": "live",
+            "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090",
+            "FABRIC_GATEWAY_TOKEN": TEST_GATEWAY_TOKEN,
+        }
+
+        # 1. Action-event write
+        mock_post_event = MagicMock()
+        mock_post_event.status_code = 200
+        mock_post_event.json.return_value = {
+            "status": "COMMITTED",
+            "result": {"event_id": self.sample_event["event_id"]},
+        }
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch.object(httpx.Client, "post", return_value=mock_post_event) as post_mock,
+        ):
+            self.client.record_action_event(**self.sample_event)
+            post_mock.assert_called_once_with(
+                "http://127.0.0.1:8090/v1/action-events",
+                json=self.sample_event,
+                headers=TEST_AUTH_HEADERS,
+            )
+
+        # 2. Action-event reconciliation query
+        mock_get_event = MagicMock()
+        mock_get_event.status_code = 200
+        mock_get_event.raise_for_status.return_value = None
+        mock_get_event.json.return_value = {
+            "status": "FOUND",
+            "result": {"event_id": "EVT-200", "decision": "ALLOWED"},
+        }
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch.object(httpx.Client, "get", return_value=mock_get_event) as get_mock,
+        ):
+            self.client.get_event("EVT-200")
+            get_mock.assert_called_once_with(
+                "http://127.0.0.1:8090/v1/action-events/EVT-200",
+                headers=TEST_AUTH_HEADERS,
+            )
+
+        # 3. Evidence verification query
+        mock_verify = MagicMock()
+        mock_verify.status_code = 200
+        mock_verify.raise_for_status.return_value = None
+        mock_verify.json.return_value = {
+            "status": "SUCCESS",
+            "result": {
+                "found": True,
+                "stored_hash": "b" * 64,
+                "recalculated_hash": "b" * 64,
+                "verified": True,
+                "status": "VERIFIED",
+            },
+        }
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch.object(httpx.Client, "post", return_value=mock_verify) as verify_mock,
+        ):
+            self.client.verify_evidence_hash("EVID-200", "b" * 64)
+            verify_mock.assert_called_once_with(
+                "http://127.0.0.1:8090/v1/evidence/verify",
+                json={"evidence_ref": "EVID-200", "expected_hash": "b" * 64},
+                headers=TEST_AUTH_HEADERS,
+            )
 
 
 if __name__ == "__main__":

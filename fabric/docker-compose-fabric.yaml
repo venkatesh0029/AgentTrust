@@ -190,3 +190,34 @@ services:
     restart: unless-stopped
     networks:
       - agenttrust-net
+
+  fabric-gateway-bridge:
+    build:
+      context: ./gateway-bridge
+      dockerfile: Dockerfile
+    image: agenttrust-fabric-gateway-bridge:local
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      FABRIC_GATEWAY_TOKEN: ${FABRIC_GATEWAY_TOKEN:?Set FABRIC_GATEWAY_TOKEN in your environment}
+      FABRIC_GATEWAY_LISTEN_ADDR: "0.0.0.0:8090"
+      FABRIC_PEER_ENDPOINT: "peer0.org1.agenttrust.com:7051"
+      FABRIC_TLS_SERVER_NAME: "peer0.org1.agenttrust.com"
+      FABRIC_CHANNEL_NAME: "agenttrust-channel"
+      FABRIC_CHAINCODE_NAME: "agenttrust-cc"
+      FABRIC_CRYPTO_PATH: "/crypto"
+      FABRIC_IDENTITY_CERT_DIR: "/crypto/identity/signcerts"
+      FABRIC_IDENTITY_KEY_DIR: "/crypto/identity/keystore"
+      FABRIC_PEER_TLS_CA_PATH: "/crypto/peer-tls/ca.crt"
+    volumes:
+      - ./crypto-config/peerOrganizations/org1.agenttrust.com/users/Admin@org1.agenttrust.com/msp/signcerts:/crypto/identity/signcerts:ro
+      - ./crypto-config/peerOrganizations/org1.agenttrust.com/users/Admin@org1.agenttrust.com/msp/keystore:/crypto/identity/keystore:ro
+      - ./crypto-config/peerOrganizations/org1.agenttrust.com/peers/peer0.org1.agenttrust.com/tls/ca.crt:/crypto/peer-tls/ca.crt:ro
+    depends_on:
+      - peer0.org1.agenttrust.com
+    networks:
+      - agenttrust-net

@@ -19,6 +19,16 @@ class FabricClient:
         self.ledger_service = FabricLedgerService()
         self.chaincode = self.ledger_service.chaincode
 
+    @staticmethod
+    def _gateway_auth_headers() -> dict[str, str]:
+        token = os.environ.get("FABRIC_GATEWAY_TOKEN", "").strip()
+        if len(token) < 32:
+            raise RuntimeError(
+                "FABRIC_GATEWAY_TOKEN must be configured with at least "
+                "32 characters for live Fabric Gateway requests."
+            )
+        return {"Authorization": f"Bearer {token}"}
+
     def _invoke_grpc_peer(self, function_name: str, args: list[str]) -> dict[str, Any]:
         """
         Submits gRPC transaction proposal directly to the Hyperledger Fabric Peer node.
@@ -111,7 +121,11 @@ class FabricClient:
 
         try:
             with httpx.Client(timeout=5.0, trust_env=False) as client:
-                response = client.post(endpoint, json=fields)
+                response = client.post(
+                    endpoint,
+                    json=fields,
+                    headers=self._gateway_auth_headers(),
+                )
                 if response.status_code == 502:
                     try:
                         err_body = response.json()
@@ -237,7 +251,10 @@ class FabricClient:
 
         try:
             with httpx.Client(timeout=5.0, trust_env=False) as client:
-                response = client.get(endpoint)
+                response = client.get(
+                    endpoint,
+                    headers=self._gateway_auth_headers(),
+                )
                 response.raise_for_status()
                 body = response.json()
         except (httpx.HTTPError, ValueError) as exc:
@@ -295,7 +312,11 @@ class FabricClient:
 
         try:
             with httpx.Client(timeout=5.0, trust_env=False) as client:
-                response = client.post(endpoint, json=payload)
+                response = client.post(
+                    endpoint,
+                    json=payload,
+                    headers=self._gateway_auth_headers(),
+                )
                 response.raise_for_status()
                 body = response.json()
         except (httpx.HTTPError, ValueError) as exc:

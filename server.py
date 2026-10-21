@@ -108,6 +108,14 @@ def validate_production_configuration(env_profile: str, current_mode: str) -> No
                     "SECURITY VIOLATION: Production Mode D requires explicit FABRIC_GATEWAY_URL. "
                     "Refusing to run in production with missing gateway URL."
                 )
+            gateway_token = os.environ.get(
+                "FABRIC_GATEWAY_TOKEN", ""
+            ).strip()
+            if len(gateway_token) < 32:
+                raise RuntimeError(
+                    "SECURITY VIOLATION: Production Mode D requires "
+                    "FABRIC_GATEWAY_TOKEN with at least 32 characters."
+                )
 
 
 validate_production_configuration(ENV_PROFILE, CURRENT_MODE)

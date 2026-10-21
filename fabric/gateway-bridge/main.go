@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hyperledger/fabric-gateway/pkg/client"
@@ -38,6 +40,18 @@ func requiredEnv(name, fallback string) string {
 	return fallback
 }
 
+func gatewayContractNames() (string, string) {
+	channelName := requiredEnv(
+		"FABRIC_CHANNEL_NAME",
+		"agenttrust-channel",
+	)
+	chaincodeName := requiredEnv(
+		"FABRIC_CHAINCODE_NAME",
+		"agenttrust-cc",
+	)
+	return channelName, chaincodeName
+}
+
 func firstFile(dir string) (string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -57,15 +71,104 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func main() {
-	root := requiredEnv("FABRIC_CRYPTO_PATH", `..\crypto-config`)
+func bearerAuth(token string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Health is unauthenticated only because the bridge will have
+		// no published host port and will be reachable on a private network.
+		if r.Method == http.MethodGet && r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
 
-	identityDir := filepath.Join(root, "peerOrganizations", "org1.agenttrust.com",
-		"users", "Admin@org1.agenttrust.com", "msp", "signcerts")
-	keyDir := filepath.Join(root, "peerOrganizations", "org1.agenttrust.com",
-		"users", "Admin@org1.agenttrust.com", "msp", "keystore")
-	tlsCertPath := filepath.Join(root, "peerOrganizations", "org1.agenttrust.com",
-		"peers", "peer0.org1.agenttrust.com", "tls", "ca.crt")
+		parts := strings.Fields(r.Header.Get("Authorization"))
+		if len(parts) != 2 ||
+			!strings.EqualFold(parts[0], "Bearer") ||
+			subtle.ConstantTimeCompare(
+				[]byte(parts[1]),
+				[]byte(token),
+			) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeJSON(w, http.StatusUnauthorized, apiResponse{
+				Status: "UNAUTHORIZED",
+				Error:  "Missing or invalid bearer token",
+			})
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func fabricHealthHandler(
+	check func(context.Context) error,
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+
+		if err := check(ctx); err != nil {
+			log.Printf("Fabric readiness check failed: %v", err)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"status": "UNAVAILABLE",
+				"mode":   "FABRIC_GATEWAY_READ_WRITE",
+			})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status": "ONLINE",
+			"mode":   "FABRIC_GATEWAY_READ_WRITE",
+			"fabric": "READY",
+		})
+	}
+}
+
+func main() {
+	authToken := strings.TrimSpace(os.Getenv("FABRIC_GATEWAY_TOKEN"))
+	if len(authToken) < 32 {
+		log.Fatal("FABRIC_GATEWAY_TOKEN must be configured with at least 32 characters")
+	}
+
+	listenAddr := requiredEnv(
+		"FABRIC_GATEWAY_LISTEN_ADDR",
+		"127.0.0.1:8090",
+	)
+	peerEndpoint := requiredEnv(
+		"FABRIC_PEER_ENDPOINT",
+		"localhost:7051",
+	)
+	tlsServerName := requiredEnv(
+		"FABRIC_TLS_SERVER_NAME",
+		"peer0.org1.agenttrust.com",
+	)
+	root := requiredEnv(
+		"FABRIC_CRYPTO_PATH",
+		filepath.Join("..", "crypto-config"),
+	)
+
+	identityDir := requiredEnv(
+		"FABRIC_IDENTITY_CERT_DIR",
+		filepath.Join(
+			root, "peerOrganizations", "org1.agenttrust.com",
+			"users", "Admin@org1.agenttrust.com", "msp", "signcerts",
+		),
+	)
+
+	keyDir := requiredEnv(
+		"FABRIC_IDENTITY_KEY_DIR",
+		filepath.Join(
+			root, "peerOrganizations", "org1.agenttrust.com",
+			"users", "Admin@org1.agenttrust.com", "msp", "keystore",
+		),
+	)
+
+	tlsCertPath := requiredEnv(
+		"FABRIC_PEER_TLS_CA_PATH",
+		filepath.Join(
+			root, "peerOrganizations", "org1.agenttrust.com",
+			"peers", "peer0.org1.agenttrust.com", "tls", "ca.crt",
+		),
+	)
 
 	certPath, err := firstFile(identityDir)
 	if err != nil {
@@ -113,12 +216,12 @@ func main() {
 
 	tlsCredentials := credentials.NewTLS(&tls.Config{
 		RootCAs:    certPool,
-		ServerName: "peer0.org1.agenttrust.com",
+		ServerName: tlsServerName,
 		MinVersion: tls.VersionTLS12,
 	})
 
 	connection, err := grpc.NewClient(
-		"localhost:7051",
+		peerEndpoint,
 		grpc.WithTransportCredentials(tlsCredentials),
 	)
 	if err != nil {
@@ -136,17 +239,25 @@ func main() {
 	}
 	defer gateway.Close()
 
-	contract := gateway.GetNetwork("agenttrust-channel").GetContract("agenttrust")
+	channelName, chaincodeName := gatewayContractNames()
+	contract := gateway.GetNetwork(channelName).GetContract(chaincodeName)
 	log.Println("Connected to Fabric Gateway; read/write API starting")
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{
-			"status": "ONLINE",
-			"mode":   "FABRIC_GATEWAY_READ_WRITE",
-		})
-	})
+	mux.HandleFunc("GET /health", fabricHealthHandler(
+		func(ctx context.Context) error {
+			_, err := contract.EvaluateWithContext(
+				ctx,
+				"VerifyEvidenceReference",
+				client.WithArguments(
+					"__agenttrust_health_probe__",
+					"__agenttrust_probe_hash__",
+				),
+			)
+			return err
+		},
+	))
 
 	mux.HandleFunc("POST /v1/action-events", func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, 32*1024)
@@ -334,13 +445,13 @@ func main() {
 		})
 	})
 
-	listener, err := net.Listen("tcp", "127.0.0.1:8090")
+	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		log.Fatal("listen on 127.0.0.1:8090: ", err)
+		log.Fatal("listen on "+listenAddr+": ", err)
 	}
 
 	server := &http.Server{
-		Handler:           mux,
+		Handler:           bearerAuth(authToken, mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -350,8 +461,9 @@ func main() {
 		},
 	}
 
-	log.Println("Listening on http://127.0.0.1:8090")
-	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+	log.Printf("Listening on %s", listenAddr)
+	if err := server.Serve(listener); err != nil &&
+		err != http.ErrServerClosed {
 		log.Fatal("HTTP server: ", err)
 	}
 }
