@@ -38,6 +38,7 @@ from replay_protection.request_tracker import RequestTracker
 
 from action_gateway.mcp_gateway import MCPGovernanceGateway
 from action_gateway.retry_queue import RetryQueueManager
+from fabric.persistent_db import PersistentStorageEngine
 from evidence_manager.merkle_tree import MerkleTree
 from evidence_manager.provenance import ProvenanceBuilder
 from identity_manager.delegation import DelegationTokenManager
@@ -144,7 +145,11 @@ approval_manager = HumanApprovalManager()
 evidence_store = EvidenceStore()
 chain_writer = AuditChainWriter()
 fabric_client = FabricClient()
-retry_manager = RetryQueueManager()
+
+# Share one durable storage engine and retry queue across the API
+# endpoints and the main ActionGateway.
+persistent_db = PersistentStorageEngine()
+retry_manager = RetryQueueManager(persistent_db=persistent_db)
 
 action_gateway = ActionGateway(
     registry=agent_registry,
@@ -155,7 +160,9 @@ action_gateway = ActionGateway(
     approval_manager=approval_manager,
     evidence_store=evidence_store,
     fabric_client=fabric_client,
-    chain_writer=chain_writer
+    chain_writer=chain_writer,
+    retry_queue=retry_manager,
+    persistent_db=persistent_db,
 )
 
 mcp_gateway = MCPGovernanceGateway(action_gateway)

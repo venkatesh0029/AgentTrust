@@ -129,6 +129,38 @@ class TestRetryReconciliation(unittest.TestCase):
         client.record_action_event.assert_not_called()
         self.assertEqual(self.manager.pending_count(), 1)
 
+    def test_live_absent_event_retries_after_known_pre_submission_failure(self):
+        client = self.make_client()
+        client.get_event.return_value = None
+        marker = (
+            "FABRIC_PRE_SUBMISSION_FAILURE: "
+            "Fabric endorsement planning failed before transaction submission."
+        )
+        record = self.manager._pending_queue[self.payload["event_id"]]
+        record.error_msg = marker
+        self.db.save_retry_record(
+            event_id=self.payload["event_id"],
+            request_id=self.payload["request_id"],
+            payload=self.payload.copy(),
+            error_msg=marker,
+            status="PENDING_RETRY",
+            retry_count=0,
+        )
+        with patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live"}):
+            ok, message = self.manager.retry_commit(
+                self.payload["event_id"], client
+            )
+        self.assertTrue(ok)
+        self.assertEqual(message, "RETRY_SUCCESSFUL")
+        client.get_event.assert_called_once_with(self.payload["event_id"])
+        client.record_action_event.assert_called_once()
+        self.assertEqual(
+            client.record_action_event.call_args.kwargs["event_id"],
+            self.payload["event_id"],
+        )
+        self.assertEqual(self.manager.pending_count(), 0)
+        self.assertEqual(self.db.list_pending_retries(), [])
+
     def test_matching_event_comparison_includes_all_payload_fields(self):
         client = self.make_client()
         changed = self.payload.copy()

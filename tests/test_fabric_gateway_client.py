@@ -74,6 +74,41 @@ class TestFabricClientGetEvent(unittest.TestCase):
             headers=TEST_AUTH_HEADERS,
         )
 
+    def test_live_mode_definitive_not_found_returns_none(self):
+        response = MagicMock()
+        response.status_code = 404
+        response.json.return_value = {
+            "status": "NOT_FOUND",
+            "error": "Action event not found",
+        }
+        with (
+            patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live"}),
+            patch.object(
+                httpx.Client, "get", return_value=response
+            ) as get,
+        ):
+            result = self.client.get_event("EVENT-TEST-MISSING")
+        self.assertIsNone(result)
+        response.raise_for_status.assert_not_called()
+        get.assert_called_once()
+
+    def test_live_mode_404_without_not_found_status_stays_uncertain(self):
+        url = "http://127.0.0.1:8090/v1/action-events/EVENT-TEST-MISSING"
+        request = httpx.Request("GET", url)
+        response_404 = httpx.Response(
+            404,
+            request=request,
+            json={"status": "FABRIC_QUERY_FAILED"},
+        )
+        with (
+            patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live"}),
+            patch.object(
+                httpx.Client, "get", return_value=response_404
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            self.client.get_event("EVENT-TEST-MISSING")
+
     def test_live_mode_http_502_error(self):
         response = MagicMock()
         response.raise_for_status.side_effect = httpx.HTTPStatusError(
@@ -308,6 +343,23 @@ class TestFabricClientRecordActionEvent(unittest.TestCase):
 
         self.assertIn("FABRIC_SUBMISSION_REJECTED", str(ctx.exception))
         self.assertNotIn("FABRIC_SUBMISSION_UNCERTAIN", str(ctx.exception))
+
+    def test_record_action_event_live_mode_pre_submission_failure(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 409
+        mock_response.json.return_value = {
+            "status": "FABRIC_PRE_SUBMISSION_FAILURE",
+            "error": "Fabric endorsement planning failed before transaction submission",
+        }
+
+        with (
+            patch.dict(os.environ, {"FABRIC_GATEWAY_MODE": "live", "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090"}),
+            patch.object(httpx.Client, "post", return_value=mock_response),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            self.client.record_action_event(**self.sample_event)
+
+        self.assertIn("FABRIC_PRE_SUBMISSION_FAILURE", str(ctx.exception))
 
     def test_record_action_event_live_mode_http_500_uncertain(self):
         mock_response = MagicMock()

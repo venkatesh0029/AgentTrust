@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -122,5 +123,109 @@ func TestGatewayContractNamesConfigurable(t *testing.T) {
 	}
 	if chaincodeName != "test-chaincode" {
 		t.Fatalf("unexpected chaincode name: %q", chaincodeName)
+	}
+}
+
+func TestClassifyActionEventQueryError(t *testing.T) {
+	const eventID = "EVENT-TEST-123"
+
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name: "definitively missing event",
+			err: errors.New(
+				"rpc error: code = Unknown desc = " +
+					"chaincode response 500, action event '" +
+					eventID + "' not found",
+			),
+			wantStatus: http.StatusNotFound,
+			wantBody:   "NOT_FOUND",
+		},
+		{
+			name:       "peer connectivity failure stays uncertain",
+			err:        errors.New("rpc error: code = Unavailable"),
+			wantStatus: http.StatusBadGateway,
+			wantBody:   "FABRIC_QUERY_FAILED",
+		},
+		{
+			name:       "unrelated chaincode error stays uncertain",
+			err:        errors.New("failed to read action event"),
+			wantStatus: http.StatusBadGateway,
+			wantBody:   "FABRIC_QUERY_FAILED",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, response := classifyActionEventQueryError(
+				eventID,
+				tt.err,
+			)
+
+			if status != tt.wantStatus {
+				t.Fatalf(
+					"got HTTP status %d, want %d",
+					status,
+					tt.wantStatus,
+				)
+			}
+
+			if response.Status != tt.wantBody {
+				t.Fatalf(
+					"got response status %q, want %q",
+					response.Status,
+					tt.wantBody,
+				)
+			}
+		})
+	}
+}
+
+func TestClassifyActionEventSubmissionError(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name: "known endorsement planning failure",
+			err: errors.New(
+				"endorse error: rpc error: code = FailedPrecondition desc = " +
+					"no combination of peers can be derived which satisfy the endorsement policy: " +
+					"no peer combination can satisfy the endorsement policy",
+			),
+			wantStatus: http.StatusConflict,
+			wantBody:   "FABRIC_PRE_SUBMISSION_FAILURE",
+		},
+		{
+			name:       "commit outcome remains uncertain",
+			err:        errors.New("context deadline exceeded"),
+			wantStatus: http.StatusBadGateway,
+			wantBody:   "FABRIC_SUBMISSION_UNCERTAIN",
+		},
+		{
+			name:       "unrecognized submission error remains uncertain",
+			err:        errors.New("transaction status could not be confirmed"),
+			wantStatus: http.StatusBadGateway,
+			wantBody:   "FABRIC_SUBMISSION_UNCERTAIN",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, response := classifyActionEventSubmissionError(tt.err)
+
+			if status != tt.wantStatus {
+				t.Fatalf("got HTTP status %d, want %d", status, tt.wantStatus)
+			}
+			if response.Status != tt.wantBody {
+				t.Fatalf("got response status %q, want %q", response.Status, tt.wantBody)
+			}
+		})
 	}
 }

@@ -287,8 +287,14 @@ class RetryQueueManager:
                         self._pending_queue.pop(event_id, None)
                         return False, "RETRY_FAILED: RECONCILIATION_CONFLICT"
                 else:
-                    if mode == "live":
+                    if mode == "live" and (
+                        "FABRIC_PRE_SUBMISSION_FAILURE"
+                        not in (record.error_msg or "")
+                    ):
                         return False, "RETRY_FAILED: LIVE_LEDGER_STATE_UNCERTAIN"
+                    # A definitive NOT_FOUND plus a recorded pre-submission
+                    # endorsement failure permits a guarded write under the
+                    # existing database lease and fencing-token checks.
 
             # 6. Safe write attempt (simulator mode with absent event, or fallback)
             if not self.persistent_db.validate_retry_claim(
@@ -437,7 +443,10 @@ class RetryQueueManager:
                     self._pending_queue.pop(event_id, None)
                     return False, "RETRY_FAILED: RECONCILIATION_CONFLICT"
             else:
-                if mode == "live":
+                if mode == "live" and (
+                    "FABRIC_PRE_SUBMISSION_FAILURE"
+                    not in (record.error_msg or "")
+                ):
                     return False, "RETRY_FAILED: LIVE_LEDGER_STATE_UNCERTAIN"
 
         # Step 2: Safe to attempt write

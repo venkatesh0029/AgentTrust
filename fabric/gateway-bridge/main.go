@@ -123,6 +123,53 @@ func fabricHealthHandler(
 	}
 }
 
+func classifyActionEventQueryError(
+	eventID string,
+	err error,
+) (int, apiResponse) {
+	// Only classify the exact chaincode "action event not found" error
+	// as a definitive absence. Other query errors remain uncertain.
+	if err != nil &&
+		strings.Contains(
+			err.Error(),
+			"action event '"+eventID+"' not found",
+		) {
+		return http.StatusNotFound, apiResponse{
+			Status: "NOT_FOUND",
+			Error:  "Action event not found",
+		}
+	}
+
+	return http.StatusBadGateway, apiResponse{
+		Status: "FABRIC_QUERY_FAILED",
+		Error:  "Fabric Gateway could not confirm the action-event state",
+	}
+}
+
+func classifyActionEventSubmissionError(
+	err error,
+) (int, apiResponse) {
+	if err != nil {
+		message := strings.ToLower(err.Error())
+
+		endorsementPlanningFailure := strings.Contains(message, "endorse error:") &&
+			(strings.Contains(message, "no combination of peers can be derived which satisfy the endorsement policy") ||
+				strings.Contains(message, "no peer combination can satisfy the endorsement policy"))
+
+		if endorsementPlanningFailure {
+			return http.StatusConflict, apiResponse{
+				Status: "FABRIC_PRE_SUBMISSION_FAILURE",
+				Error:  "Fabric endorsement planning failed before transaction submission",
+			}
+		}
+	}
+
+	return http.StatusBadGateway, apiResponse{
+		Status: "FABRIC_SUBMISSION_UNCERTAIN",
+		Error:  "Fabric transaction was not confirmed; reconcile event_id before retrying",
+	}
+}
+
 func main() {
 	authToken := strings.TrimSpace(os.Getenv("FABRIC_GATEWAY_TOKEN"))
 	if len(authToken) < 32 {
@@ -328,11 +375,13 @@ func main() {
 			request.EvidenceHash,
 		)
 		if err != nil {
-			log.Printf("Fabric action-event submission outcome may require reconciliation: %v", err)
-			writeJSON(w, http.StatusBadGateway, apiResponse{
-				Status: "FABRIC_SUBMISSION_UNCERTAIN",
-				Error:  "Fabric transaction was not confirmed; reconcile event_id before retrying",
-			})
+			log.Printf(
+				"Fabric action-event submission outcome may require reconciliation: %v",
+				err,
+			)
+
+			status, response := classifyActionEventSubmissionError(err)
+			writeJSON(w, status, response)
 			return
 		}
 
@@ -364,11 +413,14 @@ func main() {
 
 		result, err := contract.EvaluateTransaction("GetActionEvent", eventID)
 		if err != nil {
-			log.Printf("Fabric action-event query failed for event_id %q: %v", eventID, err)
-			writeJSON(w, http.StatusBadGateway, apiResponse{
-				Status: "FABRIC_QUERY_FAILED",
-				Error:  "Fabric Gateway could not confirm the action-event state",
-			})
+			log.Printf(
+				"Fabric action-event query failed for event_id %q: %v",
+				eventID,
+				err,
+			)
+
+			status, response := classifyActionEventQueryError(eventID, err)
+			writeJSON(w, status, response)
 			return
 		}
 

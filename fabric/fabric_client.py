@@ -144,6 +144,21 @@ class FabricClient:
                         f"unexpected redirect HTTP {response.status_code}. "
                         "Reconcile event_id before retrying."
                     )
+                if response.status_code == 409:
+                    try:
+                        conflict_body = response.json()
+                    except ValueError:
+                        conflict_body = None
+                    if (
+                        isinstance(conflict_body, dict)
+                        and conflict_body.get("status")
+                        == "FABRIC_PRE_SUBMISSION_FAILURE"
+                    ):
+                        raise RuntimeError(
+                            "FABRIC_PRE_SUBMISSION_FAILURE: "
+                            "Fabric endorsement planning failed before "
+                            "transaction submission."
+                        )
                 if 400 <= response.status_code < 500:
                     raise RuntimeError(
                         "FABRIC_SUBMISSION_REJECTED: Live Fabric Gateway "
@@ -255,6 +270,16 @@ class FabricClient:
                     endpoint,
                     headers=self._gateway_auth_headers(),
                 )
+                if response.status_code == 404:
+                    try:
+                        not_found_body = response.json()
+                    except ValueError:
+                        not_found_body = None
+                    if (
+                        isinstance(not_found_body, dict)
+                        and not_found_body.get("status") == "NOT_FOUND"
+                    ):
+                        return None
                 response.raise_for_status()
                 body = response.json()
         except (httpx.HTTPError, ValueError) as exc:
