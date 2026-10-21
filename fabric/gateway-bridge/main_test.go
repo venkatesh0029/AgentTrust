@@ -106,7 +106,7 @@ func TestGatewayContractNamesDefaults(t *testing.T) {
 	if channelName != "agenttrust-channel" {
 		t.Fatalf("unexpected channel name: %q", channelName)
 	}
-	if chaincodeName != "agenttrust-cc" {
+	if chaincodeName != "agenttrust" {
 		t.Fatalf("unexpected chaincode name: %q", chaincodeName)
 	}
 }

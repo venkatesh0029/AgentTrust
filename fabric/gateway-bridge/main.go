@@ -47,7 +47,7 @@ func gatewayContractNames() (string, string) {
 	)
 	chaincodeName := requiredEnv(
 		"FABRIC_CHAINCODE_NAME",
-		"agenttrust-cc",
+		"agenttrust",
 	)
 	return channelName, chaincodeName
 }

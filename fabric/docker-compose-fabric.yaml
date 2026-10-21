@@ -3,6 +3,7 @@ version: '3.7'
 volumes:
   peer0.org1-data:
   peer0.org2-data:
+  fabric-gateway-crypto:
 
 networks:
   agenttrust-net:
@@ -191,6 +192,43 @@ services:
     networks:
       - agenttrust-net
 
+  fabric-gateway-crypto-init:
+    image: alpine:3.22
+    user: "0:0"
+    restart: "no"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        chown 0:0 /staged
+        mkdir -p \
+          /staged/identity/signcerts \
+          /staged/identity/keystore \
+          /staged/peer-tls
+        chown -R 0:0 /staged
+        rm -f /staged/identity/signcerts/*
+        rm -f /staged/identity/keystore/*
+        rm -f /staged/peer-tls/ca.crt
+        cp -f /source/signcerts/* /staged/identity/signcerts/
+        cp -f /source/keystore/* /staged/identity/keystore/
+        cp -f /source/peer-tls/ca.crt /staged/peer-tls/ca.crt
+        chmod 0444 /staged/identity/signcerts/*
+        chmod 0400 /staged/identity/keystore/*
+        chmod 0444 /staged/peer-tls/ca.crt
+        chown -R 65532:65532 /staged
+    volumes:
+      - fabric-gateway-crypto:/staged
+      - ./crypto-config/peerOrganizations/org1.agenttrust.com/users/Admin@org1.agenttrust.com/msp/signcerts:/source/signcerts:ro
+      - ./crypto-config/peerOrganizations/org1.agenttrust.com/users/Admin@org1.agenttrust.com/msp/keystore:/source/keystore:ro
+      - ./crypto-config/peerOrganizations/org1.agenttrust.com/peers/peer0.org1.agenttrust.com/tls/ca.crt:/source/peer-tls/ca.crt:ro
+
   fabric-gateway-bridge:
     build:
       context: ./gateway-bridge
@@ -208,16 +246,17 @@ services:
       FABRIC_PEER_ENDPOINT: "peer0.org1.agenttrust.com:7051"
       FABRIC_TLS_SERVER_NAME: "peer0.org1.agenttrust.com"
       FABRIC_CHANNEL_NAME: "agenttrust-channel"
-      FABRIC_CHAINCODE_NAME: "agenttrust-cc"
+      FABRIC_CHAINCODE_NAME: "agenttrust"
       FABRIC_CRYPTO_PATH: "/crypto"
       FABRIC_IDENTITY_CERT_DIR: "/crypto/identity/signcerts"
       FABRIC_IDENTITY_KEY_DIR: "/crypto/identity/keystore"
       FABRIC_PEER_TLS_CA_PATH: "/crypto/peer-tls/ca.crt"
     volumes:
-      - ./crypto-config/peerOrganizations/org1.agenttrust.com/users/Admin@org1.agenttrust.com/msp/signcerts:/crypto/identity/signcerts:ro
-      - ./crypto-config/peerOrganizations/org1.agenttrust.com/users/Admin@org1.agenttrust.com/msp/keystore:/crypto/identity/keystore:ro
-      - ./crypto-config/peerOrganizations/org1.agenttrust.com/peers/peer0.org1.agenttrust.com/tls/ca.crt:/crypto/peer-tls/ca.crt:ro
+      - fabric-gateway-crypto:/crypto:ro
     depends_on:
-      - peer0.org1.agenttrust.com
+      peer0.org1.agenttrust.com:
+        condition: service_started
+      fabric-gateway-crypto-init:
+        condition: service_completed_successfully
     networks:
       - agenttrust-net
