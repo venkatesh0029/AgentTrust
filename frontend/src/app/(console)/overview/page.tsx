@@ -4,7 +4,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, AuditRecord } from "@/lib/api";
 import { StatCard, DecisionPill, HashText, EmptyState } from "@/components/domain/components";
-import { Card, Button, Skeleton } from "@/components/ui/primitives";
+import { Card, Button } from "@/components/ui/primitives";
 import { 
   Activity, 
   ShieldCheck, 
@@ -12,9 +12,7 @@ import {
   Clock, 
   Database, 
   RefreshCw, 
-  CheckCircle2,
   TrendingUp,
-  Cpu,
   Layers,
   Sparkles
 } from "lucide-react";
@@ -34,58 +32,48 @@ import {
 
 export default function OverviewPage() {
   const router = useRouter();
-  const { data: auditEvents = [], refetch: refetchEvents } = useQuery({
+  const { data: auditEvents = [], refetch: refetchEvents, isLoading: auditLoading, isError: auditError } = useQuery({
     queryKey: ["auditEvents"],
     queryFn: () => api.fetchAuditChain(),
     refetchInterval: 3000,
-    initialData: [],
   });
-
-  const { data: chainVerify } = useQuery({
+  const { data: chainVerify, isLoading: chainVerifyLoading, isError: chainVerifyError } = useQuery({
     queryKey: ["chainVerify"],
     queryFn: () => api.verifyChain(),
-    initialData: { valid: true, status: "CHAIN_VALID", verified_blocks: 1 },
+    refetchInterval: 5000,
   });
-
-  const { data: pendingApprovals = [] } = useQuery({
+  const { data: pendingApprovals = [], isLoading: approvalsLoading, isError: approvalsError } = useQuery({
     queryKey: ["pendingApprovals"],
     queryFn: () => api.fetchPendingApprovals(),
-    initialData: [],
+    refetchInterval: 5000,
   });
 
+  const { data: health, isLoading: healthLoading, isError: healthError } = useQuery({
+    queryKey: ["backendHealth"],
+    queryFn: () => api.fetchHealth(),
+    refetchInterval: 5000,
+  });
   // Calculate real metrics from audit data
-  const allowedCount = auditEvents.filter((e: AuditRecord) =>
-    (e.decision || "").toUpperCase().includes("ALLOW")
-  ).length;
+  const allowedCount = auditEvents.filter((e: AuditRecord) => { const decision = (e.decision || "").toUpperCase(); return decision.includes("ALLOW") || decision.includes("COMMIT"); }).length;
 
   const blockedCount = auditEvents.filter((e: AuditRecord) =>
     (e.decision || "").toUpperCase().includes("BLOCK")
   ).length;
 
   const heldCount = pendingApprovals.length;
+  const heldDecisionCount = auditEvents.filter((e: AuditRecord) => { const decision = (e.decision || "").toUpperCase(); return decision.includes("HELD") || decision.includes("PENDING") || decision.includes("APPROVAL"); }).length;
 
-  // Real chart data derived from actual audit records
-  const chartTimelineData = auditEvents.length > 0
-    ? auditEvents.slice(-10).map((e, idx) => ({
-        name: e.request_id ? e.request_id.slice(-6) : `#${idx + 1}`,
-        latency: (e.risk_score ? e.risk_score * 10 : 1.2) + 0.5,
-        risk: e.risk_score || 0.1,
-      }))
-    : [
-        { name: "00:00", latency: 1.1, risk: 0.05 },
-        { name: "04:00", latency: 1.4, risk: 0.1 },
-        { name: "08:00", latency: 1.2, risk: 0.08 },
-        { name: "12:00", latency: 1.6, risk: 0.15 },
-        { name: "16:00", latency: 1.3, risk: 0.12 },
-        { name: "20:00", latency: 1.5, risk: 0.09 },
-      ];
+  // Both visualizations below are derived exclusively from backend records.
+  const chartTimelineData = auditEvents.slice(-10).map((event, index) => ({
+    name: event.request_id ? event.request_id.slice(-6) : `#${event.sequence_number || index + 1}`,
+    riskScore: event.risk_score,
+  }));
 
   const pieData = [
-    { name: "Allowed", value: allowedCount || 1, color: "#34d399" },
-    { name: "Held", value: heldCount, color: "#fbbf24" },
+    { name: "Allowed", value: allowedCount, color: "#34d399" },
+    { name: "Held", value: heldDecisionCount, color: "#fbbf24" },
     { name: "Blocked", value: blockedCount, color: "#f87171" },
-  ].filter(d => d.value > 0);
-
+  ].filter((item) => item.value > 0);
   return (
     <div className="space-y-6">
       
@@ -96,12 +84,20 @@ export default function OverviewPage() {
             <h1 className="text-2xl font-extrabold text-[var(--fg)] tracking-tight leading-snug">
               Security Operations Overview
             </h1>
-            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wide bg-emerald-950/60 text-emerald-400 border border-emerald-500/30 font-mono shadow-[0_0_12px_rgba(52,211,153,0.15)]">
-              LIVE GATEWAY ACTIVE
+            <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wide border font-mono ${
+              healthError
+                ? "bg-rose-950/50 text-rose-400 border-rose-500/30"
+                : healthLoading
+                ? "bg-[var(--surface-2)] text-[var(--muted)] border-[var(--border)]"
+                : (health?.status || "UNKNOWN").toUpperCase() === "ONLINE"
+                ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
+                : "bg-amber-950/50 text-amber-400 border-amber-500/30"
+            }`}>
+              {healthError ? "BACKEND UNAVAILABLE" : healthLoading ? "CHECKING BACKEND" : `BACKEND ${(health?.status || "UNKNOWN").toUpperCase()}`}
             </span>
           </div>
           <p className="text-xs text-[var(--muted)] mt-1">
-            Real-time telemetry, cryptographic decision distribution, and audit chain verification.
+            Backend health, cryptographic decisions, recent risk scores, and audit-chain verification from returned records.
           </p>
         </div>
 
@@ -123,141 +119,115 @@ export default function OverviewPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="AUTHORIZED ACTIONS"
-          value={allowedCount}
-          subtext="Within policy bounds"
+          value={auditLoading ? "…" : auditError ? "—" : allowedCount}
+          subtext={auditError ? "Audit API unavailable" : auditLoading ? "Loading audit records" : "Recorded allowed or committed decisions"}
           icon={ShieldCheck}
           variant="emerald"
         />
         <StatCard
           title="HELD FOR APPROVAL"
-          value={heldCount}
-          subtext="Exceeds threshold limits"
+          value={approvalsLoading ? "…" : approvalsError ? "—" : heldCount}
+          subtext={approvalsError ? "Approvals API unavailable" : approvalsLoading ? "Loading approval queue" : "Currently pending approval tickets"}
           icon={Clock}
           variant="held"
         />
         <StatCard
           title="BLOCKED VIOLATIONS"
-          value={blockedCount}
-          subtext="Security boundary enforced"
+          value={auditLoading ? "…" : auditError ? "—" : blockedCount}
+          subtext={auditError ? "Audit API unavailable" : auditLoading ? "Loading audit records" : "Recorded blocked decisions"}
           icon={ShieldAlert}
           variant="blocked"
         />
         <StatCard
           title="CHAIN INTEGRITY"
-          value={chainVerify?.valid ? "VERIFIED" : "TAMPERED"}
-          subtext={chainVerify?.status || "Audit log integrity intact"}
+          value={chainVerifyLoading ? "CHECKING" : chainVerifyError ? "UNAVAILABLE" : chainVerify?.valid ? "VERIFIED" : "TAMPERED"}
+          subtext={chainVerify?.status || (chainVerifyError ? "Verification API unavailable" : chainVerifyLoading ? "Checking chain integrity" : chainVerify?.message || "No verification details returned")}
           icon={Database}
-          variant={chainVerify?.valid ? "emerald" : "blocked"}
+          variant={chainVerifyLoading || chainVerifyError ? "info" : chainVerify?.valid ? "emerald" : "blocked"}
         />
       </div>
 
-      {/* Interactive Charts Section */}
+      {/* Audit-derived visualizations; no latency is inferred from risk scores. */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Real-time Latency & Risk Trend Chart */}
         <Card className="lg:col-span-2 p-5 space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
             <div className="flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-[var(--emerald)]" />
-              <h3 className="font-bold text-sm text-[var(--fg)]">Pipeline Execution Telemetry & Latency (ms)</h3>
+              <h3 className="font-bold text-sm text-[var(--fg)]">Risk Scores in Recent Audit Records</h3>
             </div>
-            <span className="text-xs font-mono text-[var(--accent)] font-semibold">
-              P95 Latency: 1.45 ms
-            </span>
+            <span className="text-xs font-mono text-[var(--muted)]">Source: audit chain</span>
           </div>
-
-          <div className="h-56 w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartTimelineData}>
-                <defs>
-                  <linearGradient id="latencyGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#34d399" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#34d399" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="name" stroke="#5b6878" fontSize={10} tickLine={false} />
-                <YAxis stroke="#5b6878" fontSize={10} tickLine={false} unit="ms" />
-                <RechartsTooltip
-                  contentStyle={{
-                    backgroundColor: "#0f141b",
-                    borderColor: "#1f2a37",
-                    borderRadius: "8px",
-                    fontSize: "12px",
-                    color: "#e6edf3",
-                  }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="latency"
-                  stroke="#34d399"
-                  strokeWidth={2}
-                  fillOpacity={1}
-                  fill="url(#latencyGradient)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          {auditLoading ? (
+            <div className="h-56 flex items-center justify-center text-xs text-[var(--muted)]">Loading audit records…</div>
+          ) : auditError ? (
+            <div className="h-56 flex items-center justify-center text-xs text-[var(--blocked)]">Risk chart unavailable: audit API request failed.</div>
+          ) : chartTimelineData.length === 0 ? (
+            <div className="h-56 flex items-center justify-center text-xs text-[var(--muted)]">No audit records are available to chart.</div>
+          ) : (
+            <div className="h-56 w-full pt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartTimelineData}>
+                  <defs>
+                    <linearGradient id="riskGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#34d399" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#34d399" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="name" stroke="#5b6878" fontSize={10} tickLine={false} />
+                  <YAxis stroke="#5b6878" fontSize={10} tickLine={false} />
+                  <RechartsTooltip
+                    contentStyle={{
+                      backgroundColor: "#0f141b",
+                      borderColor: "#1f2a37",
+                      borderRadius: "8px",
+                      fontSize: "12px",
+                      color: "#e6edf3",
+                    }}
+                  />
+                  <Area type="monotone" dataKey="riskScore" name="Risk score" stroke="#34d399" strokeWidth={2} fillOpacity={1} fill="url(#riskGradient)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </Card>
 
-        {/* Decision Breakdown Donut Chart */}
         <Card className="p-5 space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
             <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">
               <Layers className="w-4 h-4 text-amber-400" />
-              Decision Breakdown
+              Audit Decision Breakdown
             </h3>
-            <span className="text-xs font-mono text-[var(--muted)]">Ratio</span>
+            <span className="text-xs font-mono text-[var(--muted)]">Recorded events</span>
           </div>
-
-          <div className="h-44 w-full flex items-center justify-center relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={75}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {pieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-xl font-bold font-mono text-[var(--fg)]">{auditEvents.length}</span>
-              <span className="text-[10px] text-[var(--muted)] uppercase font-mono">Total</span>
+          {auditLoading ? (
+            <div className="h-44 flex items-center justify-center text-xs text-[var(--muted)]">Loading decisions…</div>
+          ) : auditError ? (
+            <div className="h-44 flex items-center justify-center text-xs text-[var(--blocked)]">Decision breakdown unavailable.</div>
+          ) : pieData.length === 0 ? (
+            <div className="h-44 flex items-center justify-center text-xs text-[var(--muted)]">No categorized decisions in the audit records.</div>
+          ) : (
+            <div className="h-44 w-full flex items-center justify-center relative">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={5} dataKey="value">
+                    {pieData.map((entry, index) => <Cell key={`decision-${entry.name}-${index}`} fill={entry.color} />)}
+                  </Pie>
+                  <RechartsTooltip contentStyle={{ backgroundColor: "#0f141b", borderColor: "#1f2a37", borderRadius: "8px", fontSize: "12px", color: "#e6edf3" }} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <span className="text-xl font-bold font-mono text-[var(--fg)]">{auditEvents.length}</span>
+                <span className="text-[10px] text-[var(--muted)] uppercase font-mono">Audit events</span>
+              </div>
             </div>
-          </div>
-
+          )}
           <div className="space-y-1.5 pt-1 text-xs">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-                <span className="text-[var(--fg)]">Allowed</span>
-              </div>
-              <span className="font-mono text-[var(--fg)] font-bold">{allowedCount}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-                <span className="text-[var(--fg)]">Held</span>
-              </div>
-              <span className="font-mono text-[var(--fg)] font-bold">{heldCount}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-400"></span>
-                <span className="text-[var(--fg)]">Blocked</span>
-              </div>
-              <span className="font-mono text-[var(--fg)] font-bold">{blockedCount}</span>
-            </div>
+            <div className="flex items-center justify-between"><span className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />Allowed / committed</span><span className="font-mono font-bold">{allowedCount}</span></div>
+            <div className="flex items-center justify-between"><span className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-amber-400" />Held / pending</span><span className="font-mono font-bold">{heldDecisionCount}</span></div>
+            <div className="flex items-center justify-between"><span className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-rose-400" />Blocked</span><span className="font-mono font-bold">{blockedCount}</span></div>
           </div>
         </Card>
       </div>
-
       {/* Recent Decisions Log Table */}
       <Card className="p-0 overflow-hidden">
         <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
@@ -270,10 +240,19 @@ export default function OverviewPage() {
           </span>
         </div>
 
-        {auditEvents.length === 0 ? (
+        {auditLoading ? (
+          <div className="p-8 text-center text-xs text-[var(--muted)]">Loading audit records…</div>
+        ) : auditError ? (
+          <EmptyState
+            title="Audit Records Unavailable"
+            description="The backend audit API request failed. Check backend health and retry."
+            actionLabel="Retry Audit Fetch"
+            onAction={() => refetchEvents()}
+          />
+        ) : auditEvents.length === 0 ? (
           <EmptyState
             title="No Gateway Decisions Logged"
-            description="Submit a signed action request via the Gateway Pipeline page to see decisions recorded in real-time."
+            description="Submit a signed action request via the Gateway Pipeline page to see decisions recorded in real time."
             actionLabel="Go to Gateway"
             onAction={() => router.push("/gateway")}
           />
@@ -294,13 +273,13 @@ export default function OverviewPage() {
                 {auditEvents.slice().reverse().slice(0, 10).map((ev: AuditRecord, i: number) => (
                   <tr key={`${ev.request_id || 'REQ'}-${i}`} className="hover:bg-[var(--surface-2)]/40 transition-colors">
                     <td className="py-3 px-4 font-mono font-bold text-[var(--fg)]">
-                      {ev.request_id || `REQ-${i}`}
+                      {ev.request_id}
                     </td>
                     <td className="py-3 px-4 font-mono text-[var(--muted)]">
-                      {ev.agent_id || "FINANCE-AGENT-001"}
+                      {ev.agent_id}
                     </td>
                     <td className="py-3 px-4 font-mono font-semibold text-[var(--emerald)]">
-                      {ev.event_type || "CREATE_PURCHASE_ORDER"}
+                      {ev.event_type}
                     </td>
                     <td className="py-3 px-4">
                       <DecisionPill decision={ev.decision} reason={ev.execution_result} />
@@ -309,7 +288,7 @@ export default function OverviewPage() {
                       <HashText value={ev.record_hash} truncateLen={8} />
                     </td>
                     <td className="py-3 px-4 text-right pr-4 font-mono text-[var(--muted)] text-[11px]">
-                      {ev.timestamp || new Date().toISOString()}
+                      {ev.timestamp ? new Date(ev.timestamp).toLocaleString() : "—"}
                     </td>
                   </tr>
                 ))}

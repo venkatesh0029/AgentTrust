@@ -12,17 +12,68 @@ import {
   UserCheck, 
   UserX, 
   RotateCw,
-  Fingerprint
+  Fingerprint,
+  Plus,
+  X
 } from "lucide-react";
 
 export default function AgentsPage() {
   const queryClient = useQueryClient();
   const [actionMessage, setActionMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [showRegisterForm, setShowRegisterForm] = useState(false);
+  const [newAgent, setNewAgent] = useState({
+    agent_id: "",
+    agent_name: "",
+    owner: "",
+    organization: "FinanceOrg",
+    role: "procurement_agent",
+    policy_id: "FIN-POLICY-001",
+    capabilities: "CREATE_PURCHASE_ORDER, TRANSFER_FUNDS",
+  });
 
   const { data: agents = [], isLoading, refetch } = useQuery({
     queryKey: ["agents"],
     queryFn: () => api.fetchAgents(),
     refetchInterval: 3000,
+  });
+
+  const registerMutation = useMutation({
+    mutationFn: () =>
+      api.registerAgent({
+        agent_id: newAgent.agent_id.trim(),
+        agent_name: newAgent.agent_name.trim(),
+        owner: newAgent.owner.trim(),
+        organization: newAgent.organization.trim(),
+        role: newAgent.role.trim(),
+        policy_id: newAgent.policy_id.trim() || "FIN-POLICY-001",
+        agent_version: "1.0",
+        capabilities: newAgent.capabilities
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      }),
+    onSuccess: (data) => {
+      const agent = data.agent as { agent_id?: string } | undefined;
+      const registeredId = agent?.agent_id || newAgent.agent_id;
+      setActionMessage({
+        type: "success",
+        text: `Agent ${registeredId} successfully registered and committed to registry.`,
+      });
+      setNewAgent({
+        agent_id: "",
+        agent_name: "",
+        owner: "",
+        organization: "FinanceOrg",
+        role: "procurement_agent",
+        policy_id: "FIN-POLICY-001",
+        capabilities: "CREATE_PURCHASE_ORDER, TRANSFER_FUNDS",
+      });
+      setShowRegisterForm(false);
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+    },
+    onError: (err: Error) => {
+      setActionMessage({ type: "error", text: err.message || "Failed to register agent." });
+    },
   });
 
   const suspendMutation = useMutation({
@@ -119,6 +170,14 @@ export default function AgentsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <Button
+            variant="emerald"
+            size="sm"
+            onClick={() => setShowRegisterForm((prev) => !prev)}
+          >
+            <Plus className="w-4 h-4 mr-1.5" />
+            {showRegisterForm ? "Close Form" : "Register Agent"}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => refetch()}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh
@@ -143,6 +202,149 @@ export default function AgentsPage() {
             ✕
           </button>
         </div>
+      )}
+
+      {/* Registration Form Card */}
+      {showRegisterForm && (
+        <Card className="p-5 border border-emerald-500/30 bg-[var(--surface-2)]/30 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
+            <div className="flex items-center gap-2">
+              <Bot className="w-4 h-4 text-emerald-400" />
+              <h3 className="font-bold text-sm text-[var(--fg)]">Register New AI Agent</h3>
+            </div>
+            <button
+              onClick={() => setShowRegisterForm(false)}
+              className="text-[var(--muted)] hover:text-[var(--fg)] text-xs p-1"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!newAgent.agent_id.trim() || !newAgent.agent_name.trim() || !newAgent.owner.trim()) {
+                setActionMessage({ type: "error", text: "Agent ID, Name, and Owner are required." });
+                return;
+              }
+              registerMutation.mutate();
+            }}
+            className="space-y-4"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Agent ID *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. FINANCE-AGENT-002"
+                  value={newAgent.agent_id}
+                  onChange={(e) => setNewAgent({ ...newAgent, agent_id: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Agent Name *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Treasury Dispatch Bot"
+                  value={newAgent.agent_name}
+                  onChange={(e) => setNewAgent({ ...newAgent, agent_name: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Owner *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Treasury Operations"
+                  value={newAgent.owner}
+                  onChange={(e) => setNewAgent({ ...newAgent, owner: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Organization
+                </label>
+                <input
+                  type="text"
+                  value={newAgent.organization}
+                  onChange={(e) => setNewAgent({ ...newAgent, organization: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Role
+                </label>
+                <input
+                  type="text"
+                  value={newAgent.role}
+                  onChange={(e) => setNewAgent({ ...newAgent, role: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Policy ID
+                </label>
+                <input
+                  type="text"
+                  value={newAgent.policy_id}
+                  onChange={(e) => setNewAgent({ ...newAgent, policy_id: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Capabilities (comma-separated)
+                </label>
+                <input
+                  type="text"
+                  value={newAgent.capabilities}
+                  onChange={(e) => setNewAgent({ ...newAgent, capabilities: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-[var(--border)]">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowRegisterForm(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="emerald"
+                size="sm"
+                disabled={registerMutation.isPending}
+              >
+                {registerMutation.isPending ? "Registering..." : "Submit Registration"}
+              </Button>
+            </div>
+          </form>
+        </Card>
       )}
 
       {/* Agents Table */}

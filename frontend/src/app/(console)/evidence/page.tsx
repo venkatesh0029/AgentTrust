@@ -14,13 +14,23 @@ import {
   XCircle,
   Clock,
   Fingerprint,
-  FileCode
+  FileCode,
+  GitBranch,
+  Network
 } from "lucide-react";
 
 export default function EvidencePage() {
   const [searchId, setSearchId] = useState("");
   const [activeEvidenceId, setActiveEvidenceId] = useState<string | null>(null);
   const [verificationResult, setVerificationResult] = useState<Record<string, unknown> | null>(null);
+  const [provenanceData, setProvenanceData] = useState<Record<string, unknown> | null>(null);
+  const [provenanceError, setProvenanceError] = useState<string | null>(null);
+  const [loadingProvenance, setLoadingProvenance] = useState(false);
+  const [merkleProofData, setMerkleProofData] = useState<Record<string, unknown> | null>(null);
+  const [merkleProofError, setMerkleProofError] = useState<string | null>(null);
+  const [loadingMerkleProof, setLoadingMerkleProof] = useState(false);
+  const [merkleVerification, setMerkleVerification] = useState<Record<string, unknown> | null>(null);
+  const [verifyingMerkleProof, setVerifyingMerkleProof] = useState(false);
 
   const { data: chain = [], isLoading: isLoadingChain } = useQuery({
     queryKey: ["auditChain"],
@@ -52,11 +62,19 @@ export default function EvidencePage() {
     },
   });
 
+  const normalizeRequestId = (identifier: string) =>
+    identifier.startsWith("EVIDENCE-") ? identifier.slice("EVIDENCE-".length) : identifier;
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchId.trim()) {
       setActiveEvidenceId(searchId.trim());
       setVerificationResult(null);
+      setProvenanceData(null);
+      setProvenanceError(null);
+      setMerkleProofData(null);
+      setMerkleProofError(null);
+      setMerkleVerification(null);
     }
   };
 
@@ -64,6 +82,78 @@ export default function EvidencePage() {
     setActiveEvidenceId(reqId);
     setSearchId(reqId);
     setVerificationResult(null);
+    setProvenanceData(null);
+    setProvenanceError(null);
+    setMerkleProofData(null);
+    setMerkleProofError(null);
+    setMerkleVerification(null);
+  };
+
+  const handleLoadProvenance = async () => {
+    if (!activeEvidenceId) return;
+    const requestId = normalizeRequestId(activeEvidenceId);
+    if (!chain.some((record) => record.request_id === requestId)) {
+      setProvenanceData(null);
+      setProvenanceError(
+        "This request ID is not present in the loaded audit chain. The backend can synthesize fallback provenance for missing records, so the UI did not request or display a fallback as authoritative evidence."
+      );
+      return;
+    }
+
+    setLoadingProvenance(true);
+    setProvenanceError(null);
+    try {
+      const data = await api.fetchEvidenceProvenance(requestId);
+      setProvenanceData(data as Record<string, unknown>);
+    } catch (err: unknown) {
+      setProvenanceError(err instanceof Error ? err.message : "Failed to load provenance");
+    } finally {
+      setLoadingProvenance(false);
+    }
+  };
+
+  const handleLoadMerkleProof = async () => {
+    if (!activeEvidenceId) return;
+    const requestId = normalizeRequestId(activeEvidenceId);
+    if (!chain.some((record) => record.request_id === requestId)) {
+      setMerkleProofData(null);
+      setMerkleProofError(
+        "This request ID is not present in the loaded audit chain. The backend can generate fallback proofs for missing records, so the UI did not request or display a fallback as authoritative evidence."
+      );
+      return;
+    }
+
+    setLoadingMerkleProof(true);
+    setMerkleProofError(null);
+    setMerkleVerification(null);
+    try {
+      const data = await api.fetchMerkleProof(requestId);
+      setMerkleProofData(data as Record<string, unknown>);
+    } catch (err: unknown) {
+      setMerkleProofError(err instanceof Error ? err.message : "Failed to load Merkle proof");
+    } finally {
+      setLoadingMerkleProof(false);
+    }
+  };
+
+  const handleVerifyMerkleProof = async () => {
+    if (!merkleProofData) return;
+    setVerifyingMerkleProof(true);
+    try {
+      const data = await api.verifyMerkleProof({
+        leaf_hash: merkleProofData.leaf_hash,
+        proof: merkleProofData.proof,
+        merkle_root: merkleProofData.merkle_root,
+      });
+      setMerkleVerification(data as Record<string, unknown>);
+    } catch (err: unknown) {
+      setMerkleVerification({
+        is_valid: false,
+        error: err instanceof Error ? err.message : "Merkle verification failed",
+      });
+    } finally {
+      setVerifyingMerkleProof(false);
+    }
   };
 
   return (
@@ -326,6 +416,185 @@ export default function EvidencePage() {
                     <pre className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)] font-mono text-xs text-[var(--fg)] overflow-x-auto">
                       {JSON.stringify(evidenceData.parameters, null, 2)}
                     </pre>
+                  </div>
+                )}
+              </Card>
+
+              {/* Evidence Provenance & Lineage Panel */}
+              <Card className="p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border)]">
+                  <div className="flex items-center gap-2">
+                    <GitBranch className="w-4 h-4 text-[var(--accent)]" />
+                    <div>
+                      <h3 className="font-bold text-sm text-[var(--fg)]">
+                        Evidence Provenance & Cryptographic Lineage
+                      </h3>
+                      <p className="text-[11px] text-[var(--muted)]">
+                        Inspect chronological causal lineage, policy metadata, and signing provenance.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleLoadProvenance}
+                    disabled={loadingProvenance}
+                  >
+                    {loadingProvenance ? "Retrieving Lineage..." : "Inspect Lineage"}
+                  </Button>
+                </div>
+
+                {provenanceError && (
+                  <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-950/20 text-amber-300 text-xs">
+                    {provenanceError}
+                  </div>
+                )}
+
+                {provenanceData && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                      <div className="p-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] font-mono">
+                        <span className="text-[var(--muted)] block text-[10px]">Origin Agent</span>
+                        <span className="text-[var(--fg)] font-semibold">
+                          {String(provenanceData.origin_agent || provenanceData.agent_id || "N/A")}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] font-mono">
+                        <span className="text-[var(--muted)] block text-[10px]">Signing Algorithm</span>
+                        <span className="text-[var(--accent)] font-semibold">
+                          {String(provenanceData.signing_algorithm || "SHA256withRSA")}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] font-mono">
+                        <span className="text-[var(--muted)] block text-[10px]">Policy Reference</span>
+                        <span className="text-[var(--fg)]">
+                          {String(provenanceData.policy_id || "FIN-POL-001")}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      <span className="text-xs text-[var(--muted)] block mb-1 font-mono">
+                        Raw Provenance Attestation Record
+                      </span>
+                      <pre className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)] font-mono text-xs text-[var(--fg)] overflow-x-auto">
+                        {JSON.stringify(provenanceData, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+              </Card>
+
+              {/* Merkle Tree Inclusion Proof Panel */}
+              <Card className="p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border)]">
+                  <div className="flex items-center gap-2">
+                    <Network className="w-4 h-4 text-emerald-400" />
+                    <div>
+                      <h3 className="font-bold text-sm text-[var(--fg)]">
+                        Merkle Tree Inclusion Proof
+                      </h3>
+                      <p className="text-[11px] text-[var(--muted)]">
+                        Cryptographic tree inclusion path proving evidence presence in ledger root hash.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleLoadMerkleProof}
+                    disabled={loadingMerkleProof}
+                  >
+                    {loadingMerkleProof ? "Building Proof..." : "Build Merkle Proof"}
+                  </Button>
+                </div>
+
+                {merkleProofError && (
+                  <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-950/20 text-amber-300 text-xs">
+                    {merkleProofError}
+                  </div>
+                )}
+
+                {merkleProofData && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                      <div className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)] space-y-1">
+                        <span className="text-[var(--muted)] text-[10px] font-mono block">Leaf Event Hash</span>
+                        <HashText value={String(merkleProofData.leaf_hash || "N/A")} truncateLen={20} />
+                      </div>
+                      <div className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)] space-y-1">
+                        <span className="text-[var(--muted)] text-[10px] font-mono block">Merkle Root Hash</span>
+                        <HashText value={String(merkleProofData.merkle_root || "N/A")} truncateLen={20} />
+                      </div>
+                    </div>
+
+                    {/* Proof Steps Path */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-[var(--muted)] font-mono">
+                          Proof Path (Sibling Hashes: {Array.isArray(merkleProofData.proof) ? merkleProofData.proof.length : 0})
+                        </span>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={handleVerifyMerkleProof}
+                          disabled={verifyingMerkleProof}
+                        >
+                          <ShieldCheck className="w-4 h-4 mr-1.5" />
+                          {verifyingMerkleProof ? "Verifying..." : "Verify Inclusion Proof"}
+                        </Button>
+                      </div>
+
+                      {Array.isArray(merkleProofData.proof) && merkleProofData.proof.length > 0 ? (
+                        <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                          {merkleProofData.proof.map((step: unknown, idx: number) => {
+                            const hashStr = typeof step === "string" ? step : JSON.stringify(step);
+                            return (
+                              <div
+                                key={idx}
+                                className="flex items-center gap-2 p-2 rounded bg-[var(--bg)] border border-[var(--border)] font-mono text-[11px]"
+                              >
+                                <span className="text-[var(--muted)] w-6 shrink-0">#{idx + 1}</span>
+                                <HashText value={hashStr} truncateLen={24} />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-[var(--muted)] italic">
+                          Proof path contains direct root binding.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Merkle Verification Outcome Banner */}
+                    {merkleVerification && (
+                      <div
+                        className={`p-4 rounded-xl border flex items-start gap-3 text-xs ${
+                          merkleVerification.is_valid
+                            ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-400"
+                            : "bg-red-950/20 border-red-500/30 text-red-400"
+                        }`}
+                      >
+                        {merkleVerification.is_valid ? (
+                          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <XCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                        )}
+                        <div>
+                          <div className="font-semibold text-sm">
+                            {merkleVerification.is_valid
+                              ? "Inclusion Proof Mathematically Verified (VALID)"
+                              : "Inclusion Proof Verification Failed"}
+                          </div>
+                          <p className="opacity-90 mt-0.5">
+                            {merkleVerification.is_valid
+                              ? "The evidence leaf hash resolves to the audit-tree Merkle root through the computed sibling proof path. Note: this verifies mathematical tree inclusion within the audit tree and does not independently prove live Fabric peer connectivity."
+                              : String(merkleVerification.error || "The leaf hash could not be mathematically bound to the supplied Merkle root.")}
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </Card>

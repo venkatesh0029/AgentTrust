@@ -27,8 +27,10 @@ export default function LedgerPage() {
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{
     valid: boolean;
-    status: string;
-    verified_blocks: number;
+    status?: string;
+    total_records?: number;
+    verified_blocks?: number;
+    reason?: string | null;
     message?: string | null;
   } | null>(null);
 
@@ -38,7 +40,7 @@ export default function LedgerPage() {
     refetchInterval: 3000,
   });
 
-  const { data: fabricStatus } = useQuery({
+  const { data: fabricStatus, isLoading: isLoadingFabric, isError: isFabricError } = useQuery({
     queryKey: ["fabricStatus"],
     queryFn: () => api.fetchFabricStatus(),
   });
@@ -54,7 +56,9 @@ export default function LedgerPage() {
       setVerifyResult({
         valid: false,
         status: "VERIFICATION_ERROR",
+        total_records: 0,
         verified_blocks: 0,
+        reason: err.message || "Failed to verify chain integrity.",
         message: err.message || "Failed to verify chain integrity.",
       });
       setVerifying(false);
@@ -114,45 +118,57 @@ export default function LedgerPage() {
       </div>
 
       {/* Verification Banner Result */}
-      {verifyResult && (
-        <div
-          className={`p-4 rounded-xl border flex items-start gap-3 transition-all ${
-            verifyResult.valid
-              ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-400"
-              : "bg-red-950/20 border-red-500/30 text-red-400"
-          }`}
-        >
-          {verifyResult.valid ? (
-            <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-          ) : (
-            <ShieldAlert className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-          )}
-          <div className="flex-1 text-sm">
-            <div className="font-semibold flex items-center justify-between">
-              <span>
-                {verifyResult.valid
-                  ? "Audit Chain Integrity Verified"
-                  : "Chain Tamper / Corruption Detected!"}
-              </span>
-              <span className="font-mono text-xs opacity-80">
-                {verifyResult.verified_blocks} blocks verified
-              </span>
-            </div>
-            <p className="text-xs opacity-90 mt-1">
-              {verifyResult.message ||
-                (verifyResult.valid
-                  ? "All block cryptographic signatures (SHA-256) match their predecessor hash links."
-                  : "Hash mismatch detected in chain sequence! The ledger has been tampered with.")}
-            </p>
-          </div>
-          <button
-            onClick={() => setVerifyResult(null)}
-            className="text-xs opacity-60 hover:opacity-100"
+      {verifyResult && (() => {
+        const verifiedCount = verifyResult.verified_blocks ?? verifyResult.total_records ?? 0;
+        const isEmpty = !verifyResult.valid && verifyResult.reason === "EMPTY_CHAIN";
+
+        return (
+          <div
+            className={`p-4 rounded-xl border flex items-start gap-3 transition-all ${
+              verifyResult.valid
+                ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-400"
+                : isEmpty
+                ? "bg-amber-950/20 border-amber-500/30 text-amber-400"
+                : "bg-red-950/20 border-red-500/30 text-red-400"
+            }`}
           >
-            Dismiss
-          </button>
-        </div>
-      )}
+            {verifyResult.valid ? (
+              <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            ) : (
+              <ShieldAlert className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1 text-sm">
+              <div className="font-semibold flex items-center justify-between">
+                <span>
+                  {verifyResult.valid
+                    ? "Audit Chain Integrity Verified"
+                    : isEmpty
+                    ? "Audit Chain is Empty"
+                    : "Chain Tamper / Corruption Detected!"}
+                </span>
+                <span className="font-mono text-xs opacity-80">
+                  {verifiedCount} blocks verified
+                </span>
+              </div>
+              <p className="text-xs opacity-90 mt-1">
+                {verifyResult.message ||
+                  verifyResult.reason ||
+                  (verifyResult.valid
+                    ? `All ${verifiedCount} block cryptographic signatures (SHA-256) match their predecessor hash links.`
+                    : isEmpty
+                    ? "No audit records committed to the ledger yet. Process transactions via the Gateway to generate audit blocks."
+                    : "Hash mismatch detected in chain sequence! The ledger has been tampered with.")}
+              </p>
+            </div>
+            <button
+              onClick={() => setVerifyResult(null)}
+              className="text-xs opacity-60 hover:opacity-100"
+            >
+              Dismiss
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Network Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -174,11 +190,15 @@ export default function LedgerPage() {
             <span>Network Engine</span>
             <Cpu className="w-4 h-4 text-[var(--muted)]" />
           </div>
-          <div className="text-sm font-semibold text-[var(--fg)] truncate">
-            {fabricStatus?.network || "Fabric Simulator"}
-          </div>
+          {isLoadingFabric ? (
+            <Skeleton className="h-5 w-32 my-1" />
+          ) : (
+            <div className="text-sm font-semibold text-[var(--fg)] truncate">
+              {fabricStatus?.network || (isFabricError ? "Unavailable" : "Fabric Simulator")}
+            </div>
+          )}
           <div className="text-[11px] text-[var(--muted)] truncate">
-            {fabricStatus?.consensus || "In-Memory / SQLite"}
+            {fabricStatus?.consensus || (isFabricError ? "Backend Unreachable" : "In-Memory / SQLite")}
           </div>
         </Card>
 
@@ -187,27 +207,42 @@ export default function LedgerPage() {
             <span>Chaincode Version</span>
             <Database className="w-4 h-4 text-[var(--muted)]" />
           </div>
-          <div className="text-sm font-mono text-[var(--accent)] font-semibold">
-            {fabricStatus?.chaincode || "agent_trust_cc:v2.0"}
-          </div>
+          {isLoadingFabric ? (
+            <Skeleton className="h-5 w-28 my-1" />
+          ) : (
+            <div className="text-sm font-mono text-[var(--accent)] font-semibold">
+              {fabricStatus?.chaincode || (isFabricError ? "N/A" : "agent_trust_cc:v2.0")}
+            </div>
+          )}
           <div className="text-[11px] text-[var(--muted)] truncate">
-            Channel: {fabricStatus?.channel || "agenttrust-channel"}
+            Channel: {fabricStatus?.channel || (isFabricError ? "disconnected" : "agenttrust-channel")}
           </div>
         </Card>
 
         <Card className="p-4 space-y-1">
           <div className="flex items-center justify-between text-xs text-[var(--muted)]">
             <span>Ledger Status</span>
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <ShieldCheck className={`w-4 h-4 ${isFabricError ? "text-amber-400" : "text-emerald-400"}`} />
           </div>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="text-sm font-semibold text-emerald-400">
-              {fabricStatus?.status || "HEALTHY"}
-            </span>
-          </div>
+          {isLoadingFabric ? (
+            <Skeleton className="h-5 w-24 my-1" />
+          ) : isFabricError || !fabricStatus ? (
+            <div className="flex items-center gap-2 mt-1">
+              <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+              <span className="text-sm font-semibold text-amber-400">
+                UNAVAILABLE
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 mt-1">
+              <span className={`w-2 h-2 rounded-full ${fabricStatus.status === "HEALTHY" ? "bg-emerald-400 animate-pulse" : "bg-red-400"}`}></span>
+              <span className={`text-sm font-semibold ${fabricStatus.status === "HEALTHY" ? "text-emerald-400" : "text-red-400"}`}>
+                {fabricStatus.status}
+              </span>
+            </div>
+          )}
           <div className="text-[11px] text-[var(--muted)]">
-            Zero-Trust Enforcement Active
+            {isFabricError ? "Cannot poll ledger status" : "Zero-Trust Enforcement Active"}
           </div>
         </Card>
       </div>

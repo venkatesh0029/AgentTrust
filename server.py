@@ -518,6 +518,13 @@ class FundTransferRequest(BaseModel):
     reference: str = "Vendor Invoice Payment"
     idempotency_key: str | None = None
 
+class IssueDelegationTokenRequest(BaseModel):
+    issuer_agent_id: str = Field(min_length=1)
+    delegate_agent_id: str = Field(min_length=1)
+    allowed_actions: list[str] = Field(min_length=1)
+    maximum_amount: float = Field(ge=0, allow_inf_nan=False)
+    ttl_seconds: int = Field(default=3600, ge=1, le=2592000)
+
 class GrantApprovalRequest(BaseModel):
     approval_id: str
     approver_id: str = "CFO"
@@ -1129,22 +1136,59 @@ def get_identity_certificates():
     return {"total": len(certs), "certificates": certs, "crl_revoked_agents": crl_list}
 
 @app.post("/identity/delegation/issue")
-def issue_delegation_token(req: dict[str, Any]):
-    issuer_id = req.get("issuer_agent_id", "FINANCE-AGENT-001")
-    delegate_id = req.get("delegate_agent_id", "PROCUREMENT-AGENT-002")
-    allowed_actions = req.get("allowed_actions", ["CREATE_PURCHASE_ORDER"])
-    max_amt = float(req.get("maximum_amount", 5000.0))
-    ttl = int(req.get("ttl_seconds", 3600))
+def issue_delegation_token(
+    req: IssueDelegationTokenRequest,
+    role: AdminRole = Depends(check_admin_permission_dep("issue_delegation")),
+):
+    issuer_id = req.issuer_agent_id.strip()
+    delegate_id = req.delegate_agent_id.strip()
 
-    priv_key = AGENT_PRIVATE_KEYS.get(issuer_id, default_agent_reg.get("private_key", ""))
+    if issuer_id == delegate_id:
+        raise HTTPException(status_code=422, detail="Issuer and delegate must be different agents.")
+    if any(not action.strip() for action in req.allowed_actions):
+        raise HTTPException(status_code=422, detail="Allowed actions must not contain blank entries.")
+
+    issuer = agent_registry.get_agent(issuer_id)
+    if not issuer:
+        raise HTTPException(status_code=404, detail=f"Issuer agent '{issuer_id}' is not registered.")
+    delegate = agent_registry.get_agent(delegate_id)
+    if not delegate:
+        raise HTTPException(status_code=404, detail=f"Delegate agent '{delegate_id}' is not registered.")
+
+    if str(issuer.get("status", "")).upper() != "ACTIVE":
+        raise HTTPException(status_code=409, detail="Delegation issuer must be ACTIVE.")
+    if str(delegate.get("status", "")).upper() != "ACTIVE":
+        raise HTTPException(status_code=409, detail="Delegation target must be ACTIVE.")
+
+    priv_key = AGENT_PRIVATE_KEYS.get(issuer_id) or issuer.get("private_key")
+    if not priv_key:
+        raise HTTPException(status_code=400, detail=f"No signing key available for issuer '{issuer_id}'.")
+
+    policy_id = issuer.get("policy_id")
+    policy = policy_loader.get_policy(policy_id) if policy_id else None
+    allowed_scope = set(policy.allowed_actions) if policy else set(issuer.get("capabilities", []))
+
+    requested_actions = set(req.allowed_actions)
+    if not requested_actions.issubset(allowed_scope):
+        unauthorized = sorted(list(requested_actions - allowed_scope))
+        raise HTTPException(
+            status_code=403,
+            detail=f"Requested actions exceed issuer capabilities or policy: {', '.join(unauthorized)}",
+        )
+
+    if policy and req.maximum_amount > policy.maximum_amount:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Requested delegation amount {req.maximum_amount} exceeds issuer policy limit {policy.maximum_amount}.",
+        )
 
     token = DelegationTokenManager.create_delegated_token(
         issuer_agent_id=issuer_id,
         delegate_agent_id=delegate_id,
-        allowed_actions=allowed_actions,
-        maximum_amount=max_amt,
+        allowed_actions=req.allowed_actions,
+        maximum_amount=req.maximum_amount,
         issuer_private_key=priv_key,
-        ttl_seconds=ttl
+        ttl_seconds=req.ttl_seconds,
     )
     ISSUED_DELEGATION_TOKENS.append(token)
     return {"status": "SUCCESS", "token": token}
@@ -1204,28 +1248,30 @@ def flush_retry_queue():
 @app.get("/audit/merkle-proof/{request_id}")
 def get_merkle_proof(request_id: str):
     events = chain_writer.get_chain_events()
-    hashes = [e.get("event_hash", "") for e in events if e.get("event_hash")]
-    if not hashes:
-        hashes = [HashManager.calculate_evidence_hash({"request_id": request_id})]
+    target_event = next(
+        (
+            event
+            for event in events
+            if event.get("request_id") == request_id and event.get("event_hash")
+        ),
+        None,
+    )
+    if target_event is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Merkle inclusion proof for request '{request_id}' could not be generated.",
+        )
 
+    hashes = [event.get("event_hash", "") for event in events if event.get("event_hash")]
     tree = MerkleTree(hashes)
-    root = tree.get_root()
-
-    target_hash = None
-    for e in events:
-        if e.get("request_id") == request_id:
-            target_hash = e.get("event_hash")
-            break
-    if not target_hash:
-        target_hash = hashes[0]
-
+    target_hash = target_event["event_hash"]
     proof = tree.get_inclusion_proof(target_hash)
     return {
         "request_id": request_id,
         "leaf_hash": target_hash,
-        "merkle_root": root,
+        "merkle_root": tree.get_root(),
         "proof": proof or [],
-        "total_leaves": len(hashes)
+        "total_leaves": len(hashes),
     }
 
 @app.post("/audit/verify-merkle-proof")
@@ -1241,19 +1287,11 @@ def verify_merkle_proof(req: dict[str, Any]):
 def get_evidence_provenance(request_id: str):
     ev = evidence_store.get_evidence(f"EVIDENCE-{request_id}") or evidence_store.get_evidence(request_id)
     if not ev:
-        ev = ProvenanceBuilder.build_evidence(
-            request_id=request_id,
-            agent_id="FINANCE-AGENT-001",
-            action="CREATE_PURCHASE_ORDER",
-            resource="FINANCE_API",
-            parameters={"amount": 5000.0, "supplier_id": "SUPPLIER-101"},
-            decision="ALLOWED",
-            reason="POLICY_PASSED",
-            policy_id="FIN-POL-001",
-            policy_version="1.0",
-            agent_version="1.0.0",
-            api_result="SUCCESS"
+        raise HTTPException(
+            status_code=404,
+            detail=f"Evidence record not found for request ID '{request_id}'.",
         )
+
     return {
         "request_id": request_id,
         "provenance_record": ev,
@@ -1345,27 +1383,48 @@ def get_attack_matrix():
 def run_all_attack_scenarios():
     details = []
     passed_count = 0
+    failed_count = 0
     for sid in range(1, 21):
-        res_sc = run_scenario(sid)
-        dec = res_sc.get("result", {}).get("decision", res_sc.get("expected", "BLOCKED"))
-        exp = res_sc.get("expected", "BLOCKED")
-        is_passed = True
-        details.append({
-            "scenario_id": sid,
-            "title": res_sc.get("title", f"Scenario #{sid}"),
-            "expected": exp,
-            "actual": dec,
-            "status": "PASSED (Mitigated)" if is_passed else "FAILED"
-        })
-        if is_passed:
-            passed_count += 1
+        try:
+            res_sc = run_scenario(sid)
+            dec = res_sc.get("result", {}).get("decision")
+            exp = res_sc.get("expected", "BLOCKED")
+            is_passed = (dec == exp)
+            if is_passed:
+                passed_count += 1
+                status = "PASSED (Mitigated)"
+                error = None
+            else:
+                failed_count += 1
+                status = f"FAILED ({dec})"
+                error = f"Expected {exp}, got {dec}"
+            details.append({
+                "scenario_id": sid,
+                "title": res_sc.get("title", f"Scenario #{sid}"),
+                "expected": exp,
+                "actual": dec,
+                "status": status,
+                "error": error
+            })
+        except Exception as e:
+            failed_count += 1
+            details.append({
+                "scenario_id": sid,
+                "title": f"Scenario #{sid}",
+                "expected": "BLOCKED",
+                "actual": "ERROR",
+                "status": f"FAILED ({type(e).__name__})",
+                "error": str(e)
+            })
 
+    total = len(details)
+    pass_rate = f"{(passed_count / total * 100.0):.1f}%" if total > 0 else "0.0%"
     return {
         "summary": {
-            "total": 20,
+            "total": total,
             "passed": passed_count,
-            "failed": 0,
-            "pass_rate": "100.0%"
+            "failed": failed_count,
+            "pass_rate": pass_rate
         },
         "details": details
     }
@@ -1664,13 +1723,14 @@ def run_scenario(scenario_id: int):
         return {"scenario": 15, "title": "Direct API Access Denial", "expected": "BLOCKED", "result": res}
 
     elif scenario_id == 16:
+        req_id = f"REQ-ATK16-{uuid.uuid4().hex[:6]}"
         ev_id = f"EV-TEST-16-{uuid.uuid4().hex[:4]}"
-        ev_record = {"evidence_id": ev_id, "request_id": "REQ-16", "amount": 5000.0}
+        ev_record = {"evidence_id": ev_id, "request_id": req_id, "amount": 5000.0}
         stored_hash = evidence_store.save_evidence(ev_record)
-        fabric_client.record_evidence("REQ-16", "FINANCE-AGENT-001", stored_hash, "ALLOWED")
+        fabric_client.record_evidence(req_id, "FINANCE-AGENT-001", stored_hash, "ALLOWED")
         evidence_store.simulate_tamper(ev_id, "amount", 500000.0)
         recalculated = HashManager.calculate_evidence_hash(evidence_store.get_evidence(ev_id) or {})
-        verify_res = fabric_client.verify_evidence("REQ-16", recalculated)
+        verify_res = fabric_client.verify_evidence(req_id, recalculated)
         res = {
             "decision": "TAMPERING_DETECTED",
             "reason": "OFF_CHAIN_EVIDENCE_TAMPERED",
@@ -1694,8 +1754,9 @@ def run_scenario(scenario_id: int):
         return {"scenario": 17, "title": "Audit Hash Chain Tampering", "expected": "TAMPERING_DETECTED", "result": res}
 
     elif scenario_id == 18:
+        req_id = f"REQ-AUTH-18-{uuid.uuid4().hex[:6]}"
         try:
-            fabric_client.record_evidence("REQ-AUTH-18", "FINANCE-AGENT-001", "hash", "ALLOWED", caller_org="UNAUTHORIZED_ROGUE_MSP")
+            fabric_client.record_evidence(req_id, "FINANCE-AGENT-001", "hash", "ALLOWED", caller_org="UNAUTHORIZED_ROGUE_MSP")
             res_dec = "ALLOWED"
             res_reason = "UNEXPECTED"
         except PermissionError:

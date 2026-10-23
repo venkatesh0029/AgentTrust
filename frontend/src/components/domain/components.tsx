@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { Badge } from "@/components/ui/primitives";
-import { Copy, Check, Cpu, AlertTriangle, Layers, Server, ArrowRight, ShieldCheck, ShieldAlert } from "lucide-react";
+import { Copy, Check, Cpu, AlertTriangle, Layers, Server, ShieldCheck, ShieldAlert } from "lucide-react";
 
 // 1. DECISION PILL
 export function DecisionPill({ decision, reason }: { decision?: string; reason?: string }) {
@@ -111,18 +111,22 @@ export function StatCard({
   );
 }
 
-// 4. MODE BADGE (Honest Ledger Status)
+  // 4. MODE BADGE (Backend-reported operating mode)
 export function ModeBadge({ mode }: { mode?: string }) {
+  const currentMode = mode?.trim() || "MODE_UNKNOWN";
+
   return (
-    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] font-mono text-xs text-[var(--fg)] shadow-sm">
-      <span className="w-2 h-2 rounded-full bg-[var(--emerald)] animate-pulse"></span>
-      <Server className="w-3.5 h-3.5 text-[var(--emerald)]" />
-      <span className="font-medium">Ledger: local simulator</span>
-      <span className="text-[10px] text-[var(--muted)] font-normal">({mode || "MODE_D"})</span>
+    <div
+      className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] font-mono text-xs text-[var(--fg)] shadow-sm"
+      aria-label={`Backend operating mode: ${currentMode}`}
+    >
+      <span className="w-2 h-2 rounded-full bg-[var(--info)]" />
+      <Server className="w-3.5 h-3.5 text-[var(--info)]" />
+      <span className="font-medium">Backend mode:</span>
+      <span className="text-[10px] text-[var(--muted)] font-normal">{currentMode}</span>
     </div>
   );
 }
-
 // 5. EMPTY STATE
 export function EmptyState({
   title = "No Data Available",
@@ -192,11 +196,13 @@ export const STAGES_LIST = [
 export function PipelineStrip({
   stoppedStage,
   reasonCode,
+  hasResult = true,
 }: {
   stoppedStage?: number;
   reasonCode?: string;
+  hasResult?: boolean;
 }) {
-  const lastActive = stoppedStage !== undefined ? stoppedStage : 13;
+  const lastActive = !hasResult ? 0 : stoppedStage !== undefined ? stoppedStage : 13;
 
   return (
     <div className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl p-5 mb-6 shadow-sm relative overflow-hidden">
@@ -210,7 +216,11 @@ export function PipelineStrip({
             <p className="text-[11px] text-[var(--muted)]">Sequential Zero-Trust Security Verification Gateways</p>
           </div>
         </div>
-        {stoppedStage !== undefined && stoppedStage < 13 ? (
+        {!hasResult ? (
+          <span className="text-xs font-mono px-3 py-1 rounded-full bg-[var(--surface-2)] text-[var(--muted)] border border-[var(--border)] font-semibold flex items-center gap-1.5">
+            <Cpu className="w-3.5 h-3.5" /> Awaiting Action Request
+          </span>
+        ) : stoppedStage !== undefined && stoppedStage < 13 ? (
           <span className="text-xs font-mono px-3 py-1 rounded-full bg-[var(--blocked)]/15 text-[var(--blocked)] border border-[var(--blocked)]/30 font-semibold flex items-center gap-1.5">
             <ShieldAlert className="w-3.5 h-3.5" />
             Stopped at Stage {stoppedStage}: {reasonCode || "REJECTED"}
@@ -226,8 +236,8 @@ export function PipelineStrip({
       {/* Grid Stages with Glowing Nodes */}
       <div className="grid grid-cols-2 md:grid-cols-7 lg:grid-cols-13 gap-2">
         {STAGES_LIST.map((stg) => {
-          const isPassed = stg.id <= lastActive;
-          const isFailedStage = stg.id === stoppedStage && stoppedStage < 13;
+          const isPassed = hasResult && stg.id <= lastActive;
+          const isFailedStage = hasResult && stoppedStage !== undefined && stg.id === stoppedStage && stoppedStage < 13;
 
           let statusBg = "bg-[var(--surface-2)] text-[var(--muted)] border-[var(--border)]";
           if (isFailedStage) {

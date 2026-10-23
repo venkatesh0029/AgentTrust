@@ -37,14 +37,9 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
   
   const [collapsed, setCollapsed] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   // Poll Chain Integrity
-  const { data: chainIntegrity } = useQuery({
+  const { data: chainIntegrity, isLoading: chainIntegrityLoading, isError: chainIntegrityError } = useQuery({
     queryKey: ["chainIntegrity"],
     queryFn: () => api.verifyChain(),
     refetchInterval: 3000,
@@ -55,6 +50,13 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
     queryKey: ["modeData"],
     queryFn: () => api.fetchMode(),
     refetchInterval: 5000,
+  });
+
+  // API reachability is not proof that the underlying Fabric network is live.
+  const { data: fabricStatus, isError: fabricStatusError } = useQuery({
+    queryKey: ["fabricStatus"],
+    queryFn: () => api.fetchFabricStatus(),
+    refetchInterval: 10000,
   });
 
   // Keyboard shortcut Ctrl+K
@@ -148,7 +150,15 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
           <div className="p-4 border-t border-[var(--border)] bg-[var(--surface-2)]/40 font-mono text-xs">
             <div className="flex items-center justify-between text-[var(--muted)] mb-1">
               <span>Chain Integrity:</span>
-              {chainIntegrity?.valid ? (
+              {chainIntegrityLoading ? (
+                <span className="text-[var(--muted)] font-semibold flex items-center gap-1">
+                  <Activity className="w-3 h-3" /> CHECKING
+                </span>
+              ) : chainIntegrityError ? (
+                <span className="text-[var(--muted)] font-semibold flex items-center gap-1">
+                  <XCircle className="w-3 h-3" /> UNAVAILABLE
+                </span>
+              ) : chainIntegrity?.valid ? (
                 <span className="text-[var(--allowed)] font-semibold flex items-center gap-1">
                   <CheckCircle className="w-3 h-3" /> VERIFIED
                 </span>
@@ -188,8 +198,8 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
 
             {/* Chain Indicator */}
             <div className="hidden sm:flex items-center gap-1.5 text-xs font-mono px-3 py-1 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--muted)]">
-              <span className="w-2 h-2 rounded-full bg-[var(--emerald)] animate-pulse" />
-              <span>Simulated Fabric Channel</span>
+              <span className={`w-2 h-2 rounded-full ${fabricStatusError ? "bg-[var(--blocked)]" : fabricStatus ? "bg-[var(--emerald)]" : "bg-[var(--subtle)]"}`} />
+              <span>{fabricStatusError ? "Ledger API unavailable" : fabricStatus ? "Ledger API reachable" : "Checking ledger API"}</span>
             </div>
 
             {/* Theme Toggle */}
@@ -198,7 +208,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
               className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--fg)] hover:bg-[var(--surface-2)] transition-colors"
               title="Toggle light/dark theme"
             >
-              {mounted && theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
 
             {/* User Profile */}

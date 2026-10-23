@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { PipelineStrip, DecisionPill, HashText } from "@/components/domain/components";
 import { Card, Button } from "@/components/ui/primitives";
 import { Cpu, Play, RefreshCw, ShieldCheck, AlertTriangle, XCircle, CheckCircle2, Lock, Filter } from "lucide-react";
-import { api, AgentRecord, PolicyRecord, GatewaySubmitResponse } from "@/lib/api";
+import { api, PolicyRecord, GatewaySubmitResponse } from "@/lib/api";
 
 interface ExtendedAgent {
   agent_id: string;
@@ -23,6 +23,13 @@ interface ExtendedAgent {
   expected_outcome: string;
 }
 
+function matchesCategory(agent: ExtendedAgent, category: string): boolean {
+  if (category === "PASS_13_STAGES") return agent.category === "PASS_13_STAGES";
+  if (category === "HELD_APPROVAL") return agent.category === "HELD_APPROVAL";
+  if (category === "POLICY_EXCEEDED") return agent.category === "POLICY_EXCEEDED";
+  if (category === "SUSPENDED_REVOKED") return agent.category === "SUSPENDED" || agent.category === "REVOKED";
+  return true;
+}
 export default function GatewayPage() {
   const [agents, setAgents] = useState<ExtendedAgent[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(true);
@@ -59,7 +66,7 @@ export default function GatewayPage() {
           const status = (a.status || "ACTIVE").toUpperCase();
 
           let category: ExtendedAgent["category"] = "PASS_13_STAGES";
-          let recAction = caps[0] || "CREATE_PURCHASE_ORDER";
+          const recAction = caps[0] || "CREATE_PURCHASE_ORDER";
           let recAmount = 5000;
           let expected = "Passes All 13 Stages (100% Valid)";
 
@@ -120,16 +127,10 @@ export default function GatewayPage() {
   }, []);
 
   // Filter agents by category button
-  const filteredAgents = useMemo(() => {
-    return agents.filter(a => {
-      if (selectedCategory === "PASS_13_STAGES") return a.category === "PASS_13_STAGES";
-      if (selectedCategory === "HELD_APPROVAL") return a.category === "HELD_APPROVAL";
-      if (selectedCategory === "POLICY_EXCEEDED") return a.category === "POLICY_EXCEEDED";
-      if (selectedCategory === "SUSPENDED_REVOKED") return a.category === "SUSPENDED" || a.category === "REVOKED";
-      return true; // ALL
-    });
-  }, [agents, selectedCategory]);
-
+  const filteredAgents = useMemo(
+    () => agents.filter((agent) => matchesCategory(agent, selectedCategory)),
+    [agents, selectedCategory]
+  );
   const countPass13 = useMemo(() => agents.filter(a => a.category === "PASS_13_STAGES").length, [agents]);
   const countHeld = useMemo(() => agents.filter(a => a.category === "HELD_APPROVAL").length, [agents]);
   const countExceeded = useMemo(() => agents.filter(a => a.category === "POLICY_EXCEEDED").length, [agents]);
@@ -146,16 +147,13 @@ export default function GatewayPage() {
       setAmount(ag.recommended_amount);
     }
   }, [agents, action]);
-
-  // Sync selected agent when category filter changes
-  useEffect(() => {
-    if (filteredAgents.length > 0) {
-      const exists = filteredAgents.some(a => a.agent_id === agentId);
-      if (!exists) {
-        handleAgentSelect(filteredAgents[0].agent_id);
-      }
+  const handleCategoryChange = useCallback((category: string) => {
+    setSelectedCategory(category);
+    const categoryAgents = agents.filter((agent) => matchesCategory(agent, category));
+    if (categoryAgents.length > 0 && !categoryAgents.some((agent) => agent.agent_id === agentId)) {
+      handleAgentSelect(categoryAgents[0].agent_id);
     }
-  }, [selectedCategory, filteredAgents, agentId, handleAgentSelect]);
+  }, [agents, agentId, handleAgentSelect]);
 
   const selectedAgent = agents.find(a => a.agent_id === agentId);
 
@@ -264,7 +262,7 @@ export default function GatewayPage() {
           <Filter className="w-3.5 h-3.5" /> Filter Agents:
         </span>
         <button
-          onClick={() => setSelectedCategory("ALL")}
+          onClick={() => handleCategoryChange("ALL")}
           className={`px-3 py-1 rounded-full text-xs font-medium font-mono transition-colors ${
             selectedCategory === "ALL"
               ? "bg-[var(--emerald)] text-black font-bold"
@@ -274,7 +272,7 @@ export default function GatewayPage() {
           All Agents ({agents.length})
         </button>
         <button
-          onClick={() => setSelectedCategory("PASS_13_STAGES")}
+          onClick={() => handleCategoryChange("PASS_13_STAGES")}
           className={`px-3 py-1 rounded-full text-xs font-medium font-mono transition-colors ${
             selectedCategory === "PASS_13_STAGES"
               ? "bg-[var(--emerald)] text-black font-bold"
@@ -284,7 +282,7 @@ export default function GatewayPage() {
           ✅ 13-Stage Pass Valid ({countPass13})
         </button>
         <button
-          onClick={() => setSelectedCategory("HELD_APPROVAL")}
+          onClick={() => handleCategoryChange("HELD_APPROVAL")}
           className={`px-3 py-1 rounded-full text-xs font-medium font-mono transition-colors ${
             selectedCategory === "HELD_APPROVAL"
               ? "bg-amber-500 text-black font-bold"
@@ -294,7 +292,7 @@ export default function GatewayPage() {
           ⏳ Stage 8 Held Approval ({countHeld})
         </button>
         <button
-          onClick={() => setSelectedCategory("POLICY_EXCEEDED")}
+          onClick={() => handleCategoryChange("POLICY_EXCEEDED")}
           className={`px-3 py-1 rounded-full text-xs font-medium font-mono transition-colors ${
             selectedCategory === "POLICY_EXCEEDED"
               ? "bg-rose-500 text-white font-bold"
@@ -304,7 +302,7 @@ export default function GatewayPage() {
           🛑 Stage 7 Policy Exceeded ({countExceeded})
         </button>
         <button
-          onClick={() => setSelectedCategory("SUSPENDED_REVOKED")}
+          onClick={() => handleCategoryChange("SUSPENDED_REVOKED")}
           className={`px-3 py-1 rounded-full text-xs font-medium font-mono transition-colors ${
             selectedCategory === "SUSPENDED_REVOKED"
               ? "bg-purple-600 text-white font-bold"
@@ -316,7 +314,7 @@ export default function GatewayPage() {
       </div>
 
       {/* Animated Pipeline Strip */}
-      <PipelineStrip stoppedStage={stoppedStage} reasonCode={reasonCode} />
+      <PipelineStrip stoppedStage={stoppedStage} reasonCode={reasonCode} hasResult={result !== null} />
 
       {/* Request Simulation Form & Result Split */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

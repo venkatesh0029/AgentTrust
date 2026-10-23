@@ -41,11 +41,8 @@ def get_evidence(request_id: str):
 
 @router.get("/merkle-proof/{request_id}", summary="Generate Merkle Inclusion Proof for Independent Auditor")
 def generate_merkle_proof(request_id: str):
-    store = get_evidence_store()
-    proof_data = store.generate_merkle_proof(request_id)
-    if not proof_data:
-        raise HTTPException(status_code=404, detail=f"Merkle inclusion proof for request '{request_id}' could not be generated.")
-    return proof_data
+    from server import get_merkle_proof
+    return get_merkle_proof(request_id)
 
 
 @router.get("/ledger/blocks", summary="Fetch Permissioned Ledger Commit History")

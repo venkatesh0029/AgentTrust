@@ -9,7 +9,9 @@ import {
   FileText, 
   RefreshCw, 
   RotateCcw, 
-  Clock
+  Clock,
+  Plus,
+  X
 } from "lucide-react";
 
 export default function PoliciesPage() {
@@ -17,11 +19,65 @@ export default function PoliciesPage() {
   const [selectedPolicy, setSelectedPolicy] = useState<PolicyRecord | null>(null);
   const [rollbackVersion, setRollbackVersion] = useState("1.0");
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createForm, setCreateForm] = useState({
+    policy_id: "",
+    agent_id: "*",
+    allowed_actions: "CREATE_PURCHASE_ORDER, TRANSFER_FUNDS",
+    allowed_resource: "*",
+    maximum_amount: "100000",
+    human_approval_above: "10000",
+    working_hours_start: "00:00",
+    working_hours_end: "23:59",
+    version: "1.0",
+  });
 
   const { data: policies = [], isLoading, refetch } = useQuery({
     queryKey: ["policies"],
     queryFn: () => api.fetchPolicies(),
     refetchInterval: 3000,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: () =>
+      api.createPolicy({
+        policy_id: createForm.policy_id.trim(),
+        agent_id: createForm.agent_id.trim() || "*",
+        allowed_actions: createForm.allowed_actions
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        allowed_resource: createForm.allowed_resource.trim() || "*",
+        maximum_amount: parseFloat(createForm.maximum_amount) || 0,
+        human_approval_above: parseFloat(createForm.human_approval_above) || 0,
+        working_hours_start: createForm.working_hours_start || "00:00",
+        working_hours_end: createForm.working_hours_end || "23:59",
+        version: createForm.version.trim() || "1.0",
+      }),
+    onSuccess: (data) => {
+      const pol = (data as { policy?: { policy_id?: string; version?: string } }).policy;
+      const savedId = pol?.policy_id || createForm.policy_id;
+      setFeedback({
+        type: "success",
+        text: `Policy '${savedId}' successfully saved and registered in policy engine.`,
+      });
+      setCreateForm({
+        policy_id: "",
+        agent_id: "*",
+        allowed_actions: "CREATE_PURCHASE_ORDER, TRANSFER_FUNDS",
+        allowed_resource: "*",
+        maximum_amount: "100000",
+        human_approval_above: "10000",
+        working_hours_start: "00:00",
+        working_hours_end: "23:59",
+        version: "1.0",
+      });
+      setShowCreateForm(false);
+      queryClient.invalidateQueries({ queryKey: ["policies"] });
+    },
+    onError: (err: Error) => {
+      setFeedback({ type: "error", text: err.message || "Failed to create policy." });
+    },
   });
 
   const rollbackMutation = useMutation({
@@ -62,6 +118,14 @@ export default function PoliciesPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <Button
+            variant="emerald"
+            size="sm"
+            onClick={() => setShowCreateForm((prev) => !prev)}
+          >
+            <Plus className="w-4 h-4 mr-1.5" />
+            {showCreateForm ? "Close Form" : "Create Policy"}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => refetch()}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh
@@ -86,6 +150,181 @@ export default function PoliciesPage() {
             ✕
           </button>
         </div>
+      )}
+
+      {/* Policy Creation Form Card */}
+      {showCreateForm && (
+        <Card className="p-5 border border-emerald-500/30 bg-[var(--surface-2)]/30 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-emerald-400" />
+              <h3 className="font-bold text-sm text-[var(--fg)]">Create or Update Declarative Policy</h3>
+            </div>
+            <button
+              onClick={() => setShowCreateForm(false)}
+              className="text-[var(--muted)] hover:text-[var(--fg)] text-xs p-1"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!createForm.policy_id.trim()) {
+                setFeedback({ type: "error", text: "Policy ID is required." });
+                return;
+              }
+              createMutation.mutate();
+            }}
+            className="space-y-4"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Policy ID *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. FIN-POLICY-002"
+                  value={createForm.policy_id}
+                  onChange={(e) => setCreateForm({ ...createForm, policy_id: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500 font-mono"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Target Agent ID (* for all)
+                </label>
+                <input
+                  type="text"
+                  placeholder="* or FINANCE-AGENT-001"
+                  value={createForm.agent_id}
+                  onChange={(e) => setCreateForm({ ...createForm, agent_id: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500 font-mono"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Version
+                </label>
+                <input
+                  type="text"
+                  placeholder="1.0"
+                  value={createForm.version}
+                  onChange={(e) => setCreateForm({ ...createForm, version: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Allowed Actions (comma-separated)
+                </label>
+                <input
+                  type="text"
+                  value={createForm.allowed_actions}
+                  onChange={(e) => setCreateForm({ ...createForm, allowed_actions: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Allowed Resource Scope
+                </label>
+                <input
+                  type="text"
+                  placeholder="* or finance:*"
+                  value={createForm.allowed_resource}
+                  onChange={(e) => setCreateForm({ ...createForm, allowed_resource: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Max Transaction Cap ($)
+                </label>
+                <input
+                  type="number"
+                  value={createForm.maximum_amount}
+                  onChange={(e) => setCreateForm({ ...createForm, maximum_amount: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500 font-mono"
+                  min="0"
+                  step="100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Human Approval Above ($)
+                </label>
+                <input
+                  type="number"
+                  value={createForm.human_approval_above}
+                  onChange={(e) => setCreateForm({ ...createForm, human_approval_above: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500 font-mono"
+                  min="0"
+                  step="100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Working Hours Start
+                </label>
+                <input
+                  type="text"
+                  placeholder="00:00"
+                  value={createForm.working_hours_start}
+                  onChange={(e) => setCreateForm({ ...createForm, working_hours_start: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-[var(--muted)] mb-1">
+                  Working Hours End
+                </label>
+                <input
+                  type="text"
+                  placeholder="23:59"
+                  value={createForm.working_hours_end}
+                  onChange={(e) => setCreateForm({ ...createForm, working_hours_end: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-[var(--border)]">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowCreateForm(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="emerald"
+                size="sm"
+                disabled={createMutation.isPending}
+              >
+                {createMutation.isPending ? "Saving..." : "Save Policy"}
+              </Button>
+            </div>
+          </form>
+        </Card>
       )}
 
       {/* Main Grid: Policy Cards */}
@@ -134,11 +373,17 @@ export default function PoliciesPage() {
                     <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border)] text-[var(--accent)]">
                       v{policy.version}
                     </span>
-                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-950/40 text-emerald-400 border border-emerald-500/30">
-                      ACTIVE
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                      (policy.status || "ACTIVE").toUpperCase() === "ACTIVE"
+                        ? "bg-emerald-950/40 text-emerald-400 border border-emerald-500/30"
+                        : "bg-amber-950/40 text-amber-400 border border-amber-500/30"
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${(policy.status || "ACTIVE").toUpperCase() === "ACTIVE" ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
+                      {(policy.status || "ACTIVE").toUpperCase()}
                     </span>
                   </div>
                 </div>
+
 
                 {/* Bounds Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">

@@ -107,10 +107,15 @@ export const AuditChainSchema = z.object({
 });
 
 export const ChainVerifySchema = z.object({
-  valid: z.boolean().default(true),
-  status: z.string().default("CHAIN_VALID"),
-  verified_blocks: z.number().default(0),
+  valid: z.boolean(),
+  status: z.string().optional(),
+  total_records: z.number().optional(),
+  verified_blocks: z.number().optional(),
+  reason: z.string().nullable().optional(),
   message: z.string().nullable().optional(),
+  tampered_sequence: z.number().optional(),
+  event_id: z.string().optional(),
+  latest_record_hash: z.string().optional(),
 });
 
 export const EvidenceRecordSchema = z.object({
@@ -152,16 +157,16 @@ export const AttackScenarioSchema = z.object({
   title: z.string(),
   expected: z.string().default("BLOCKED"),
   actual: z.string().nullable().optional(),
-  status: z.string().default("PASSED (Mitigated)"),
+  status: z.string().default("UNKNOWN"),
   error: z.string().nullable().optional(),
 });
 
 export const AttackMatrixRunSchema = z.object({
   summary: z.object({
     total: z.number().default(20),
-    passed: z.number().default(20),
+    passed: z.number().default(0),
     failed: z.number().default(0),
-    pass_rate: z.string().default("100.0%"),
+    pass_rate: z.string().default("0.0%"),
   }),
   details: z.array(AttackScenarioSchema).default([]),
 });
@@ -474,13 +479,38 @@ export const api = {
     return res.json();
   },
 
-  async registerAgent(data: Record<string, unknown>): Promise<GenericApiResponse> {
+  async registerAgent(data: Record<string, unknown>, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
     const res = await fetch(`${API_BASE}/agents/register`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Admin-Role": role,
+      },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(`Agent registration failed (${res.status})`);
+    if (!res.ok) {
+      const err: unknown = await res.json().catch(() => ({ detail: "Agent registration failed" }));
+      const detail = typeof err === "object" && err !== null && "detail" in err
+        ? (err as { detail?: unknown }).detail
+        : undefined;
+      let message = `Agent registration failed (${res.status})`;
+      if (typeof detail === "string" && detail.length > 0) {
+        message = detail;
+      } else if (Array.isArray(detail)) {
+        message = detail.map((item: unknown) => {
+          if (typeof item === "string") return item;
+          if (typeof item === "object" && item !== null) {
+            const issue = item as { loc?: unknown; msg?: unknown };
+            const location = Array.isArray(issue.loc) ? `${issue.loc.join(".")}: ` : "";
+            return `${location}${typeof issue.msg === "string" ? issue.msg : JSON.stringify(item)}`;
+          }
+          return String(item);
+        }).join("; ");
+      } else if (typeof detail === "object" && detail !== null) {
+        message = JSON.stringify(detail);
+      }
+      throw new Error(message);
+    }
     return res.json();
   },
 
@@ -491,13 +521,27 @@ export const api = {
     return res.json();
   },
 
-  async createPolicy(data: Record<string, unknown>): Promise<GenericApiResponse> {
+  async createPolicy(data: Record<string, unknown>, role: string = "POLICY_ADMIN"): Promise<GenericApiResponse> {
     const res = await fetch(`${API_BASE}/policies`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Admin-Role": role,
+      },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(`Create policy failed (${res.status})`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Create policy failed" }));
+      const detail = (err as { detail?: unknown }).detail;
+      const detailMsg = typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+        ? detail.map((item: { msg?: string; loc?: (string | number)[] }) => `${item.loc ? item.loc.join(".") + ": " : ""}${item.msg || JSON.stringify(item)}`).join(", ")
+        : detail && typeof detail === "object"
+        ? JSON.stringify(detail)
+        : `Create policy failed (${res.status})`;
+      throw new Error(detailMsg);
+    }
     return res.json();
   },
 
@@ -507,13 +551,27 @@ export const api = {
     return res.json();
   },
 
-  async issueDelegationToken(data: Record<string, unknown>): Promise<unknown> {
+  async issueDelegationToken(data: Record<string, unknown>, role: string = "SYSTEM_ADMIN"): Promise<unknown> {
     const res = await fetch(`${API_BASE}/identity/delegation/issue`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Admin-Role": role,
+      },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(`Issue delegation token failed (${res.status})`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Issue delegation token failed (${res.status})` }));
+      const detail = (err as { detail?: unknown }).detail;
+      const detailMsg = typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+        ? detail.map((item: { msg?: string; loc?: (string | number)[] }) => `${item.loc ? item.loc.join(".") + ": " : ""}${item.msg || JSON.stringify(item)}`).join(", ")
+        : detail && typeof detail === "object"
+        ? JSON.stringify(detail)
+        : `Issue delegation token failed (${res.status})`;
+      throw new Error(detailMsg);
+    }
     return res.json();
   },
 
