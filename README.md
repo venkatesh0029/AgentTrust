@@ -714,6 +714,8 @@ In the spirit of rigorous academic and engineering honesty, we explicitly docume
 1. **Prompt Injection is Not a Silver Bullet**: As empirically demonstrated in our Held-Out V2 benchmark (33.33% recall on novel vectors), pattern-based heuristic filters cannot prevent all prompt injection attacks. AgentTrust relies on **Layer 2 Bounded Authorization** (monetary limits, resource whitelists, and human approval) as the decisive security boundary when semantic detection fails.
 2. **Single-Host vs Multi-Host Persistence**: The default SQLite database with Write-Ahead Logging (`WAL`) provides robust multiprocess concurrency on a single physical host. Multi-host production deployments require a distributed persistence tier (e.g. PostgreSQL with row-level locks or etcd/Consul) for distributed lease coordination.
 3. **External System Idempotency Assumption**: Guaranteed at-most-once execution during network partition timeouts requires downstream enterprise APIs to honor durable idempotency keys and provide an authoritative transaction status query.
+4. **Raft Ordering Consensus Scope**: The current live multi-peer Fabric network demonstrates a multi-organization deployment (Org1 and Org2) with a single Raft orderer consenter. A multi-node Raft ordering cluster ($2f+1$ consenters) with live leader failover is targeted in the upcoming distributed resilience milestone.
+5. **Transport Outage vs Peer Failure Boundaries**: Our live acceptance suite verifies fail-closed enforcement when the gateway bridge is unreachable (`FABRIC_SUBMISSION_UNCERTAIN`). Endorsing peer crashes mid-proposal and uncertain commit reconciliation are governed by the durable outbox state machine, with live peer crash injection scheduled for future hardening.
 
 ---
 
@@ -727,7 +729,7 @@ If you use AgentTrust in your academic research, enterprise architecture, or sec
   author       = {Venkatesh},
   year         = {2026},
   url          = {https://github.com/venkatesh0029/AgentTrust},
-  version      = {0.4.0}
+  version      = {1.0.0-rc1}
 }
 ```
 
