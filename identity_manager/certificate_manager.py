@@ -81,6 +81,10 @@ class CertificateManager:
         """Checks whether a certificate fingerprint is on the CRL."""
         return fingerprint.upper() in self.revoked_fingerprints
 
+    def is_certificate_revoked(self, fingerprint: str) -> bool:
+        """Alias for is_revoked."""
+        return self.is_revoked(fingerprint)
+
     def issue_agent_certificate_from_pubkey(
         self, agent_id: str, agent_name: str, public_key_pem: str, validity_days: int = 365
     ) -> tuple[str, str]:

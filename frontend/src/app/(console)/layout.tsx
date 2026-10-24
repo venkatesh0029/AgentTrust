@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -30,6 +30,8 @@ import { useTheme } from "next-themes";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
+const emptySubscribe = () => () => {};
+
 export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -37,6 +39,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
   
   const [collapsed, setCollapsed] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
+  const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false);
 
   // Poll Chain Integrity
   const { data: chainIntegrity, isLoading: chainIntegrityLoading, isError: chainIntegrityError } = useQuery({
@@ -208,7 +211,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
               className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--fg)] hover:bg-[var(--surface-2)] transition-colors"
               title="Toggle light/dark theme"
             >
-              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {mounted && theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
 
             {/* User Profile */}

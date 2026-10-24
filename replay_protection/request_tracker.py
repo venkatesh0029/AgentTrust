@@ -34,6 +34,10 @@ class RequestTracker:
             except Exception:
                 pass
 
+    @property
+    def processed_idempotency_keys(self) -> dict[str, dict[str, Any]]:
+        return self._idempotency_records
+
     def check_and_track(
         self,
         request_id: str,

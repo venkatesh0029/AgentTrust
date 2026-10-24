@@ -14,8 +14,12 @@ class RegisterAgentRequest(BaseModel):
     agent_name: str = Field("Unnamed Agent")
     owner: str = Field("Enterprise User")
     organization: str = Field("OrgA")
-    roles: list[str] = Field(default_factory=lambda: ["finance_agent"])
-    policy_id: str = Field("FIN-POL-001")
+    role: str = Field("finance_agent")
+    roles: list[str] | None = None
+    capabilities: list[str] = Field(default_factory=lambda: ["CREATE_PURCHASE_ORDER", "TRANSFER_FUNDS"])
+    policy_id: str = Field("FIN-POLICY-001")
+    agent_version: str = Field("1.0")
+    public_key: str | None = None
     public_key_pem: str | None = None
 
 
@@ -46,17 +50,31 @@ def register_agent(
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
     authorization: str | None = Header(None)
 ):
-    check_perm("register_agent", x_admin_role, authorization)
+    role = check_perm("register_agent", x_admin_role, authorization)
     registry = get_agent_registry()
+    caps = req.capabilities if req.capabilities else (req.roles if req.roles else ["finance_agent"])
+    role_name = req.role if req.role else (req.roles[0] if req.roles else "finance_agent")
+    pub_key = req.public_key or req.public_key_pem
+
     result = registry.register_agent(
         agent_id=req.agent_id,
         agent_name=req.agent_name,
         owner=req.owner,
-        organization=req.organization,
+        capabilities=caps,
         policy_id=req.policy_id,
-        public_key_pem=req.public_key_pem
+        agent_version=req.agent_version,
+        organization=req.organization,
+        role=role_name,
+        public_key_pem=pub_key
     )
-    return {"status": "SUCCESS", "agent": result}
+    from server import fabric_client, cache_manager
+    try:
+        fabric_client.chaincode.RegisterAgent(req.agent_id, req.owner, result["certificate_fingerprint"])
+        cache_manager.delete("agents:list")
+        cache_manager.delete(f"agent:{req.agent_id}")
+    except Exception:
+        pass
+    return {"status": "SUCCESS", "success": True, "agent": result, "authorized_by": role.value}
 
 
 @router.get("", summary="List All Registered Agents")
@@ -64,8 +82,13 @@ def list_agents(
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
     authorization: str | None = Header(None)
 ):
-    registry = get_agent_registry()
-    return {"agents": registry.list_agents(), "total": len(registry.list_agents())}
+    from server import agent_registry, cache_manager
+    cached = cache_manager.get("agents:list")
+    if cached:
+        return {"agents": cached, "total": len(cached)}
+    agents = agent_registry.list_agents()
+    cache_manager.set("agents:list", agents, ttl=5)
+    return {"agents": agents, "total": len(agents)}
 
 
 @router.get("/{agent_id}", summary="Get Agent Information & Status")

@@ -1,5 +1,4 @@
 from unittest.mock import patch
-import pytest
 from fastapi.testclient import TestClient
 
 from server import app, evidence_store, chain_writer

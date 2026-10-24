@@ -298,7 +298,12 @@ class BenchmarkEngine:
                 elif mode == "Without Replay Protection":
                     # Bypass Replay Tracker check inside gateway workflow
                     old_tracker = self.gw.replay_tracker
-                    self.gw.replay_tracker = type("DummyReplay", (), {"check_and_track": staticmethod(lambda **kwargs: (True, "OK"))})()
+                    dummy_lock = type("DummyLock", (), {"__bool__": lambda s: True, "fencing_token": 0, "owner_id": ""})()
+                    self.gw.replay_tracker = type("DummyReplay", (), {
+                        "check_and_track": staticmethod(lambda **kwargs: (True, "OK")),
+                        "acquire_in_flight": staticmethod(lambda *args, **kwargs: dummy_lock),
+                        "release_in_flight": staticmethod(lambda *args, **kwargs: True),
+                    })()
                     try:
                         self.gw.process_request(payload)
                     finally:
@@ -314,7 +319,7 @@ class BenchmarkEngine:
                 elif mode == "Without Fabric":
                     # Bypass Fabric Ledger commit
                     old_fabric = self.gw.fabric_client
-                    self.gw.fabric_client = type("DummyFabric", (), {"record_action_event": staticmethod(lambda **kwargs: {"status": "SKIPPED"})})()
+                    self.gw.fabric_client = type("DummyFabric", (), {"record_action_event": staticmethod(lambda **kwargs: {"status": "SKIPPED", "block_index": None, "block_hash": None, "mode": "simulator", "source": "dummy"})})()
                     try:
                         self.gw.process_request(payload)
                     finally:

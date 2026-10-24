@@ -39,13 +39,14 @@ def check_perm(perm: str, x_admin_role: str | None, authorization: str | None):
 @router.get("/pending", summary="List Pending Approval Tickets")
 def list_pending_tickets():
     mgr = get_approval_manager()
-    return {"pending_tickets": mgr.get_pending_tickets()}
+    pending = mgr.list_pending()
+    return {"pending_approvals": pending, "pending_tickets": pending}
 
 
 @router.get("/{ticket_id}", summary="Get Ticket Details")
 def get_ticket(ticket_id: str):
     mgr = get_approval_manager()
-    t = mgr.get_ticket(ticket_id)
+    t = mgr.get_approval_by_id(ticket_id)
     if not t:
         raise HTTPException(status_code=404, detail=f"Ticket '{ticket_id}' not found.")
     return t
@@ -57,12 +58,22 @@ def approve_ticket(
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
     authorization: str | None = Header(None)
 ):
-    check_perm("approve_transaction", x_admin_role, authorization)
-    mgr = get_approval_manager()
-    success, message = mgr.approve_ticket(req.ticket_id, req.approver_id, req.reason)
-    if not success:
-        raise HTTPException(status_code=400, detail=message)
-    return {"status": "APPROVED", "message": message, "ticket_id": req.ticket_id}
+    role = check_perm("approve_transaction", x_admin_role, authorization)
+    gateway = get_action_gateway()
+    res = gateway.process_human_approval_resume(req.ticket_id, approver_id=req.approver_id or role.value)
+    return res
+
+
+@router.post("/{approval_id}/approve", summary="Approve High-Risk Ticket by ID")
+def approve_ticket_by_id(
+    approval_id: str,
+    x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
+    authorization: str | None = Header(None)
+):
+    role = check_perm("approve_transaction", x_admin_role, authorization)
+    gateway = get_action_gateway()
+    res = gateway.process_human_approval_resume(approval_id, approver_id=role.value)
+    return res
 
 
 @router.post("/reject", summary="Reject High-Risk Ticket")
@@ -71,12 +82,27 @@ def reject_ticket(
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
     authorization: str | None = Header(None)
 ):
-    check_perm("reject_transaction", x_admin_role, authorization)
+    role = check_perm("reject_transaction", x_admin_role, authorization)
     mgr = get_approval_manager()
-    success, message = mgr.reject_ticket(req.ticket_id, req.approver_id, req.reason)
-    if not success:
-        raise HTTPException(status_code=400, detail=message)
-    return {"status": "REJECTED", "message": message, "ticket_id": req.ticket_id}
+    ok, record, msg = mgr.reject_request(req.ticket_id, approver_id=req.approver_id or role.value, reason=req.reason)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"status": "REJECTED", "success": True, "message": msg, "approval": record}
+
+
+@router.post("/{approval_id}/reject", summary="Reject High-Risk Ticket by ID")
+def reject_ticket_by_id(
+    approval_id: str,
+    reason: str = "REJECTED_BY_HUMAN",
+    x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
+    authorization: str | None = Header(None)
+):
+    role = check_perm("reject_transaction", x_admin_role, authorization)
+    mgr = get_approval_manager()
+    ok, record, msg = mgr.reject_request(approval_id, approver_id=role.value, reason=reason)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"status": "REJECTED", "success": True, "message": msg, "approval": record}
 
 
 @router.post("/resume", summary="Resume Execution for Approved Ticket (TOCTOU Safe)")

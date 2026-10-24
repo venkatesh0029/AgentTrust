@@ -69,6 +69,7 @@ class AuditChainRecord:
             "execution_result": self.execution_result,
             "previous_record_hash": self.previous_record_hash,
             "record_hash": self.record_hash,
+            "event_hash": self.record_hash,
             "timestamp": self.timestamp
         }
 

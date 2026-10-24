@@ -46,7 +46,8 @@ class ActionGateway:
         fabric_client: FabricClient,
         chain_writer: AuditChainWriter | None = None,
         retry_queue: RetryQueueManager | None = None,
-        persistent_db: Any | None = None
+        persistent_db: Any | None = None,
+        risk_evaluator: Any | None = None
     ):
         self.registry = registry
         self.cert_manager = cert_manager
@@ -59,6 +60,7 @@ class ActionGateway:
         self.chain_writer = chain_writer or AuditChainWriter()
         self.retry_queue = retry_queue or RetryQueueManager(persistent_db=persistent_db)
         self.persistent_db = persistent_db
+        self.risk_evaluator = risk_evaluator or RiskEvaluator
         self._event_counter = 1000
 
     CURRENCY_PRECISION_SPECS: dict[str, int] = {
@@ -552,7 +554,7 @@ class ActionGateway:
             )
 
         # Step 7: Trusted Risk Engine Evaluation (Executed BEFORE Policy Engine)
-        risk_result = RiskEvaluator.evaluate(
+        risk_result = self.risk_evaluator.evaluate(
             agent_id=agent_id,
             action=action,
             resource=resource,
@@ -795,7 +797,7 @@ class ActionGateway:
 
             # 3. Re-evaluate Risk Engine
             now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            risk_res = RiskEvaluator.evaluate(
+            risk_res = self.risk_evaluator.evaluate(
                 agent_id=agent_id,
                 action=action,
                 resource=resource,
@@ -1060,8 +1062,8 @@ class ActionGateway:
             },
             "blockchain": {
                 "event_id": event_id,
-                "block_index": blockchain_commit["block_index"],
-                "block_hash": blockchain_commit["block_hash"],
+                "block_index": blockchain_commit.get("block_index") if isinstance(blockchain_commit, dict) else None,
+                "block_hash": blockchain_commit.get("block_hash") if isinstance(blockchain_commit, dict) else None,
                 "status": ledger_status,
                 "mode": blockchain_commit.get("mode", "simulator") if isinstance(blockchain_commit, dict) else "simulator",
                 "source": blockchain_commit.get("source", "fabric_simulator") if isinstance(blockchain_commit, dict) else "unknown"

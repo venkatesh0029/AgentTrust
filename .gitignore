@@ -24,6 +24,8 @@ MANIFEST
 
 # SQLite Database Files
 *.db
+*.db-*
+*.db.backup_*
 agenttrust_persistent.db
 
 # Environments

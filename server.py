@@ -40,7 +40,6 @@ from action_gateway.mcp_gateway import MCPGovernanceGateway
 from action_gateway.retry_queue import RetryQueueManager
 from fabric.persistent_db import PersistentStorageEngine
 from evidence_manager.merkle_tree import MerkleTree
-from evidence_manager.provenance import ProvenanceBuilder
 from identity_manager.delegation import DelegationTokenManager
 from risk_engine.prompt_injection_guard import PromptInjectionGuard
 from cache_manager import cache_manager
@@ -1117,22 +1116,35 @@ def get_fabric_network_status():
 # 1. Identity & Delegation
 @app.get("/identity/certificates")
 def get_identity_certificates():
+    from identity_manager.certificate_manager import _parse_cert_cached
     agents = agent_registry.list_agents()
     certs = []
     for a in agents:
         agent_id = a.get("agent_id")
-        rec = cert_manager.get_certificate(agent_id)
-        is_revoked = cert_manager.is_certificate_revoked(agent_id)
+        cert_pem = a.get("certificate")
+        fingerprint = a.get("certificate_fingerprint") or (
+            CertificateManager.calculate_fingerprint(cert_pem) if cert_pem else f"SHA256:{agent_id}"
+        )
+        is_revoked = cert_manager.is_revoked(fingerprint) if fingerprint else False
+        issued_at = None
+        expires_at = None
+        if cert_pem:
+            try:
+                parsed_c = _parse_cert_cached(cert_pem)
+                issued_at = parsed_c.not_valid_before_utc.isoformat()
+                expires_at = parsed_c.not_valid_after_utc.isoformat()
+            except Exception:
+                pass
         certs.append({
             "agent_id": agent_id,
             "status": a.get("status"),
-            "certificate_pem": rec.get("certificate_pem") if rec else None,
-            "fingerprint": rec.get("fingerprint") if rec else f"SHA256:{agent_id}",
-            "issued_at": rec.get("issued_at") if rec else None,
-            "expires_at": rec.get("expires_at") if rec else None,
-            "is_revoked": is_revoked
+            "certificate_pem": cert_pem,
+            "fingerprint": fingerprint,
+            "issued_at": issued_at,
+            "expires_at": expires_at,
+            "is_revoked": is_revoked,
         })
-    crl_list = list(cert_manager._crl_store)
+    crl_list = list(cert_manager.revoked_fingerprints)
     return {"total": len(certs), "certificates": certs, "crl_revoked_agents": crl_list}
 
 @app.post("/identity/delegation/issue")
@@ -1233,7 +1245,7 @@ def handle_mcp_call(req: dict[str, Any]):
 @app.get("/gateway/retry-queue")
 def list_retry_queue():
     pending = retry_manager.list_pending_retries()
-    return {"total": len(pending), "pending_retries": pending}
+    return {"total": len(pending), "queue_size": len(pending), "pending_retries": pending}
 
 @app.post("/gateway/retry-queue/flush")
 def flush_retry_queue():
@@ -1252,7 +1264,7 @@ def get_merkle_proof(request_id: str):
         (
             event
             for event in events
-            if event.get("request_id") == request_id and event.get("event_hash")
+            if event.get("request_id") == request_id and (event.get("event_hash") or event.get("record_hash"))
         ),
         None,
     )
@@ -1262,9 +1274,13 @@ def get_merkle_proof(request_id: str):
             detail=f"Merkle inclusion proof for request '{request_id}' could not be generated.",
         )
 
-    hashes = [event.get("event_hash", "") for event in events if event.get("event_hash")]
+    hashes = [
+        event.get("event_hash") or event.get("record_hash", "")
+        for event in events
+        if (event.get("event_hash") or event.get("record_hash"))
+    ]
     tree = MerkleTree(hashes)
-    target_hash = target_event["event_hash"]
+    target_hash = target_event.get("event_hash") or target_event.get("record_hash", "")
     proof = tree.get_inclusion_proof(target_hash)
     return {
         "request_id": request_id,
@@ -1307,11 +1323,14 @@ def get_evidence_provenance(request_id: str):
 # 7. Replay Protection Cache Explorer
 @app.get("/replay/cache")
 def get_replay_cache():
+    nonces = len(replay_tracker.nonce_manager.seen_nonces)
+    idem_keys = list(replay_tracker.processed_idempotency_keys.keys())
     return {
         "timestamp_window_seconds": replay_tracker.timestamp_validator.window_seconds,
-        "processed_nonces_count": len(replay_tracker.nonce_manager.seen_nonces),
-        "processed_idempotency_keys": list(replay_tracker.processed_idempotency_keys)[:20],
-        "total_idempotency_keys_cached": len(replay_tracker.processed_idempotency_keys)
+        "processed_nonces_count": nonces,
+        "nonces_cached": nonces,
+        "processed_idempotency_keys": idem_keys[:20],
+        "total_idempotency_keys_cached": len(idem_keys)
     }
 
 # 8. World State KV Store & Chaincode Query
@@ -1426,6 +1445,8 @@ def run_all_attack_scenarios():
             "failed": failed_count,
             "pass_rate": pass_rate
         },
+        "total_scenarios": total,
+        "attacks_blocked": passed_count,
         "details": details
     }
 
@@ -1449,7 +1470,8 @@ def run_performance_benchmarks():
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "stage_latencies": stage_latencies,
         "concurrency_scaling": concurrency_scaling,
-        "ablation_study": ablation_study
+        "ablation_study": ablation_study,
+        "benchmark_results": ablation_study
     }
 
 # 10. Demonstration Scenarios APIs (Full 20 Attack Matrix Engine)

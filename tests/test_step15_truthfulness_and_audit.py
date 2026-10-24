@@ -7,13 +7,12 @@ Covers:
 - Scenarios router delegation without import errors
 """
 
-from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from server import app, run_scenario, run_all_attack_scenarios
+from server import app, run_all_attack_scenarios
 from audit_writer.chain_writer import AuditChainWriter
-from benchmarks.benchmark_engine import calculate_percentiles, BenchmarkEngine
+from benchmarks.benchmark_engine import calculate_percentiles
 from routers.scenarios import run_attack_matrix as router_run_attack_matrix
 
 

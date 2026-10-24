@@ -7,6 +7,10 @@ class NonceManager:
     def __init__(self):
         self._used_nonces: dict[str, float] = {}
 
+    @property
+    def seen_nonces(self) -> dict[str, float]:
+        return self._used_nonces
+
     def is_nonce_used(self, nonce: str) -> bool:
         return nonce in self._used_nonces
 

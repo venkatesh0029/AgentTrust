@@ -87,9 +87,10 @@ class CacheManager:
                 del self._in_memory_cache[key]
         return None
 
-    def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
+    def set(self, key: str, value: Any, ttl: int | None = None, ttl_seconds: int | None = None) -> bool:
         """Sets a key-value pair in cache with optional TTL (seconds)."""
-        ttl_val = ttl if ttl is not None else self.default_ttl
+        actual_ttl = ttl_seconds if ttl_seconds is not None else ttl
+        ttl_val = actual_ttl if actual_ttl is not None else self.default_ttl
         json_val = json.dumps(value)
 
         success = False

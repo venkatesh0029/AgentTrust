@@ -1,8 +1,7 @@
-import pytest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 
-from server import app, agent_registry, policy_loader, AGENT_PRIVATE_KEYS
+from server import app, agent_registry, AGENT_PRIVATE_KEYS
 
 
 client = TestClient(app)
