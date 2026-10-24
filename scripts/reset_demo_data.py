@@ -151,10 +151,7 @@ def reset_demo_data(db_path: str, reset_ledger: bool = False, dry_run: bool = Fa
         pruned_crl = cursor.rowcount
 
         # 3. Clean transient test approvals
-        cursor.execute(
-            f"DELETE FROM human_approvals WHERE agent_id NOT IN ({placeholders})",
-            CANONICAL_DEMO_AGENT_IDS
-        )
+        cursor.execute("DELETE FROM human_approvals")
         pruned_approvals = cursor.rowcount
 
         # 4. Clean transient operational state (locks, nonces, intents, reconciliation)

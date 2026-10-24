@@ -23,6 +23,7 @@ EXPECTED_COUNTS = {
     "ca_store": 1,
     "block_ledger": 1,
     "evidence_store": 0,
+    "human_approvals": 0,
     "in_flight_locks": 0,
     "transaction_intents": 0,
 }
