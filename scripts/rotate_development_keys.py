@@ -17,11 +17,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from database_config import resolve_database_path
-from fabric.persistent_db import PersistentStorageEngine
-from identity_manager.certificate_manager import CertificateManager
-from agent_registry.identity_store import IdentityStore
-from agent_registry.registration import AgentRegistry
+from database_config import resolve_database_path  # noqa: E402
+from fabric.persistent_db import PersistentStorageEngine  # noqa: E402
+from identity_manager.certificate_manager import CertificateManager  # noqa: E402
+from agent_registry.identity_store import IdentityStore  # noqa: E402
+from agent_registry.registration import AgentRegistry  # noqa: E402
 
 
 def rotate_development_keys(db_path: str | None = None) -> dict[str, str]:
