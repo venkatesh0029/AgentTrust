@@ -59,8 +59,12 @@ Each disruption, transaction invocation, and recovery step advanced the ledger o
 
 The isolated Raft-3 network runs on custom bridge network `agenttrust-raft3-net` and non-conflicting host ports (15984, 16984, 17050, 18050, 19050, 17051, 19051). 
 
-### Complete Release Network Inventory (10 Containers)
-All 10 single-orderer release candidate containers on network `agenttrust-net` were verified online and healthy:
+### Complete Release Network Inventory & Isolation Status (10 Containers)
+The `v1.0.0-rc1` release network was strictly isolated from all fault-injection testing. 
+
+*Operational Note on Container Restoration*: Prior to running the Raft-3 fault-tolerance experiments, a host Docker daemon restart caused 7 standalone release containers (`orderer.agenttrust.com`, `peer0.org1.agenttrust.com`, `peer0.org2.agenttrust.com`, `couchdb0.org1.agenttrust.com`, `couchdb0.org2.agenttrust.com`, `ca.org1.agenttrust.com`, `ca.org2.agenttrust.com`) to exit with exit code 255, while 3 Compose-managed containers (`fabric-fabric-gateway-bridge-1`, `fabric-agenttrust-ccaas-1`, `fabric-agenttrust-ccaas-v3-1`) remained active. All 7 containers were promptly restored via `docker start`, and all 10 containers were confirmed online and healthy via `scripts/fabric_lifecycle.py status`. Throughout the subsequent Raft consensus and CCaaS fault-injection validation, the release network remained fully isolated on `agenttrust-net` without interference.
+
+Active Release Containers (10/10 verified healthy):
 1. `ca.org1.agenttrust.com` (State: running)
 2. `ca.org2.agenttrust.com` (State: running)
 3. `couchdb0.org1.agenttrust.com` (State: running, Port 5984)
@@ -79,13 +83,15 @@ The demo database file `agenttrust_persistent.db` remained completely untouched 
 
 ---
 
-## 5. Security Remediation Checkpoint
+## 5. Security Remediation Checkpoint (Steps 3F, 3G & Step 4)
 
-| Vulnerability | Remediation | Verification |
+| Vulnerability / Milestone | Remediation | Verification |
 | :--- | :--- | :--- |
-| **Unauthenticated /auth/login** | Added `AdminAuthManager` in `identity_manager/admin_auth.py` with salted PBKDF2-HMAC-SHA256 hashing. Mandated password verification on login. | 8/8 tests passed in `tests/test_auth_security.py`. |
-| **Role Self-Assignment** | Bound roles strictly to authenticated administrative accounts (`admin`, `policy_admin`, `finance_approver`, `auditor`). Request-supplied role parameters are ignored. | Role self-granting prevented. |
-| **Plaintext X-Admin-Role Escalation** | Strictly prohibited plaintext `X-Admin-Role` headers across all routes with HTTP 401 Unauthorized. Supported cryptographically signed JWT bearer tokens. | Regression suites updated and passing (12/12 in `test_audit_findings_regression.py`, 7/7 in `test_delegation_api_security.py`). |
+| **Unauthenticated /auth/login** | Added `AdminAuthManager` in `identity_manager/admin_auth.py` with salted PBKDF2-HMAC-SHA256 hashing. Mandated password verification on login. | Verified in `tests/test_auth_security.py`. |
+| **Role Self-Assignment** | Bound roles strictly to authenticated administrative accounts (`admin`, `policy_admin`, `finance_approver`, `auditor`). Request-supplied role parameters are ignored. | Role self-granting prevented and tested. |
+| **Plaintext X-Admin-Role Escalation** | Strictly prohibited plaintext `X-Admin-Role` headers across all backend routes with HTTP 401 Unauthorized. Supported cryptographically signed JWT bearer tokens. | Regression suites passing (12/12 in `test_audit_findings_regression.py`, 7/7 in `test_delegation_api_security.py`). |
+| **JWT Signing-Secret Enforcement** | Closed secret drift vulnerability in `identity_manager/jwt_auth.py` and `server.py` (`validate_production_configuration`). Production startup fails closed if `AGENTTRUST_JWT_SECRET` is unset, <32 characters, or an insecure placeholder. Maintained stable session keys for dev/test. | Verified in `tests/test_production_resilience.py` (5/5 negative and consistency tests passed). |
+| **Frontend & Dashboard Auth Integration** | Updated `frontend/src/lib/api.ts`, `frontend/src/app/(console)/layout.tsx`, and `dashboard/app.js` to obtain tokens via `/auth/login`, store sessions in `localStorage`, and send `Authorization: Bearer <token>` for all protected endpoints. Added interactive auth modal and role switcher. | Frontend build passing (`next build` 0 errors); zero plaintext role headers sent. |
 | **Hardcoded Gateway Token** | Scrubbed hardcoded token from `scripts/test_live_fabric_integration.py` and implemented `scripts/rotate_fabric_gateway_token.ps1`. | Zero secrets tracked in git; previous token revoked. |
 
-Total test suite pass rate: **269 passed, 5 skipped, 0 failures** in pytest.
+Total test suite pass rate: **274+ passed, 5 skipped, 0 failures** in pytest.

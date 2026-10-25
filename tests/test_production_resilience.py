@@ -41,6 +41,7 @@ class TestProductionResilience(unittest.TestCase):
         env = {
             "AGENTTRUST_ENV": "production",
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
             "CORS_ORIGINS": "https://agenttrust.corp.internal",
             "FABRIC_GATEWAY_MODE": "simulator",
         }
@@ -54,6 +55,7 @@ class TestProductionResilience(unittest.TestCase):
         env = {
             "AGENTTRUST_ENV": "production",
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
             "CORS_ORIGINS": "https://agenttrust.corp.internal",
             "FABRIC_GATEWAY_MODE": "live",
             "FABRIC_GATEWAY_URL": "",
@@ -69,6 +71,7 @@ class TestProductionResilience(unittest.TestCase):
         base_env = {
             "AGENTTRUST_ENV": "production",
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
             "CORS_ORIGINS": "https://agenttrust.corp.internal",
             "FABRIC_GATEWAY_MODE": "live",
             "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090",
@@ -81,11 +84,79 @@ class TestProductionResilience(unittest.TestCase):
                         validate_production_configuration("production", "MODE_D_AGENTTRUST_FABRIC")
                     self.assertIn("FABRIC_GATEWAY_TOKEN", str(ctx.exception))
 
-    def test_production_mode_d_succeeds_with_valid_configuration(self):
-        """Verifies Mode D in production succeeds when live mode, gateway URL, and token are configured."""
+    def test_production_fail_closed_on_missing_jwt_secret(self):
+        """Verifies server initialization aborts if AGENTTRUST_JWT_SECRET is missing in production."""
         env = {
             "AGENTTRUST_ENV": "production",
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "",
+        }
+        with patch.dict(os.environ, env):
+            with self.assertRaises(RuntimeError) as ctx:
+                validate_production_configuration("production", "MODE_C_AGENTTRUST_NO_FABRIC")
+            self.assertIn("explicit secure AGENTTRUST_JWT_SECRET", str(ctx.exception))
+
+    def test_production_fail_closed_on_short_jwt_secret(self):
+        """Verifies server initialization aborts if AGENTTRUST_JWT_SECRET has insufficient entropy (< 32 chars)."""
+        env = {
+            "AGENTTRUST_ENV": "production",
+            "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "too-short-jwt-secret",
+        }
+        with patch.dict(os.environ, env):
+            with self.assertRaises(RuntimeError) as ctx:
+                validate_production_configuration("production", "MODE_C_AGENTTRUST_NO_FABRIC")
+            self.assertIn("at least 32 characters of entropy", str(ctx.exception))
+
+    def test_production_fail_closed_on_insecure_jwt_secret(self):
+        """Verifies server initialization aborts if AGENTTRUST_JWT_SECRET is a placeholder or dictionary word."""
+        for weak in ("secret", "changeme", "default_jwt_secret", "password"):
+            with self.subTest(secret=weak):
+                env = {
+                    "AGENTTRUST_ENV": "production",
+                    "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+                    "AGENTTRUST_JWT_SECRET": weak,
+                }
+                with patch.dict(os.environ, env):
+                    with self.assertRaises(RuntimeError) as ctx:
+                        validate_production_configuration("production", "MODE_C_AGENTTRUST_NO_FABRIC")
+                    self.assertTrue(
+                        "at least 32 characters of entropy" in str(ctx.exception)
+                        or "insecure placeholder" in str(ctx.exception)
+                    )
+
+    def test_jwt_auth_manager_fails_closed_in_production(self):
+        """Verifies JWTAuthManager fails closed when AGENTTRUST_JWT_SECRET is absent in production."""
+        from identity_manager.jwt_auth import JWTAuthManager
+        env = {
+            "AGENTTRUST_ENV": "production",
+            "AGENTTRUST_JWT_SECRET": "",
+        }
+        with patch.dict(os.environ, env):
+            with self.assertRaises(RuntimeError) as ctx:
+                JWTAuthManager.get_active_secret()
+            self.assertIn("explicit secure AGENTTRUST_JWT_SECRET", str(ctx.exception))
+
+    def test_jwt_auth_manager_uses_consistent_secret(self):
+        """Verifies JWTAuthManager maintains consistent configured secret across calls without ephemeral drift."""
+        from identity_manager.jwt_auth import JWTAuthManager
+        fixed_secret = "configured-enterprise-signing-secret-32-chars-ok"
+        env = {
+            "AGENTTRUST_ENV": "production",
+            "AGENTTRUST_JWT_SECRET": fixed_secret,
+        }
+        with patch.dict(os.environ, env):
+            secret1 = JWTAuthManager.get_active_secret()
+            secret2 = JWTAuthManager.get_active_secret()
+            self.assertEqual(secret1, fixed_secret)
+            self.assertEqual(secret2, fixed_secret)
+
+    def test_production_mode_d_succeeds_with_valid_configuration(self):
+        """Verifies Mode D in production succeeds when live mode, gateway URL, token, and JWT secret are configured."""
+        env = {
+            "AGENTTRUST_ENV": "production",
+            "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
             "CORS_ORIGINS": "https://agenttrust.corp.internal",
             "FABRIC_GATEWAY_MODE": "live",
             "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090",
@@ -109,6 +180,7 @@ class TestProductionResilience(unittest.TestCase):
     def test_production_fails_closed_when_cors_origins_missing(self):
         env = {
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
             "CORS_ORIGINS": "",
         }
         with patch.dict(os.environ, env, clear=False):
@@ -121,6 +193,7 @@ class TestProductionResilience(unittest.TestCase):
     def test_production_rejects_wildcard_cors_origin(self):
         env = {
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
             "CORS_ORIGINS": "https://agenttrust.corp.internal,*",
         }
         with patch.dict(os.environ, env, clear=False):
@@ -133,6 +206,7 @@ class TestProductionResilience(unittest.TestCase):
     def test_production_rejects_localhost_cors_origin(self):
         env = {
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
             "CORS_ORIGINS": "http://localhost:3000",
         }
         with patch.dict(os.environ, env, clear=False):
@@ -145,6 +219,7 @@ class TestProductionResilience(unittest.TestCase):
     def test_production_rejects_origin_with_path(self):
         env = {
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
             "CORS_ORIGINS": "https://agenttrust.corp.internal/path",
         }
         with patch.dict(os.environ, env, clear=False):
@@ -156,6 +231,7 @@ class TestProductionResilience(unittest.TestCase):
     def test_production_rejects_http_origin(self):
         env = {
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
             "CORS_ORIGINS": "http://agenttrust.corp.internal",
         }
         with patch.dict(os.environ, env, clear=False):
@@ -167,6 +243,7 @@ class TestProductionResilience(unittest.TestCase):
     def test_production_accepts_explicit_https_cors_origin(self):
         env = {
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
             "CORS_ORIGINS": "https://agenttrust.corp.internal",
         }
         with patch.dict(os.environ, env, clear=False):

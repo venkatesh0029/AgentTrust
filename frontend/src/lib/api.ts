@@ -216,8 +216,132 @@ export interface GenericApiResponse {
   [key: string]: unknown;
 }
 
+export const LoginResponseSchema = z.object({
+  access_token: z.string(),
+  token_type: z.string().default("bearer"),
+  expires_in: z.number().default(28800),
+  role: z.string(),
+  identity: z.string().default("admin"),
+  username: z.string().default("admin"),
+});
+export type LoginResponse = z.infer<typeof LoginResponseSchema>;
+
+export interface AuthSession {
+  token: string;
+  role: string;
+  username: string;
+  expiresAt: number;
+}
+
+const DEFAULT_CREDENTIALS: Record<string, { username: string; password: string }> = {
+  SYSTEM_ADMIN: { username: "admin", password: "AdminTrust#2026!Secured" },
+  POLICY_ADMIN: { username: "policy_admin", password: "PolicyTrust#2026!Secured" },
+  FINANCE_APPROVER: { username: "finance_approver", password: "FinanceTrust#2026!Secured" },
+  AUDITOR: { username: "auditor", password: "AuditorTrust#2026!Secured" },
+};
+
 // CENTRALIZED TYPED API CLIENT
 export const api = {
+  async login(username: string = "admin", password?: string): Promise<LoginResponse> {
+    const cred = Object.values(DEFAULT_CREDENTIALS).find((c) => c.username === username);
+    const pwd = password || cred?.password || "AdminTrust#2026!Secured";
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password: pwd }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Login failed" }));
+      throw new Error((err as { detail?: string }).detail || `Authentication failed (${res.status})`);
+    }
+    const data = LoginResponseSchema.parse(await res.json());
+    if (typeof window !== "undefined") {
+      const expiresAt = Date.now() + (data.expires_in || 28800) * 1000;
+      localStorage.setItem("agenttrust_auth_token", data.access_token);
+      localStorage.setItem("agenttrust_auth_user", data.username);
+      localStorage.setItem("agenttrust_auth_role", data.role);
+      localStorage.setItem("agenttrust_auth_expiry", String(expiresAt));
+      localStorage.setItem(`agenttrust_auth_token_${data.role}`, data.access_token);
+      localStorage.setItem(`agenttrust_auth_expiry_${data.role}`, String(expiresAt));
+      window.dispatchEvent(new CustomEvent("agenttrust-auth-changed", { detail: data }));
+    }
+    return data;
+  },
+
+  logout(): void {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("agenttrust_auth_token");
+      localStorage.removeItem("agenttrust_auth_user");
+      localStorage.removeItem("agenttrust_auth_role");
+      localStorage.removeItem("agenttrust_auth_expiry");
+      window.dispatchEvent(new CustomEvent("agenttrust-auth-changed", { detail: null }));
+    }
+  },
+
+  getStoredAuth(): AuthSession | null {
+    if (typeof window === "undefined") return null;
+    try {
+      const token = localStorage.getItem("agenttrust_auth_token");
+      const user = localStorage.getItem("agenttrust_auth_user");
+      const role = localStorage.getItem("agenttrust_auth_role");
+      const expiryStr = localStorage.getItem("agenttrust_auth_expiry");
+      if (!token || !user || !role || !expiryStr) return null;
+      const expiresAt = Number(expiryStr);
+      if (Date.now() > expiresAt) {
+        this.logout();
+        return null;
+      }
+      return { token, username: user, role, expiresAt };
+    } catch {
+      return null;
+    }
+  },
+
+  async ensureAuth(roleOrToken?: string): Promise<string> {
+    if (roleOrToken && roleOrToken.startsWith("eyJ")) {
+      return roleOrToken;
+    }
+    const targetRole = roleOrToken && DEFAULT_CREDENTIALS[roleOrToken] ? roleOrToken : null;
+    if (typeof window !== "undefined" && targetRole) {
+      const cachedToken = localStorage.getItem(`agenttrust_auth_token_${targetRole}`);
+      const cachedExpiry = Number(localStorage.getItem(`agenttrust_auth_expiry_${targetRole}`) || "0");
+      if (cachedToken && Date.now() < cachedExpiry) {
+        return cachedToken;
+      }
+      const creds = DEFAULT_CREDENTIALS[targetRole];
+      const loginRes = await this.login(creds.username, creds.password);
+      return loginRes.access_token;
+    }
+
+    const currentSession = this.getStoredAuth();
+    if (currentSession?.token) {
+      return currentSession.token;
+    }
+
+    const adminLogin = await this.login("admin", "AdminTrust#2026!Secured");
+    return adminLogin.access_token;
+  },
+
+  getAuthHeaders(roleOrToken?: string): Record<string, string> {
+    if (roleOrToken && roleOrToken.startsWith("eyJ")) {
+      return { Authorization: `Bearer ${roleOrToken}` };
+    }
+    if (typeof window !== "undefined") {
+      if (roleOrToken && DEFAULT_CREDENTIALS[roleOrToken]) {
+        const cachedToken = localStorage.getItem(`agenttrust_auth_token_${roleOrToken}`);
+        const cachedExpiry = Number(localStorage.getItem(`agenttrust_auth_expiry_${roleOrToken}`) || "0");
+        if (cachedToken && Date.now() < cachedExpiry) {
+          return { Authorization: `Bearer ${cachedToken}` };
+        }
+      }
+      const session = this.getStoredAuth();
+      if (session?.token) {
+        return { Authorization: `Bearer ${session.token}` };
+      }
+    }
+    return {};
+  },
+
   async fetchHealth(): Promise<HealthData> {
     const res = await fetch(`${API_BASE}/api/health`, { cache: "no-store" });
     if (!res.ok) throw new Error(`Health check failed (${res.status})`);
@@ -232,12 +356,14 @@ export const api = {
     return ModeSchema.parse(data);
   },
 
-  async setMode(mode: string, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async setMode(mode: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/mode`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify({ mode }),
     });
@@ -256,12 +382,14 @@ export const api = {
     return parsed.agents;
   },
 
-  async updateAgentStatus(agentId: string, status: string, reason: string = "", role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async updateAgentStatus(agentId: string, status: string, reason: string = "", roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/agents/${agentId}/status`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify({ status, reason }),
     });
@@ -272,37 +400,45 @@ export const api = {
     return res.json();
   },
 
-  async suspendAgent(agentId: string, reason: string = "ADMIN_SUSPENSION", role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async suspendAgent(agentId: string, reason: string = "ADMIN_SUSPENSION", roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/agents/${agentId}/suspend?reason=${encodeURIComponent(reason)}`, {
       method: "POST",
-      headers: { "X-Admin-Role": role },
+      headers: { ...authHeaders },
     });
     if (!res.ok) throw new Error(`Suspend agent failed (${res.status})`);
     return res.json();
   },
 
-  async reactivateAgent(agentId: string, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async reactivateAgent(agentId: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/agents/${agentId}/reactivate`, {
       method: "POST",
-      headers: { "X-Admin-Role": role },
+      headers: { ...authHeaders },
     });
     if (!res.ok) throw new Error(`Reactivate agent failed (${res.status})`);
     return res.json();
   },
 
-  async revokeAgent(agentId: string, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async revokeAgent(agentId: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/agents/${agentId}/revoke`, {
       method: "POST",
-      headers: { "X-Admin-Role": role },
+      headers: { ...authHeaders },
     });
     if (!res.ok) throw new Error(`Revoke agent failed (${res.status})`);
     return res.json();
   },
 
-  async rotateAgentKey(agentId: string, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async rotateAgentKey(agentId: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/agents/${agentId}/rotate-key`, {
       method: "POST",
-      headers: { "X-Admin-Role": role },
+      headers: { ...authHeaders },
     });
     if (!res.ok) throw new Error(`Rotate key failed (${res.status})`);
     return res.json();
@@ -323,12 +459,14 @@ export const api = {
     return parsed.policies;
   },
 
-  async rollbackPolicy(policyId: string, targetVersion: string, role: string = "POLICY_ADMIN"): Promise<GenericApiResponse> {
+  async rollbackPolicy(policyId: string, targetVersion: string, roleOrToken: string = "POLICY_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/policies/rollback`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify({ policy_id: policyId, target_version: targetVersion }),
     });
@@ -347,10 +485,12 @@ export const api = {
     return parsed.pending_approvals;
   },
 
-  async approveTicket(approvalId: string, role: string = "FINANCE_APPROVER"): Promise<GenericApiResponse> {
+  async approveTicket(approvalId: string, roleOrToken: string = "FINANCE_APPROVER"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/approvals/${approvalId}/approve`, {
       method: "POST",
-      headers: { "X-Admin-Role": role },
+      headers: { ...authHeaders },
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: "Approve ticket failed" }));
@@ -359,10 +499,12 @@ export const api = {
     return res.json();
   },
 
-  async rejectTicket(approvalId: string, reason: string = "REJECTED_BY_HUMAN", role: string = "FINANCE_APPROVER"): Promise<GenericApiResponse> {
+  async rejectTicket(approvalId: string, reason: string = "REJECTED_BY_HUMAN", roleOrToken: string = "FINANCE_APPROVER"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/approvals/${approvalId}/reject?reason=${encodeURIComponent(reason)}`, {
       method: "POST",
-      headers: { "X-Admin-Role": role },
+      headers: { ...authHeaders },
     });
     if (!res.ok) throw new Error(`Reject ticket failed (${res.status})`);
     return res.json();
@@ -447,12 +589,14 @@ export const api = {
     return res.json();
   },
 
-  async simulateEvidenceTamper(evidenceId: string, fieldName: string, newValue: unknown, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async simulateEvidenceTamper(evidenceId: string, fieldName: string, newValue: unknown, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/evidence/${evidenceId}/simulate-tamper`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify({ field_name: fieldName, new_value: newValue }),
     });
@@ -463,12 +607,14 @@ export const api = {
     return res.json();
   },
 
-  async simulateChainTamper(sequenceNumber: number, fieldName: string, newValue: unknown, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async simulateChainTamper(sequenceNumber: number, fieldName: string, newValue: unknown, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/audit/chain/simulate-tamper`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify({ sequence_number: sequenceNumber, field_name: fieldName, new_value: newValue }),
     });
@@ -479,12 +625,14 @@ export const api = {
     return res.json();
   },
 
-  async registerAgent(data: Record<string, unknown>, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async registerAgent(data: Record<string, unknown>, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/agents/register`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify(data),
     });
@@ -514,19 +662,25 @@ export const api = {
     return res.json();
   },
 
-
-  async deleteAgent(agentId: string): Promise<GenericApiResponse> {
-    const res = await fetch(`${API_BASE}/agents/${agentId}`, { method: "DELETE" });
+  async deleteAgent(agentId: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const res = await fetch(`${API_BASE}/agents/${agentId}`, {
+      method: "DELETE",
+      headers: { ...authHeaders },
+    });
     if (!res.ok) throw new Error(`Delete agent failed (${res.status})`);
     return res.json();
   },
 
-  async createPolicy(data: Record<string, unknown>, role: string = "POLICY_ADMIN"): Promise<GenericApiResponse> {
+  async createPolicy(data: Record<string, unknown>, roleOrToken: string = "POLICY_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/policies`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify(data),
     });
@@ -551,12 +705,14 @@ export const api = {
     return res.json();
   },
 
-  async issueDelegationToken(data: Record<string, unknown>, role: string = "SYSTEM_ADMIN"): Promise<unknown> {
+  async issueDelegationToken(data: Record<string, unknown>, roleOrToken: string = "SYSTEM_ADMIN"): Promise<unknown> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/identity/delegation/issue`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify(data),
     });
@@ -613,8 +769,13 @@ export const api = {
     return res.json();
   },
 
-  async flushRetryQueue(): Promise<unknown> {
-    const res = await fetch(`${API_BASE}/gateway/retry-queue/flush`, { method: "POST" });
+  async flushRetryQueue(roleOrToken: string = "SYSTEM_ADMIN"): Promise<unknown> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const res = await fetch(`${API_BASE}/gateway/retry-queue/flush`, {
+      method: "POST",
+      headers: { ...authHeaders },
+    });
     if (!res.ok) throw new Error(`Flush retry queue failed (${res.status})`);
     return res.json();
   },

@@ -188,3 +188,119 @@ def test_forged_and_expired_jwt_are_rejected():
     )
     assert res_expired.status_code == 401
     assert "Expired" in res_expired.json()["detail"]
+
+
+def test_frontend_multi_role_authenticated_operations_flow():
+    """
+    Simulates the frontend and dashboard authentication lifecycle across all four personas:
+    1. Authenticates each persona via /auth/login.
+    2. Exercises role-specific administrative operations with Authorization: Bearer <token>.
+    3. Confirms strict role separation and denial when permissions are violated.
+    """
+    # 1. Login as Policy Admin and manage policies
+    res_pol_login = client.post(
+        "/auth/login",
+        json={"username": "policy_admin", "password": "PolicyTrust#2026!Secured"},
+    )
+    assert res_pol_login.status_code == 200
+    pol_token = res_pol_login.json()["access_token"]
+    assert res_pol_login.json()["role"] == "POLICY_ADMIN"
+
+    # Policy Admin creates a policy v1.0
+    policy_id = f"POL-{uuid.uuid4().hex[:6].upper()}"
+    res_create_pol = client.post(
+        "/policies",
+        json={
+            "policy_id": policy_id,
+            "agent_id": "*",
+            "allowed_actions": ["TRANSFER_FUNDS"],
+            "allowed_resource": "*",
+            "maximum_amount": 50000,
+            "human_approval_above": 10000,
+            "version": "1.0",
+        },
+        headers={"Authorization": f"Bearer {pol_token}"},
+    )
+    assert res_create_pol.status_code == 200
+
+    # Policy Admin updates policy to v1.1
+    res_update_pol = client.post(
+        "/policies",
+        json={
+            "policy_id": policy_id,
+            "agent_id": "*",
+            "allowed_actions": ["TRANSFER_FUNDS"],
+            "allowed_resource": "*",
+            "maximum_amount": 60000,
+            "human_approval_above": 15000,
+            "version": "1.1",
+        },
+        headers={"Authorization": f"Bearer {pol_token}"},
+    )
+    assert res_update_pol.status_code == 200
+
+    # Policy Admin rolls back policy to v1.0
+    res_rollback = client.post(
+        "/policies/rollback",
+        json={"policy_id": policy_id, "target_version": "1.0"},
+        headers={"Authorization": f"Bearer {pol_token}"},
+    )
+    assert res_rollback.status_code == 200
+
+    # 2. Login as Finance Approver and review approvals
+    res_fin_login = client.post(
+        "/auth/login",
+        json={"username": "finance_approver", "password": "FinanceTrust#2026!Secured"},
+    )
+    assert res_fin_login.status_code == 200
+    fin_token = res_fin_login.json()["access_token"]
+    assert res_fin_login.json()["role"] == "FINANCE_APPROVER"
+
+    # Finance approver attempts policy creation -> MUST FAIL (403 RBAC Denial)
+    res_denied_pol = client.post(
+        "/policies",
+        json={"policy_id": "DENIED-POL", "allowed_actions": []},
+        headers={"Authorization": f"Bearer {fin_token}"},
+    )
+    assert res_denied_pol.status_code == 403
+    assert "RBAC Denial" in res_denied_pol.json()["detail"]
+
+    # 3. Login as System Admin and perform system-level operations
+    res_admin_login = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"},
+    )
+    assert res_admin_login.status_code == 200
+    admin_token = res_admin_login.json()["access_token"]
+    assert res_admin_login.json()["role"] == "SYSTEM_ADMIN"
+
+    # System Admin toggles operational mode
+    res_mode = client.post(
+        "/mode",
+        json={"mode": "MODE_D_AGENTTRUST_FABRIC"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_mode.status_code == 200
+    assert "current_mode" in res_mode.json()
+
+    # System Admin registers an agent
+    agent_id = f"FLOW-AGENT-{uuid.uuid4().hex[:4]}"
+    res_reg = client.post(
+        "/agents/register",
+        json={"agent_id": agent_id, "agent_name": "FlowAgent", "owner": "AdminOps"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_reg.status_code == 200
+    assert res_reg.json()["agent"]["agent_id"] == agent_id
+
+    # System Admin suspends the agent
+    res_suspend = client.post(
+        f"/agents/{agent_id}/suspend?reason=MAINTENANCE",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_suspend.status_code == 200
+
+    # 4. Verify unauthenticated calls are rejected with 401
+    res_unauth = client.post("/mode", json={"mode": "MODE_D_AGENTTRUST_FABRIC"})
+    assert res_unauth.status_code == 401
+    assert "Authentication Required" in res_unauth.json()["detail"]

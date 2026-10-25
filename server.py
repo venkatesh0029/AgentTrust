@@ -61,6 +61,32 @@ def validate_production_configuration(env_profile: str, current_mode: str) -> No
                 "SECURITY VIOLATION: Production environment requires explicit secure GATEWAY_SECRET. "
                 "Refusing to initialize with default secrets."
             )
+        jwt_secret = os.environ.get("AGENTTRUST_JWT_SECRET", "").strip()
+        insecure_jwt_secrets = {
+            "secret",
+            "changeme",
+            "default",
+            "default_jwt_secret",
+            "password",
+            "default_secret_key_change_in_production",
+            "admin",
+            "test",
+        }
+        if not jwt_secret:
+            raise RuntimeError(
+                "SECURITY VIOLATION: Production environment requires explicit secure AGENTTRUST_JWT_SECRET. "
+                "Refusing to initialize with missing JWT secret."
+            )
+        if len(jwt_secret) < 32:
+            raise RuntimeError(
+                "SECURITY VIOLATION: Production environment requires AGENTTRUST_JWT_SECRET "
+                "with at least 32 characters of entropy."
+            )
+        if jwt_secret.lower() in insecure_jwt_secrets:
+            raise RuntimeError(
+                "SECURITY VIOLATION: AGENTTRUST_JWT_SECRET is set to an insecure placeholder. "
+                "Production requires a cryptographically strong, unique secret."
+            )
         cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
         if not cors_origins:
             raise RuntimeError(
