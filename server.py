@@ -23,6 +23,7 @@ from fabric.fabric_client import FabricClient
 from human_approval.approval_manager import HumanApprovalManager
 
 # AgentTrust Modules
+from identity_manager.admin_auth import AdminAuthManager
 from identity_manager.certificate_manager import CertificateManager
 from identity_manager.jwt_auth import JWTAuthManager
 from identity_manager.signature_manager import SignatureManager
@@ -387,7 +388,7 @@ def check_admin_permission(required_permission: str, x_admin_role: str | None = 
 
     # 2. Check X-Admin-Role header
     if not role_str and x_admin_role:
-        if x_admin_role.startswith("eyJ"): # Standard JWT header prefix
+        if x_admin_role.startswith("eyJ"):  # Standard JWT header prefix
             try:
                 payload = JWTAuthManager.verify_token(x_admin_role)
                 role_str = payload.get("role")
@@ -397,12 +398,23 @@ def check_admin_permission(required_permission: str, x_admin_role: str | None = 
                     detail=f"JWT Header Authentication Failure: {e!s}"
                 )
         else:
-            role_str = x_admin_role
+            allow_insecure = os.environ.get("AGENTTRUST_ALLOW_INSECURE_ROLE_HEADERS", "0").lower() in ("1", "true")
+            if allow_insecure:
+                role_str = x_admin_role
+            else:
+                raise HTTPException(
+                    status_code=401,
+                    detail=(
+                        "Authentication Required: Plaintext 'X-Admin-Role' headers are prohibited "
+                        "due to privilege escalation risk. Authenticate via '/auth/login' to obtain a signed JWT and pass "
+                        "'Authorization: Bearer <token>' or supply a valid signed JWT in 'X-Admin-Role'."
+                    )
+                )
 
     if not role_str:
         raise HTTPException(
             status_code=401,
-            detail="Authentication Required: Missing 'Authorization: Bearer <JWT>' or 'X-Admin-Role' header."
+            detail="Authentication Required: Missing 'Authorization: Bearer <JWT>' header."
         )
 
     try:
@@ -431,27 +443,31 @@ def check_admin_permission_dep(required_permission: str):
 # --- Pydantic API Models ---
 class LoginRequest(BaseModel):
     username: str = Field(default="admin", description="Administrator or User Username")
-    password: str | None = Field(default="", description="Password")
-    role: str = Field(default="SYSTEM_ADMIN", description="Requested Admin Role")
+    password: str = Field(..., description="Administrator Password")
+    role: str | None = Field(default=None, description="Deprecated: role is assigned from authenticated identity")
 
 @app.post("/auth/login", response_model=dict[str, Any], tags=["Authentication"])
 @app.post("/api/v1/auth/login", response_model=dict[str, Any], tags=["Authentication"])
 def login_for_access_token(req: LoginRequest):
     """
-    Issues signed JWT access token for administrative actions.
+    Authenticates administrator credentials using PBKDF2-HMAC-SHA256 password verification.
+    Issues a cryptographically signed JWT access token with the user's bound administrative role.
     """
-    try:
-        admin_role = AdminRole(req.role)
-    except Exception:
-        raise HTTPException(status_code=400, detail=f"Invalid Admin Role '{req.role}'. Must be one of {[r.value for r in AdminRole]}")
+    user = AdminAuthManager.authenticate(req.username, req.password)
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication Failed: Invalid administrator username or password."
+        )
 
-    token = JWTAuthManager.create_admin_token(role=admin_role.value, identity_id=req.username)
+    token = JWTAuthManager.create_admin_token(role=user.role.value, identity_id=user.username)
     return {
         "access_token": token,
         "token_type": "bearer",
         "expires_in": 28800,
-        "role": admin_role.value,
-        "identity": req.username
+        "role": user.role.value,
+        "identity": user.username,
+        "username": user.username,
     }
 
 class ModeRequest(BaseModel):

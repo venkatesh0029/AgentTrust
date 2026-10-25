@@ -22,7 +22,11 @@ if str(PROJECT_ROOT) not in sys.path:
 # Configure Live Fabric Gateway Bridge credentials
 os.environ["FABRIC_GATEWAY_MODE"] = "live"
 os.environ["FABRIC_GATEWAY_URL"] = "http://127.0.0.1:8090"
-os.environ["FABRIC_GATEWAY_TOKEN"] = "jWIcW8MImMbQWx8t9Q4H4uE-g1ko1nS9UmUR-xfw10x8U1zZnQXSqZ8jufIvLig1"
+if not os.environ.get("FABRIC_GATEWAY_TOKEN"):
+    raise SystemExit(
+        "FABRIC_GATEWAY_TOKEN is required. Load the local secret with "
+        "'. .\\scripts\\load_fabric_gateway_env.ps1' before running this suite."
+    )
 
 from fabric.fabric_client import FabricClient  # noqa: E402
 

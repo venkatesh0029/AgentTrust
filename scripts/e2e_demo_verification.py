@@ -49,6 +49,19 @@ def test_checklist():
     assert st == 200 and chain_status.get("valid") is True
     results["1. Dashboard and Ledger"] = "VERIFIED"
 
+    # Authenticate admin, policy_admin, and auditor
+    admin_login_st, admin_login = post("/auth/login", {"username": "admin", "password": "AdminTrust#2026!Secured"})
+    assert admin_login_st == 200, f"Admin login failed: {admin_login}"
+    admin_headers = {"Authorization": f"Bearer {admin_login.get('access_token')}"}
+
+    pol_login_st, pol_login = post("/auth/login", {"username": "policy_admin", "password": "PolicyTrust#2026!Secured"})
+    assert pol_login_st == 200, f"Policy admin login failed: {pol_login}"
+    policy_headers = {"Authorization": f"Bearer {pol_login.get('access_token')}"}
+
+    aud_login_st, aud_login = post("/auth/login", {"username": "auditor", "password": "AuditorTrust#2026!Secured"})
+    assert aud_login_st == 200, f"Auditor login failed: {aud_login}"
+    auditor_headers = {"Authorization": f"Bearer {aud_login.get('access_token')}"}
+
     # 2. Agent registration and policies
     print("\n--- 2. Agent registration and policies ---")
     # Unauthorized test
@@ -73,7 +86,7 @@ def test_checklist():
         "policy_id": "FIN-POLICY-001",
         "agent_version": "1.0",
         "capabilities": ["CREATE_PURCHASE_ORDER", "TRANSFER_FUNDS"]
-    }, headers={"X-Admin-Role": "SYSTEM_ADMIN"})
+    }, headers=admin_headers)
     print(f"Authorized agent registration status: {auth_st}, agent: {reg_data.get('agent', {}).get('agent_id')}")
     assert auth_st == 200
 
@@ -88,7 +101,7 @@ def test_checklist():
         "working_hours_start": "00:00",
         "working_hours_end": "23:59",
         "version": "1.0"
-    }, headers={"X-Admin-Role": "POLICY_ADMIN"})
+    }, headers=policy_headers)
     print(f"Policy creation status: {pol_st}, policy: {pol_data.get('policy', {}).get('policy_id')}")
     assert pol_st == 200
     results["2. Agent registration and policies"] = "VERIFIED"
@@ -132,7 +145,7 @@ def test_checklist():
         "allowed_actions": ["CREATE_PURCHASE_ORDER"],
         "maximum_amount": 50000.0,
         "ttl_seconds": 3600
-    }, headers={"X-Admin-Role": "SYSTEM_ADMIN"})
+    }, headers=admin_headers)
     print(f"Delegation token issuance status: {del_st}, token_id: {del_data.get('token_id')}")
     assert del_st == 200
 
@@ -143,7 +156,7 @@ def test_checklist():
         "allowed_actions": ["CREATE_PURCHASE_ORDER"],
         "maximum_amount": 50000.0,
         "ttl_seconds": 3600
-    }, headers={"X-Admin-Role": "AUDITOR"})
+    }, headers=auditor_headers)
     print(f"Auditor delegation attempt rejected with status: {bad_del_st}")
     assert bad_del_st in (401, 403)
     results["4. Identity and delegation"] = "VERIFIED"
@@ -189,11 +202,11 @@ def test_checklist():
     assert mcp_st == 200
 
     # Mode switch
-    mode_st, mode_data = post("/mode", {"mode": "MODE_C_AGENTTRUST_NO_FABRIC"}, headers={"X-Admin-Role": "SYSTEM_ADMIN"})
+    mode_st, mode_data = post("/mode", {"mode": "MODE_C_AGENTTRUST_NO_FABRIC"}, headers=admin_headers)
     print(f"Mode switch to MODE_C status: {mode_st}, current_mode: {mode_data.get('current_mode')}")
     assert mode_st == 200 and mode_data.get("current_mode") == "MODE_C_AGENTTRUST_NO_FABRIC"
 
-    mode_reset_st, mode_reset_data = post("/mode", {"mode": "MODE_D_AGENTTRUST_FABRIC"}, headers={"X-Admin-Role": "SYSTEM_ADMIN"})
+    mode_reset_st, mode_reset_data = post("/mode", {"mode": "MODE_D_AGENTTRUST_FABRIC"}, headers=admin_headers)
     print(f"Mode switch reset to MODE_D status: {mode_reset_st}, current_mode: {mode_reset_data.get('current_mode')}")
     assert mode_reset_st == 200 and mode_reset_data.get("current_mode") == "MODE_D_AGENTTRUST_FABRIC"
     results["7. Operational Sandbox"] = "VERIFIED"

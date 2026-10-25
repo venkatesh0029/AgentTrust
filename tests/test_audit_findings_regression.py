@@ -3,6 +3,8 @@ import uuid
 
 from fastapi.testclient import TestClient
 
+from agent_registry.admin_rbac import AdminRole
+from identity_manager.jwt_auth import JWTAuthManager
 from identity_manager.signature_manager import SignatureManager
 from policy_engine.policy_evaluator import PolicyEvaluator
 from protected_api.finance_api import ProtectedFinanceAPI
@@ -10,29 +12,42 @@ from server import action_gateway, agent_registry, app
 
 client = TestClient(app)
 
+ADMIN_HEADERS = {"Authorization": f"Bearer {JWTAuthManager.create_admin_token(role=AdminRole.SYSTEM_ADMIN, identity_id='admin')}"}
+AUDITOR_HEADERS = {"Authorization": f"Bearer {JWTAuthManager.create_admin_token(role=AdminRole.AUDITOR, identity_id='auditor')}"}
+FINANCE_APPROVER_HEADERS = {"Authorization": f"Bearer {JWTAuthManager.create_admin_token(role=AdminRole.FINANCE_APPROVER, identity_id='finance_approver')}"}
+
 # --- Finding #1 & #2: RBAC Header Enforcement ---
 def test_regression_rbac_header_enforcement():
-    """Verify that RBAC correctly reads X-Admin-Role header and fails closed on unprivileged roles."""
-    # AUDITOR trying to register an agent MUST fail with 403
+    """Verify that RBAC correctly validates authenticated roles, fails closed on unprivileged roles, and rejects plaintext headers."""
+    # Plaintext X-Admin-Role header MUST fail with 401 Unauthorized (anti-privilege escalation)
+    res_raw = client.post(
+        "/agents/register",
+        json={"agent_id": "TEST-REG-001", "agent_name": "TestReg", "owner": "Ops"},
+        headers={"X-Admin-Role": "SYSTEM_ADMIN"}
+    )
+    assert res_raw.status_code == 401
+    assert "Plaintext 'X-Admin-Role' headers are prohibited" in res_raw.json()["detail"]
+
+    # Authenticated AUDITOR trying to register an agent MUST fail with 403
     res_auditor = client.post(
         "/agents/register",
         json={"agent_id": "TEST-REG-001", "agent_name": "TestReg", "owner": "Ops"},
-        headers={"X-Admin-Role": "AUDITOR"}
+        headers=AUDITOR_HEADERS
     )
     assert res_auditor.status_code == 403
     assert "RBAC Denial" in res_auditor.json()["detail"]
 
-    # SYSTEM_ADMIN registering an agent MUST succeed
+    # Authenticated SYSTEM_ADMIN registering an agent MUST succeed
     res_admin = client.post(
         "/agents/register",
         json={"agent_id": f"TEST-REG-{uuid.uuid4().hex[:4]}", "agent_name": "TestRegAdmin", "owner": "Ops"},
-        headers={"X-Admin-Role": "SYSTEM_ADMIN"}
+        headers=ADMIN_HEADERS
     )
     assert res_admin.status_code == 200
     assert "private_key" in res_admin.json()["agent"]
 
 def test_regression_rbac_finance_approver_role():
-    """Verify that FINANCE_APPROVER role can approve tickets while AUDITOR is denied."""
+    """Verify that FINANCE_APPROVER role can approve tickets while AUDITOR is denied and plaintext is rejected."""
     # Register pending approval
     agent_id = f"AGENT-APPR-{uuid.uuid4().hex[:4]}"
     agent_registry.register_agent(agent_id=agent_id, agent_name="ApprAgent")
@@ -48,12 +63,16 @@ def test_regression_rbac_finance_approver_role():
     )
     app_id = app_record["approval_id"]
 
-    # AUDITOR trying to approve MUST fail with 403
-    res_auditor = client.post(f"/approvals/{app_id}/approve", headers={"X-Admin-Role": "AUDITOR"})
+    # Plaintext header MUST fail with 401
+    res_raw = client.post(f"/approvals/{app_id}/approve", headers={"X-Admin-Role": "FINANCE_APPROVER"})
+    assert res_raw.status_code == 401
+
+    # Authenticated AUDITOR trying to approve MUST fail with 403
+    res_auditor = client.post(f"/approvals/{app_id}/approve", headers=AUDITOR_HEADERS)
     assert res_auditor.status_code == 403
 
-    # FINANCE_APPROVER trying to approve MUST succeed (status 200)
-    res_approver = client.post(f"/approvals/{app_id}/approve", headers={"X-Admin-Role": "FINANCE_APPROVER"})
+    # Authenticated FINANCE_APPROVER trying to approve MUST succeed (status 200)
+    res_approver = client.post(f"/approvals/{app_id}/approve", headers=FINANCE_APPROVER_HEADERS)
     assert res_approver.status_code == 200
 
 # --- Finding #4: NaN Amount Rejection ---
@@ -142,11 +161,17 @@ def test_regression_direct_api_bypass_denied():
 
 # --- Finding #8: Admin-Gated Operational Mode Switching ---
 def test_regression_mode_switch_admin_gated():
-    """Verify that switching operational modes requires SYSTEM_ADMIN role."""
-    res_auditor = client.post("/mode", json={"mode": "MODE_A_DIRECT_API"}, headers={"X-Admin-Role": "AUDITOR"})
+    """Verify that switching operational modes requires SYSTEM_ADMIN role and rejects plaintext headers."""
+    # Plaintext header rejected with 401
+    res_raw = client.post("/mode", json={"mode": "MODE_A_DIRECT_API"}, headers={"X-Admin-Role": "SYSTEM_ADMIN"})
+    assert res_raw.status_code == 401
+
+    # Authenticated AUDITOR rejected with 403
+    res_auditor = client.post("/mode", json={"mode": "MODE_A_DIRECT_API"}, headers=AUDITOR_HEADERS)
     assert res_auditor.status_code == 403
 
-    res_admin = client.post("/mode", json={"mode": "MODE_D_AGENTTRUST_FABRIC"}, headers={"X-Admin-Role": "SYSTEM_ADMIN"})
+    # Authenticated SYSTEM_ADMIN succeeds with 200
+    res_admin = client.post("/mode", json={"mode": "MODE_D_AGENTTRUST_FABRIC"}, headers=ADMIN_HEADERS)
     assert res_admin.status_code == 200
 
 # --- Finding #9: Revoked Agent Cannot Be Reactivated ---

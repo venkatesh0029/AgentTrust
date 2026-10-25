@@ -40,9 +40,10 @@ class JWTAuthManager:
     ) -> str:
         """Generates a signed JWT token containing admin role and identity claims."""
         now = int(time.time())
+        role_str = role.value if hasattr(role, "value") else str(role)
         payload = {
             "sub": identity_id,
-            "role": role,
+            "role": role_str,
             "iat": now,
             "exp": now + expires_in,
             "iss": "AgentTrust-Auth-Server"
