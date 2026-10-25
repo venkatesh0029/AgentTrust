@@ -3,7 +3,7 @@ Policy Engine & Version Control Router.
 Manages versioned agent authorization policies, limits, working hours, and rollbacks.
 """
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Cookie, Header, HTTPException
 from pydantic import BaseModel, Field
 from policy_engine.policy_models import PolicyRecord, WorkingHours
 
@@ -36,9 +36,9 @@ def get_policy_loader():
     return policy_loader
 
 
-def check_perm(perm: str, x_admin_role: str | None, authorization: str | None):
+def check_perm(perm: str, x_admin_role: str | None, authorization: str | None, cookie_token: str | None = None):
     from server import check_admin_permission
-    return check_admin_permission(perm, x_admin_role, authorization)
+    return check_admin_permission(perm, x_admin_role, authorization, cookie_token)
 
 
 @router.get("", summary="List All Active Security Policies")
@@ -61,9 +61,10 @@ def get_policy(policy_id: str):
 def create_or_update_policy(
     req: PolicyCreateRequest,
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
-    authorization: str | None = Header(None)
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias="agenttrust_session"),
 ):
-    role = check_perm("create_policy", x_admin_role, authorization)
+    role = check_perm("create_policy", x_admin_role, authorization, cookie_token)
     role_val = role.value if hasattr(role, "value") else str(role)
 
     resource = req.allowed_resource
@@ -119,9 +120,10 @@ def create_or_update_policy(
 def rollback_policy(
     req: PolicyRollbackRequest,
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
-    authorization: str | None = Header(None)
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias="agenttrust_session"),
 ):
-    role = check_perm("rollback_policy", x_admin_role, authorization)
+    role = check_perm("rollback_policy", x_admin_role, authorization, cookie_token)
     role_val = role.value if hasattr(role, "value") else str(role)
 
     loader = get_policy_loader()

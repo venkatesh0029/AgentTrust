@@ -5,7 +5,7 @@ import uuid
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException
+from fastapi import Body, Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -391,7 +391,12 @@ app.include_router(scenarios.router)
 
 
 # --- RBAC & JWT Helper Dependency ---
-def check_admin_permission(required_permission: str, x_admin_role: str | None = None, authorization: str | None = None) -> AdminRole:
+def check_admin_permission(
+    required_permission: str,
+    x_admin_role: str | None = None,
+    authorization: str | None = None,
+    cookie_token: str | None = None,
+) -> AdminRole:
     role_str = None
 
     # 1. First check JWT Authorization header
@@ -406,7 +411,7 @@ def check_admin_permission(required_permission: str, x_admin_role: str | None = 
                 detail=f"JWT Authentication Failure: {e!s}"
             )
 
-    # 2. Check X-Admin-Role header
+    # 2. Check explicit X-Admin-Role header
     if not role_str and x_admin_role:
         if x_admin_role.startswith("eyJ"):  # Standard JWT header prefix
             try:
@@ -431,10 +436,21 @@ def check_admin_permission(required_permission: str, x_admin_role: str | None = 
                     )
                 )
 
+    # 3. Next check HttpOnly session cookie (for ambient browser session protection)
+    if not role_str and cookie_token:
+        try:
+            payload = JWTAuthManager.verify_token(cookie_token)
+            role_str = payload.get("role")
+        except Exception as e:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Session Cookie Authentication Failure: {e!s}"
+            )
+
     if not role_str:
         raise HTTPException(
             status_code=401,
-            detail="Authentication Required: Missing 'Authorization: Bearer <JWT>' header."
+            detail="Authentication Required: Missing 'Authorization: Bearer <JWT>' header or session cookie."
         )
 
     try:
@@ -454,10 +470,12 @@ def check_admin_permission(required_permission: str, x_admin_role: str | None = 
 
 def check_admin_permission_dep(required_permission: str):
     def _dependency(
+        request: Request,
         x_admin_role: str | None = Header(default=None, alias="X-Admin-Role"),
-        authorization: str | None = Header(default=None, alias="Authorization")
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> AdminRole:
-        return check_admin_permission(required_permission, x_admin_role, authorization)
+        cookie_token = request.cookies.get("agenttrust_session")
+        return check_admin_permission(required_permission, x_admin_role, authorization, cookie_token)
     return _dependency
 
 # --- Pydantic API Models ---
@@ -468,10 +486,10 @@ class LoginRequest(BaseModel):
 
 @app.post("/auth/login", response_model=dict[str, Any], tags=["Authentication"])
 @app.post("/api/v1/auth/login", response_model=dict[str, Any], tags=["Authentication"])
-def login_for_access_token(req: LoginRequest):
+def login_for_access_token(req: LoginRequest, response: Response):
     """
     Authenticates administrator credentials using PBKDF2-HMAC-SHA256 password verification.
-    Issues a cryptographically signed JWT access token with the user's bound administrative role.
+    Issues a cryptographically signed JWT access token and sets an HttpOnly, Secure, SameSite=Lax cookie.
     """
     user = AdminAuthManager.authenticate(req.username, req.password)
     if not user:
@@ -481,6 +499,19 @@ def login_for_access_token(req: LoginRequest):
         )
 
     token = JWTAuthManager.create_admin_token(role=user.role.value, identity_id=user.username)
+
+    # Set HttpOnly, Secure (in production), SameSite=Lax cookie
+    is_production = ENV_PROFILE in ("production", "prod")
+    response.set_cookie(
+        key="agenttrust_session",
+        value=token,
+        max_age=28800,
+        httponly=True,
+        secure=is_production,
+        samesite="lax",
+        path="/",
+    )
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -488,6 +519,68 @@ def login_for_access_token(req: LoginRequest):
         "role": user.role.value,
         "identity": user.username,
         "username": user.username,
+    }
+
+@app.post("/auth/logout", tags=["Authentication"])
+@app.post("/api/v1/auth/logout", tags=["Authentication"])
+def logout_admin_session(
+    response: Response,
+    request: Request,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+):
+    """
+    Terminates the administrative session:
+    1. Revokes the active JWT token so subsequent requests with it are rejected.
+    2. Clears the HttpOnly session cookie.
+    """
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split("Bearer ", 1)[1].strip()
+    elif request.cookies.get("agenttrust_session"):
+        token = request.cookies.get("agenttrust_session")
+
+    if token:
+        JWTAuthManager.revoke_token(token)
+
+    is_production = ENV_PROFILE in ("production", "prod")
+    response.delete_cookie(
+        key="agenttrust_session",
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=is_production,
+    )
+    return {"status": "SUCCESS", "message": "Administrative session successfully terminated."}
+
+@app.get("/auth/session", tags=["Authentication"])
+@app.get("/api/v1/auth/session", tags=["Authentication"])
+def get_current_session(
+    request: Request,
+    authorization: str | None = Header(default=None, alias="Authorization")
+):
+    """
+    Returns the currently authenticated administrative identity and role from HttpOnly cookie or Authorization header.
+    Never exposes raw secrets; allows the frontend to initialize user state securely without browser token storage.
+    """
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split("Bearer ", 1)[1].strip()
+    elif request.cookies.get("agenttrust_session"):
+        token = request.cookies.get("agenttrust_session")
+
+    if not token:
+        raise HTTPException(status_code=401, detail="No active authenticated session.")
+
+    try:
+        payload = JWTAuthManager.verify_token(token)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid or expired session: {e!s}")
+
+    return {
+        "authenticated": True,
+        "username": payload.get("sub", "admin"),
+        "role": payload.get("role", "SYSTEM_ADMIN"),
+        "expires_at": payload.get("exp"),
     }
 
 class ModeRequest(BaseModel):

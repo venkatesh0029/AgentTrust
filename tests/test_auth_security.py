@@ -14,6 +14,7 @@ import time
 import uuid
 
 import jwt
+import pytest
 from fastapi.testclient import TestClient
 
 from agent_registry.admin_rbac import AdminRole
@@ -22,6 +23,16 @@ from identity_manager.jwt_auth import JWT_ALGORITHM, JWTAuthManager
 from server import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def reset_client_and_revocations():
+    """Ensures each test starts with an empty cookie jar and clean token revocation set."""
+    client.cookies.clear()
+    JWTAuthManager.clear_revoked_tokens()
+    yield
+    client.cookies.clear()
+    JWTAuthManager.clear_revoked_tokens()
 
 
 def test_login_rejects_missing_or_incorrect_password():
@@ -301,6 +312,178 @@ def test_frontend_multi_role_authenticated_operations_flow():
     assert res_suspend.status_code == 200
 
     # 4. Verify unauthenticated calls are rejected with 401
+    client.cookies.clear()
     res_unauth = client.post("/mode", json={"mode": "MODE_D_AGENTTRUST_FABRIC"})
     assert res_unauth.status_code == 401
     assert "Authentication Required" in res_unauth.json()["detail"]
+
+
+def test_login_sets_httponly_session_cookie():
+    """Verify that /auth/login sets the HttpOnly, SameSite=Lax session cookie."""
+    res = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"},
+    )
+    assert res.status_code == 200
+    assert "agenttrust_session" in res.cookies
+    cookie_header = res.headers.get("set-cookie", "")
+    assert "agenttrust_session=" in cookie_header
+    assert "HttpOnly" in cookie_header
+    assert "samesite=lax" in cookie_header.lower()
+
+
+def test_cookie_session_authorizes_administrative_requests():
+    """Verify that a client presenting an agenttrust_session cookie can access administrative endpoints without Authorization header."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["access_token"]
+
+    # Call /auth/session using only the cookie
+    client.cookies["agenttrust_session"] = token
+    res_session = client.get("/auth/session")
+    assert res_session.status_code == 200
+    session_data = res_session.json()
+    assert session_data["authenticated"] is True
+    assert session_data["username"] == "admin"
+    assert session_data["role"] == "SYSTEM_ADMIN"
+
+    # Call /mode using only the cookie
+    res_mode = client.post(
+        "/mode",
+        json={"mode": "MODE_D_AGENTTRUST_FABRIC"},
+    )
+    assert res_mode.status_code == 200
+    assert res_mode.json()["authorized_by"] == "SYSTEM_ADMIN"
+
+
+def test_logout_clears_cookie_and_revokes_token():
+    """Verify that /auth/logout revokes the token and clears the agenttrust_session cookie."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["access_token"]
+
+    # Verify token is active before logout
+    assert not JWTAuthManager.is_token_revoked(token)
+
+    # Perform logout
+    client.cookies["agenttrust_session"] = token
+    res_logout = client.post(
+        "/auth/logout",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res_logout.status_code == 200
+    assert res_logout.json()["status"] == "SUCCESS"
+
+    # Verify cookie was cleared
+    set_cookie = res_logout.headers.get("set-cookie", "")
+    assert 'agenttrust_session=""' in set_cookie or "agenttrust_session=;" in set_cookie or "Max-Age=0" in set_cookie
+
+    # Verify token is now marked as revoked
+    assert JWTAuthManager.is_token_revoked(token)
+
+
+def test_unauthorized_requests_after_logout():
+    """Verify that subsequent requests using a revoked token or deleted cookie return 401."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"},
+    )
+    token = res_login.json()["access_token"]
+
+    # Logout to revoke
+    client.post("/auth/logout", headers={"Authorization": f"Bearer {token}"})
+
+    # 1. Bearer request with revoked token must fail with 401
+    client.cookies.clear()
+    res_subsequent_bearer = client.post(
+        "/mode",
+        json={"mode": "MODE_D_AGENTTRUST_FABRIC"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res_subsequent_bearer.status_code == 401
+    assert "Revoked" in res_subsequent_bearer.json()["detail"]
+
+    # 2. Cookie request with revoked token must fail with 401
+    client.cookies["agenttrust_session"] = token
+    res_subsequent_cookie = client.get("/auth/session")
+    assert res_subsequent_cookie.status_code == 401
+    assert "Revoked" in res_subsequent_cookie.json()["detail"]
+
+
+def test_expired_token_denies_access():
+    """Verify that an expired JWT token returns 401."""
+    # Mint token that expired 60 seconds ago
+    secret = JWTAuthManager.get_active_secret()
+    expired_payload = {
+        "sub": "admin",
+        "role": "SYSTEM_ADMIN",
+        "exp": int(time.time()) - 60,
+        "iat": int(time.time()) - 3600,
+        "iss": "agenttrust-framework",
+    }
+    expired_token = jwt.encode(expired_payload, secret, algorithm=JWT_ALGORITHM)
+
+    # 1. Header authorization with expired token
+    client.cookies.clear()
+    res_header = client.post(
+        "/mode",
+        json={"mode": "MODE_D_AGENTTRUST_FABRIC"},
+        headers={"Authorization": f"Bearer {expired_token}"},
+    )
+    assert res_header.status_code == 401
+    assert "Signature has expired" in res_header.json()["detail"] or "expired" in res_header.json()["detail"].lower()
+
+    # 2. Cookie authorization with expired token
+    client.cookies["agenttrust_session"] = expired_token
+    res_cookie = client.get("/auth/session")
+    assert res_cookie.status_code == 401
+    assert "expired" in res_cookie.json()["detail"].lower()
+
+
+def test_lower_privilege_session_cannot_retain_elevated_access():
+    """Verify that an AUDITOR session cannot execute write or administrative actions."""
+    res_auditor = client.post(
+        "/auth/login",
+        json={"username": "auditor", "password": "AuditorTrust#2026!Secured"},
+    )
+    assert res_auditor.status_code == 200
+    auditor_token = res_auditor.json()["access_token"]
+    client.cookies["agenttrust_session"] = auditor_token
+
+    # Auditor attempts policy creation -> 403
+    res_create_pol = client.post(
+        "/policies",
+        json={"policy_id": "AUDITOR-DENIED", "allowed_actions": []},
+    )
+    assert res_create_pol.status_code == 403
+    assert "RBAC Denial" in res_create_pol.json()["detail"]
+
+    # Auditor attempts policy rollback -> 403
+    res_rollback = client.post(
+        "/policies/rollback",
+        json={"policy_id": "FIN-POLICY-001", "target_version": "1.0"},
+    )
+    assert res_rollback.status_code == 403
+    assert "RBAC Denial" in res_rollback.json()["detail"]
+
+    # Auditor attempts mode switch -> 403
+    res_mode = client.post(
+        "/mode",
+        json={"mode": "MODE_D_AGENTTRUST_FABRIC"},
+    )
+    assert res_mode.status_code == 403
+    assert "RBAC Denial" in res_mode.json()["detail"]
+
+    # Auditor attempts agent suspension -> 403
+    res_suspend = client.post(
+        "/agents/FINANCE-AGENT-001/suspend?reason=AUDITOR_ATTEMPT",
+    )
+    assert res_suspend.status_code == 403
+    assert "RBAC Denial" in res_suspend.json()["detail"]
+

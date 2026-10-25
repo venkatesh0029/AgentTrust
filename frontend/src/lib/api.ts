@@ -234,13 +234,14 @@ export interface AuthSession {
 }
 
 export const isDemoAuthMode = (): boolean => {
-  if (typeof process !== "undefined" && process.env) {
-    if (process.env.NEXT_PUBLIC_DEMO_MODE === "false") return false;
-    if (process.env.NEXT_PUBLIC_ENV === "production" || process.env.NODE_ENV === "production") {
-      return process.env.NEXT_PUBLIC_DEMO_MODE === "true";
-    }
+  if (
+    process.env.NODE_ENV === "production" ||
+    process.env.NEXT_PUBLIC_ENV === "production"
+  ) {
+    return false;
   }
-  return true; // dev default
+
+  return process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 };
 
 export const DEMO_CREDENTIALS: Record<string, { username: string; password: string }> = {
@@ -249,6 +250,26 @@ export const DEMO_CREDENTIALS: Record<string, { username: string; password: stri
   FINANCE_APPROVER: { username: "finance_approver", password: "FinanceTrust#2026!Secured" },
   AUDITOR: { username: "auditor", password: "AuditorTrust#2026!Secured" },
 };
+
+// OWASP anti-XSS Hardening: In-memory session store; tokens are NEVER stored in localStorage or sessionStorage
+let inMemorySession: AuthSession | null = null;
+const inMemoryRoleTokens: Record<string, { token: string; expiresAt: number }> = {};
+
+// Clean up legacy tokens from localStorage if present
+if (typeof window !== "undefined") {
+  try {
+    [
+      "agenttrust_auth_token",
+      "agenttrust_auth_user",
+      "agenttrust_auth_role",
+      "agenttrust_auth_expiry",
+      "agenttrust_auth_token_SYSTEM_ADMIN",
+      "agenttrust_auth_token_POLICY_ADMIN",
+      "agenttrust_auth_token_FINANCE_APPROVER",
+      "agenttrust_auth_token_AUDITOR",
+    ].forEach((k) => localStorage.removeItem(k));
+  } catch {}
+}
 
 // CENTRALIZED TYPED API CLIENT
 export const api = {
@@ -265,6 +286,7 @@ export const api = {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ username, password: pwd }),
     });
     if (!res.ok) {
@@ -272,95 +294,136 @@ export const api = {
       throw new Error((err as { detail?: string }).detail || `Authentication failed (${res.status})`);
     }
     const data = LoginResponseSchema.parse(await res.json());
+    const expiresAt = Date.now() + (data.expires_in || 28800) * 1000;
+
+    // Maintain token strictly in-memory
+    inMemorySession = {
+      token: data.access_token,
+      role: data.role,
+      username: data.username,
+      expiresAt,
+    };
+    inMemoryRoleTokens[data.role] = { token: data.access_token, expiresAt };
+
     if (typeof window !== "undefined") {
-      const expiresAt = Date.now() + (data.expires_in || 28800) * 1000;
-      localStorage.setItem("agenttrust_auth_token", data.access_token);
-      localStorage.setItem("agenttrust_auth_user", data.username);
-      localStorage.setItem("agenttrust_auth_role", data.role);
-      localStorage.setItem("agenttrust_auth_expiry", String(expiresAt));
-      localStorage.setItem(`agenttrust_auth_token_${data.role}`, data.access_token);
-      localStorage.setItem(`agenttrust_auth_expiry_${data.role}`, String(expiresAt));
       window.dispatchEvent(new CustomEvent("agenttrust-auth-changed", { detail: data }));
     }
     return data;
   },
 
-  logout(): void {
+  async logout(): Promise<void> {
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+        headers: inMemorySession?.token ? { Authorization: `Bearer ${inMemorySession.token}` } : {},
+      });
+    } catch {
+      // Ignore network errors during logout
+    }
+    inMemorySession = null;
+    Object.keys(inMemoryRoleTokens).forEach((k) => delete inMemoryRoleTokens[k]);
     if (typeof window !== "undefined") {
-      localStorage.removeItem("agenttrust_auth_token");
-      localStorage.removeItem("agenttrust_auth_user");
-      localStorage.removeItem("agenttrust_auth_role");
-      localStorage.removeItem("agenttrust_auth_expiry");
+      try {
+        [
+          "agenttrust_auth_token",
+          "agenttrust_auth_user",
+          "agenttrust_auth_role",
+          "agenttrust_auth_expiry",
+        ].forEach((k) => localStorage.removeItem(k));
+      } catch {}
       window.dispatchEvent(new CustomEvent("agenttrust-auth-changed", { detail: null }));
     }
   },
 
-  getStoredAuth(): AuthSession | null {
-    if (typeof window === "undefined") return null;
+  async checkServerSession(): Promise<AuthSession | null> {
     try {
-      const token = localStorage.getItem("agenttrust_auth_token");
-      const user = localStorage.getItem("agenttrust_auth_user");
-      const role = localStorage.getItem("agenttrust_auth_role");
-      const expiryStr = localStorage.getItem("agenttrust_auth_expiry");
-      if (!token || !user || !role || !expiryStr) return null;
-      const expiresAt = Number(expiryStr);
-      if (Date.now() > expiresAt) {
+      const res = await fetch(`${API_BASE}/auth/session`, {
+        method: "GET",
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        inMemorySession = {
+          token: inMemorySession?.token || "",
+          role: data.role,
+          username: data.username,
+          expiresAt: (data.expires_at || 0) * 1000,
+        };
+        return inMemorySession;
+      }
+    } catch {
+      // Ignore network errors
+    }
+    return null;
+  },
+
+  getStoredAuth(): AuthSession | null {
+    if (inMemorySession) {
+      if (Date.now() > inMemorySession.expiresAt) {
         this.logout();
         return null;
       }
-      return { token, username: user, role, expiresAt };
-    } catch {
-      return null;
+      return inMemorySession;
     }
+    return null;
   },
 
   async ensureAuth(roleOrToken?: string): Promise<string> {
     if (roleOrToken && roleOrToken.startsWith("eyJ")) {
       return roleOrToken;
     }
-    const targetRole = roleOrToken && DEMO_CREDENTIALS[roleOrToken] ? roleOrToken : null;
-    if (typeof window !== "undefined" && targetRole) {
-      const cachedToken = localStorage.getItem(`agenttrust_auth_token_${targetRole}`);
-      const cachedExpiry = Number(localStorage.getItem(`agenttrust_auth_expiry_${targetRole}`) || "0");
-      if (cachedToken && Date.now() < cachedExpiry) {
-        return cachedToken;
-      }
-      if (isDemoAuthMode()) {
-        const creds = DEMO_CREDENTIALS[targetRole];
-        const loginRes = await this.login(creds.username, creds.password);
-        return loginRes.access_token;
-      }
-    }
 
+    // 1. Check existing in-memory session
     const currentSession = this.getStoredAuth();
     if (currentSession?.token) {
-      return currentSession.token;
+      if (!roleOrToken || currentSession.role === roleOrToken) {
+        return currentSession.token;
+      }
     }
 
-    if (isDemoAuthMode()) {
-      const adminLogin = await this.login("admin", "AdminTrust#2026!Secured");
-      return adminLogin.access_token;
+    // 2. Check cached role tokens in memory
+    const targetRole = roleOrToken && DEMO_CREDENTIALS[roleOrToken] ? roleOrToken : null;
+    if (targetRole && inMemoryRoleTokens[targetRole]) {
+      const entry = inMemoryRoleTokens[targetRole];
+      if (Date.now() < entry.expiresAt) {
+        return entry.token;
+      }
     }
 
-    return "";
+    // 3. In production, check if active HttpOnly session cookie exists
+    if (!isDemoAuthMode()) {
+      const serverSession = await this.checkServerSession();
+      if (serverSession) {
+        return serverSession.token || "COOKIE_AUTHENTICATED";
+      }
+      return "";
+    }
+
+    // 4. Demo mode only (development)
+    if (targetRole) {
+      const creds = DEMO_CREDENTIALS[targetRole];
+      const loginRes = await this.login(creds.username, creds.password);
+      return loginRes.access_token;
+    }
+
+    const adminLogin = await this.login("admin", "AdminTrust#2026!Secured");
+    return adminLogin.access_token;
   },
 
   getAuthHeaders(roleOrToken?: string): Record<string, string> {
     if (roleOrToken && roleOrToken.startsWith("eyJ")) {
       return { Authorization: `Bearer ${roleOrToken}` };
     }
-    if (typeof window !== "undefined") {
-      if (roleOrToken && DEMO_CREDENTIALS[roleOrToken]) {
-        const cachedToken = localStorage.getItem(`agenttrust_auth_token_${roleOrToken}`);
-        const cachedExpiry = Number(localStorage.getItem(`agenttrust_auth_expiry_${roleOrToken}`) || "0");
-        if (cachedToken && Date.now() < cachedExpiry) {
-          return { Authorization: `Bearer ${cachedToken}` };
-        }
+    if (roleOrToken && inMemoryRoleTokens[roleOrToken]) {
+      const entry = inMemoryRoleTokens[roleOrToken];
+      if (Date.now() < entry.expiresAt) {
+        return { Authorization: `Bearer ${entry.token}` };
       }
-      const session = this.getStoredAuth();
-      if (session?.token) {
-        return { Authorization: `Bearer ${session.token}` };
-      }
+    }
+    const session = this.getStoredAuth();
+    if (session?.token) {
+      return { Authorization: `Bearer ${session.token}` };
     }
     return {};
   },

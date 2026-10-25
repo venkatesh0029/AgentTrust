@@ -50,9 +50,15 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
     if (session) {
       setAuthSession(session);
     } else {
-      api.ensureAuth().then(() => {
-        setAuthSession(api.getStoredAuth());
-      }).catch((e) => console.warn("Auto-auth error:", e));
+      api.checkServerSession().then((srvSession) => {
+        if (srvSession) {
+          setAuthSession(srvSession);
+        } else {
+          api.ensureAuth().then(() => {
+            setAuthSession(api.getStoredAuth());
+          }).catch((e) => console.warn("Auto-auth error:", e));
+        }
+      }).catch(() => {});
     }
 
     const onAuthChange = (e: Event) => {

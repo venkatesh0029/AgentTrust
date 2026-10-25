@@ -31,6 +31,15 @@ from server import app
 
 client = TestClient(app)
 
+
+@pytest.fixture(autouse=True)
+def clean_loophole_client():
+    client.cookies.clear()
+    JWTAuthManager.clear_revoked_tokens()
+    yield
+    client.cookies.clear()
+    JWTAuthManager.clear_revoked_tokens()
+
 # 1. JWT Authentication & Plain Header Rejection
 def test_jwt_auth_login_and_token_issuance():
     response = client.post(

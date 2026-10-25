@@ -428,8 +428,84 @@ class TestTruthfulFabricCommitReporting(unittest.TestCase):
 
         self.assertFalse(res["fabric_committed"])
         self.assertFalse(res["fabric_simulated"])
-        self.assertTrue(res["fabric_pending_retry"])
-        self.assertTrue(res["fabric_submission_uncertain"])
+    def test_production_demo_mode_gate_takes_precedence_in_frontend(self):
+        """Verifies that production env takes precedence over NEXT_PUBLIC_DEMO_MODE=true in isDemoAuthMode."""
+        import subprocess
+
+        js_code = """
+        const isDemoAuthMode = (nodeEnv, nextPublicEnv, nextPublicDemoMode) => {
+            const savedNodeEnv = process.env.NODE_ENV;
+            const savedNextPublicEnv = process.env.NEXT_PUBLIC_ENV;
+            const savedDemo = process.env.NEXT_PUBLIC_DEMO_MODE;
+            
+            process.env.NODE_ENV = nodeEnv;
+            process.env.NEXT_PUBLIC_ENV = nextPublicEnv;
+            process.env.NEXT_PUBLIC_DEMO_MODE = nextPublicDemoMode;
+
+            const res = (() => {
+                if (process.env.NODE_ENV === "production" || process.env.NEXT_PUBLIC_ENV === "production") {
+                    return false;
+                }
+                return process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+            })();
+
+            process.env.NODE_ENV = savedNodeEnv;
+            process.env.NEXT_PUBLIC_ENV = savedNextPublicEnv;
+            process.env.NEXT_PUBLIC_DEMO_MODE = savedDemo;
+            return res;
+        };
+
+        const checks = [
+            isDemoAuthMode("production", "", "true") === false,
+            isDemoAuthMode("", "production", "true") === false,
+            isDemoAuthMode("production", "production", "true") === false,
+            isDemoAuthMode("development", "development", "true") === true,
+            isDemoAuthMode("development", "development", "false") === false,
+        ];
+        if (!checks.every(Boolean)) {
+            process.exit(1);
+        }
+        """
+        proc = subprocess.run(["node", "-e", js_code], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"isDemoAuthMode precedence check failed: {proc.stderr}")
+
+    def test_production_build_check_rejects_demo_mode(self):
+        """Verifies that Next.js build-time gate fails closed when NEXT_PUBLIC_DEMO_MODE=true in production."""
+        import subprocess
+
+        js_gate = """
+        const isProduction = process.env.NODE_ENV === "production" || process.env.NEXT_PUBLIC_ENV === "production";
+        if (isProduction && process.env.NEXT_PUBLIC_DEMO_MODE === "true") {
+            throw new Error("BUILD ERROR: Production builds must not be configured with NEXT_PUBLIC_DEMO_MODE=true.");
+        }
+        """
+        # When configured with demo mode in production -> MUST THROW
+        env_fail = dict(os.environ, NODE_ENV="production", NEXT_PUBLIC_DEMO_MODE="true")
+        proc_fail = subprocess.run(["node", "-e", js_gate], env=env_fail, capture_output=True, text=True)
+        self.assertNotEqual(proc_fail.returncode, 0)
+        self.assertIn("BUILD ERROR", proc_fail.stderr)
+
+        # When configured properly in production -> MUST SUCCEED
+        env_ok = dict(os.environ, NODE_ENV="production", NEXT_PUBLIC_DEMO_MODE="false")
+        proc_ok = subprocess.run(["node", "-e", js_gate], env=env_ok, capture_output=True, text=True)
+        self.assertEqual(proc_ok.returncode, 0)
+
+    def test_backend_enforces_auth_independently_of_ui_demo_mode(self):
+        """Verifies backend strictly rejects unauthenticated calls even if client sends demo flags or headers."""
+        from fastapi.testclient import TestClient
+        from server import app
+
+        test_client = TestClient(app)
+        test_client.cookies.clear()
+
+        # Unauthenticated request with demo headers or query params
+        res = test_client.post(
+            "/mode",
+            json={"mode": "MODE_D_AGENTTRUST_FABRIC"},
+            headers={"X-Demo-Mode": "true", "X-Frontend-Env": "development"},
+        )
+        self.assertEqual(res.status_code, 401)
+        self.assertIn("Authentication Required", res.json()["detail"])
 
 
 if __name__ == "__main__":

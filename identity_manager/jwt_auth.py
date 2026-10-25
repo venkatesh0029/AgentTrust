@@ -30,7 +30,12 @@ _DEFAULT_DEV_JWT_SECRET = "dev-agenttrust-jwt-signing-secret-key-32chars-min-ent
 
 
 def calculate_shannon_entropy(data: str) -> float:
-    """Calculates the Shannon entropy of a string in bits per character."""
+    """
+    Calculates the empirical Shannon entropy of a string in bits per character.
+    NOTE: This is a weak-secret heuristic based on character frequency distributions.
+    It does not mathematically prove cryptographic unpredictability. Cryptographic
+    security requires keys to be generated via a CSPRNG (e.g. secrets.token_bytes(32)).
+    """
     if not data:
         return 0.0
     counts = Counter(data)
@@ -40,9 +45,17 @@ def calculate_shannon_entropy(data: str) -> float:
 
 def validate_jwt_secret_entropy(secret: str, secret_name: str = "AGENTTRUST_JWT_SECRET") -> None:
     """
+    Supplementary weak-secret heuristic sanity check:
     Validates minimum length (>=32 chars), absence of dictionary placeholders,
-    character diversity (>=8 unique chars), and mathematical Shannon entropy (>=3.0 bits/char).
-    Guarantees that repeated or trivial patterns like 'aaaaaaaa...' or '12121212...' fail closed.
+    character diversity (>=8 unique chars), symmetry rejection, and empirical Shannon
+    entropy (>=3.0 bits/char).
+
+    IMPORTANT QUALIFICATION:
+    These checks act as a fail-closed filter against obvious low-diversity, repetitive,
+    or placeholder values. Calculating Shannon character entropy on a single secret
+    does not mathematically prove unpredictable generation. Production secrets must be
+    provisioned from a cryptographically secure random number generator (CSPRNG, e.g.
+    secrets.token_bytes(32) yielding 256 bits of true entropy) or an enterprise secrets manager.
     """
     if not secret:
         raise RuntimeError(
@@ -117,7 +130,26 @@ JWT_EXPIRATION_SECONDS = 3600 * 8  # 8 hours
 class JWTAuthManager:
     """
     Cryptographic JWT Auth Manager for issuing and verifying session tokens.
+    Includes in-memory revocation / blacklisting for clean session termination.
     """
+
+    _revoked_tokens: set[str] = set()
+
+    @classmethod
+    def revoke_token(cls, token: str) -> None:
+        """Revokes a JWT token (e.g. on logout) so it cannot be used again."""
+        if token:
+            cls._revoked_tokens.add(token.strip())
+
+    @classmethod
+    def is_token_revoked(cls, token: str) -> bool:
+        """Returns True if the token has been explicitly revoked."""
+        return token.strip() in cls._revoked_tokens if token else False
+
+    @classmethod
+    def clear_revoked_tokens(cls) -> None:
+        """Clears revoked tokens cache (primarily for test suite reset)."""
+        cls._revoked_tokens.clear()
 
     @classmethod
     def get_active_secret(cls) -> str:
@@ -147,9 +179,12 @@ class JWTAuthManager:
     @classmethod
     def verify_token(cls, token: str) -> dict[str, Any]:
         """
-        Verifies JWT token signature, issuer, and expiration.
-        Returns payload dict if valid, raises ValueError if invalid or expired.
+        Verifies JWT token signature, issuer, expiration, and revocation status.
+        Returns payload dict if valid, raises ValueError if invalid, expired, or revoked.
         """
+        if cls.is_token_revoked(token):
+            raise ValueError("JWT Token Has Been Revoked (Session Terminated)")
+
         secret = cls.get_active_secret()
         try:
             payload = jwt.decode(

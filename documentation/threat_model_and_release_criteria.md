@@ -119,7 +119,9 @@ Before promoting any release to production:
 - [x] Side-effect boundary enforces fencing tokens against stale workers.
 - [x] Currency-specific precision scales reject excess fractional amounts.
 - [x] Hyperledger Fabric CCaaS chaincode and Raft-3 consensus resilience validated with deterministic proposal timestamps.
-- [x] Cryptographic JWT secret enforces mathematical Shannon entropy ($H \ge 3.0$ bits/char) and diversity ($\ge 8$ unique chars) in production.
+- [x] Cryptographic JWT secret enforces supplementary weak-secret heuristic sanity checks ($H \ge 3.0$ bits/char, diversity $\ge 8$, length $\ge 32$) with explicit qualification that cryptographic unpredictability derives from CSPRNG generation (`secrets.token_bytes(32)`) or an enterprise secret manager.
 - [x] PBKDF2-HMAC-SHA256 hardened to 600,000 iterations per OWASP password storage guidance (~229ms latency benchmarked).
-- [x] Administrative persona switcher strictly gated as demo-only: server fails closed on default passwords in production; UI disables 1-click switcher and auto-minting shortcuts.
+- [x] Production demo-mode gate takes strict precedence: `isDemoAuthMode()` returns `false` unconditionally when `NODE_ENV=production` or `NEXT_PUBLIC_ENV=production` regardless of `NEXT_PUBLIC_DEMO_MODE=true`; Next.js build-time check in `next.config.ts` fails closed on demo mode configurations; persona controls hidden; automatic default credential submission disabled; backend enforces authentication independently of UI.
+- [x] Administrative credentials and JWT tokens protected against XSS per OWASP guidance: zero token persistence in `localStorage`/`sessionStorage` across `frontend/src/lib/api.ts` and `dashboard/app.js`; sessions managed via `HttpOnly; Secure; SameSite=Lax` cookies (`agenttrust_session`) and in-memory caches; clean session revocation and cookie purge on `/auth/logout`.
 - [x] Database isolation verified: persistent SQLite store remains completely untouched during all testnet and consensus scenarios.
+- [x] Release governance: All technical risks addressed; production release tagging held pending unconditional Step 4 signoff.

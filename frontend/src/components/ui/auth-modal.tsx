@@ -90,8 +90,8 @@ export function AuthModal({ isOpen, onClose, currentSession }: AuthModalProps) {
     }
   };
 
-  const handleLogout = () => {
-    api.logout();
+  const handleLogout = async () => {
+    await api.logout();
     onClose();
   };
 

@@ -23,27 +23,28 @@ const ROLE_CREDS = {
 
 const tokenCache = {};
 
+// Clean up any legacy tokens from browser localStorage on load (OWASP anti-XSS storage compliance)
+try {
+  ['agenttrust_jwt_token', 'agenttrust_jwt_token_SYSTEM_ADMIN', 'agenttrust_jwt_token_POLICY_ADMIN', 'agenttrust_jwt_token_FINANCE_APPROVER', 'agenttrust_jwt_token_AUDITOR'].forEach(k => localStorage.removeItem(k));
+} catch (e) {
+  // Ignore in sandboxed contexts
+}
+
 async function getAuthToken(role = 'SYSTEM_ADMIN') {
+  // OWASP Hardening: Administrative tokens are maintained strictly in-memory (tokenCache)
+  // and never written to localStorage or sessionStorage.
   if (tokenCache[role]) return tokenCache[role];
-  const stored = localStorage.getItem(`agenttrust_jwt_token_${role}`) || (role === 'SYSTEM_ADMIN' ? localStorage.getItem('agenttrust_jwt_token') : null);
-  if (stored) {
-    tokenCache[role] = stored;
-    return stored;
-  }
   const creds = ROLE_CREDS[role] || ROLE_CREDS.SYSTEM_ADMIN;
   try {
     const res = await fetch('/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify(creds)
     });
     if (res.ok) {
       const data = await res.json();
       tokenCache[role] = data.access_token;
-      localStorage.setItem(`agenttrust_jwt_token_${role}`, data.access_token);
-      if (role === 'SYSTEM_ADMIN') {
-        localStorage.setItem('agenttrust_jwt_token', data.access_token);
-      }
       return data.access_token;
     } else {
       console.info(`Authentication required for ${role} (${res.status}). Demo shortcuts inactive.`);
