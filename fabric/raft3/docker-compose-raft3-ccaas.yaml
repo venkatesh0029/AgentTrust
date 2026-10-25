@@ -1,0 +1,19 @@
+services:
+  agenttrust-raft3-chaincode:
+    build:
+      context: ../chaincode
+      dockerfile: Dockerfile
+    image: agenttrust-raft3-chaincode:local
+    environment:
+      CHAINCODE_SERVER_ADDRESS: "0.0.0.0:9999"
+      CHAINCODE_ID: ${RAFT3_CHAINCODE_ID:?Generate the CCaaS package first}
+    expose:
+      - "9999"
+    restart: unless-stopped
+    networks:
+      - agenttrust-raft3-net
+
+networks:
+  agenttrust-raft3-net:
+    name: agenttrust-raft3-net
+    external: true

@@ -16,6 +16,28 @@ type AgentTrustContract struct {
 	contractapi.Contract
 }
 
+// transactionTimestamp returns the timestamp supplied with the Fabric
+// proposal. Endorsers processing the same proposal use the same timestamp.
+func transactionTimestamp(
+	ctx contractapi.TransactionContextInterface,
+) (string, error) {
+	ts, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return "", fmt.Errorf(
+			"failed to read Fabric transaction timestamp: %w",
+			err,
+		)
+	}
+	if ts == nil {
+		return "", fmt.Errorf("Fabric transaction timestamp is nil")
+	}
+
+	return time.Unix(
+		ts.Seconds,
+		int64(ts.Nanos),
+	).UTC().Format(time.RFC3339), nil
+}
+
 // AgentRecord represents an agent registered on the Fabric ledger
 type AgentRecord struct {
 	DocType                string `json:"docType"`
@@ -71,13 +93,18 @@ func (c *AgentTrustContract) RegisterAgent(
 ) (*AgentRecord, error) {
 	key := fmt.Sprintf("AGENT_%s", agentID)
 
+	timestamp, err := transactionTimestamp(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	rec := AgentRecord{
 		DocType:                "agent",
 		AgentID:                agentID,
 		Owner:                  owner,
 		CertificateFingerprint: certFingerprint,
 		Status:                 status,
-		RegisteredAt:           time.Now().UTC().Format(time.RFC3339),
+		RegisteredAt:           timestamp,
 	}
 
 	bytes, err := json.Marshal(rec)
@@ -108,12 +135,17 @@ func (c *AgentTrustContract) RegisterPolicy(
 		return nil, fmt.Errorf("invalid policy JSON: %v", err)
 	}
 
+	timestamp, err := transactionTimestamp(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	rec := PolicyRecord{
 		DocType:    "policy",
 		PolicyID:   policyID,
 		AgentID:    agentID,
 		PolicyData: pdata,
-		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
+		CreatedAt:  timestamp,
 	}
 
 	bytes, err := json.Marshal(rec)
@@ -193,6 +225,11 @@ func (c *AgentTrustContract) RecordActionEvent(
 		return nil, fmt.Errorf("Immutability Violation: Action event '%s' already committed to Fabric ledger", eventID)
 	}
 
+	timestamp, err := transactionTimestamp(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	eventRecord := ActionEvent{
 		DocType:           "action_event",
 		EventID:           eventID,
@@ -206,7 +243,7 @@ func (c *AgentTrustContract) RecordActionEvent(
 		PolicyVersion:     policyVersion,
 		EvidenceReference: evidenceRef,
 		EvidenceHash:      evidenceHash,
-		Timestamp:         time.Now().UTC().Format(time.RFC3339),
+		Timestamp:         timestamp,
 	}
 
 	eventBytes, err := json.Marshal(eventRecord)
