@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { Shield, Key, CheckCircle, LogOut, User, Lock, AlertCircle } from "lucide-react";
 import { Button } from "./primitives";
-import { api, type AuthSession } from "@/lib/api";
+import { api, type AuthSession, isDemoAuthMode } from "@/lib/api";
 
 const PRESET_ACCOUNTS = [
   {
@@ -51,10 +51,15 @@ export function AuthModal({ isOpen, onClose, currentSession }: AuthModalProps) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isDemo = isDemoAuthMode();
 
   if (!isOpen) return null;
 
   const handlePresetLogin = async (acc: typeof PRESET_ACCOUNTS[0]) => {
+    if (!isDemo) {
+      setError("SECURITY VIOLATION: Persona shortcuts are disabled in production.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -144,42 +149,59 @@ export function AuthModal({ isOpen, onClose, currentSession }: AuthModalProps) {
           </div>
         )}
 
-        {/* 1-Click Role Switcher */}
-        <div className="mb-5">
-          <label className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)] block mb-2">
-            Switch Administrator Persona (PBKDF2 Authenticated)
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            {PRESET_ACCOUNTS.map((acc) => {
-              const isActive = currentSession?.username === acc.username;
-              return (
-                <button
-                  key={acc.username}
-                  type="button"
-                  id={`auth-switch-${acc.username}`}
-                  disabled={loading}
-                  onClick={() => handlePresetLogin(acc)}
-                  className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between ${
-                    isActive
-                      ? "border-[var(--emerald)] bg-[var(--emerald)]/5 shadow-sm"
-                      : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)]"
-                  }`}
-                >
-                  <div className="flex items-center justify-between w-full mb-1">
-                    <span className="text-xs font-bold text-[var(--fg)]">{acc.title}</span>
-                    {isActive ? (
-                      <CheckCircle className="w-3.5 h-3.5 text-[var(--emerald)]" />
-                    ) : (
-                      <Key className="w-3 h-3 text-[var(--muted)]" />
-                    )}
-                  </div>
-                  <span className="text-[10px] font-mono text-[var(--muted)] mb-1">{acc.role}</span>
-                  <span className="text-[10px] text-[var(--subtle)] line-clamp-1">{acc.description}</span>
-                </button>
-              );
-            })}
+        {/* Administrator Authentication Section */}
+        {isDemo ? (
+          <div className="mb-5">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
+                Demo Persona Switcher (PBKDF2)
+              </label>
+              <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                DEMO ONLY
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {PRESET_ACCOUNTS.map((acc) => {
+                const isActive = currentSession?.username === acc.username;
+                return (
+                  <button
+                    key={acc.username}
+                    type="button"
+                    id={`auth-switch-${acc.username}`}
+                    disabled={loading}
+                    onClick={() => handlePresetLogin(acc)}
+                    className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                      isActive
+                        ? "border-[var(--emerald)] bg-[var(--emerald)]/5 shadow-sm"
+                        : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <span className="text-xs font-bold text-[var(--fg)]">{acc.title}</span>
+                      {isActive ? (
+                        <CheckCircle className="w-3.5 h-3.5 text-[var(--emerald)]" />
+                      ) : (
+                        <Key className="w-3 h-3 text-[var(--muted)]" />
+                      )}
+                    </div>
+                    <span className="text-[10px] font-mono text-[var(--muted)] mb-1">{acc.role}</span>
+                    <span className="text-[10px] text-[var(--subtle)] line-clamp-1">{acc.description}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="mb-5 p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
+            <div className="flex items-center gap-2 mb-1.5 text-[var(--fg)]">
+              <Lock className="w-4 h-4 text-amber-500 shrink-0" />
+              <span className="text-xs font-bold">Production Security Gate Active</span>
+            </div>
+            <p className="text-[11px] text-[var(--muted)] leading-relaxed">
+              One-click persona switching is disabled in production. Every administrative persona must be authenticated with strong PBKDF2 credentials (&ge;16 characters). Selecting a role without valid credentials will not mint tokens.
+            </p>
+          </div>
+        )}
 
         {/* Custom Login Form */}
         <form onSubmit={handleCustomLogin} className="space-y-3 pt-3 border-t border-[var(--border)]">

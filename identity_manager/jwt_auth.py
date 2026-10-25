@@ -11,6 +11,9 @@ from typing import Any
 
 import jwt
 
+import math
+from collections import Counter
+
 INSECURE_JWT_SECRETS = {
     "secret",
     "changeme",
@@ -26,6 +29,62 @@ INSECURE_JWT_SECRETS = {
 _DEFAULT_DEV_JWT_SECRET = "dev-agenttrust-jwt-signing-secret-key-32chars-min-entropy"
 
 
+def calculate_shannon_entropy(data: str) -> float:
+    """Calculates the Shannon entropy of a string in bits per character."""
+    if not data:
+        return 0.0
+    counts = Counter(data)
+    total = len(data)
+    return -sum((cnt / total) * math.log2(cnt / total) for cnt in counts.values())
+
+
+def validate_jwt_secret_entropy(secret: str, secret_name: str = "AGENTTRUST_JWT_SECRET") -> None:
+    """
+    Validates minimum length (>=32 chars), absence of dictionary placeholders,
+    character diversity (>=8 unique chars), and mathematical Shannon entropy (>=3.0 bits/char).
+    Guarantees that repeated or trivial patterns like 'aaaaaaaa...' or '12121212...' fail closed.
+    """
+    if not secret:
+        raise RuntimeError(
+            f"SECURITY VIOLATION: Production environment requires explicit secure {secret_name}. "
+            "Refusing to initialize with missing JWT secret."
+        )
+    if secret.lower() in INSECURE_JWT_SECRETS:
+        raise RuntimeError(
+            f"SECURITY VIOLATION: {secret_name} is set to an insecure placeholder. "
+            "Production requires a cryptographically strong, unique secret."
+        )
+    if len(secret) < 32:
+        raise RuntimeError(
+            f"SECURITY VIOLATION: Production environment requires {secret_name} "
+            f"with at least 32 characters of entropy (found {len(secret)})."
+        )
+
+    unique_chars = len(set(secret))
+    if unique_chars < 8:
+        raise RuntimeError(
+            f"SECURITY VIOLATION: {secret_name} has insufficient character diversity "
+            f"({unique_chars} unique chars, minimum 8 required). "
+            "Predictable, repetitive, or patterned secrets are prohibited."
+        )
+
+    # Check for trivial repeated patterns (e.g. repeated half or quarter)
+    half = len(secret) // 2
+    if secret[:half] == secret[half:]:
+        raise RuntimeError(
+            f"SECURITY VIOLATION: {secret_name} contains repeated half patterns. "
+            "Provision production secrets from a cryptographically secure random generator."
+        )
+
+    entropy = calculate_shannon_entropy(secret)
+    if entropy < 3.0:
+        raise RuntimeError(
+            f"SECURITY VIOLATION: {secret_name} has insufficient Shannon entropy "
+            f"({entropy:.2f} bits/char < 3.00 bits/char required). "
+            "Provision production secrets from a cryptographically secure random generator (e.g. secrets.token_hex(32))."
+        )
+
+
 def resolve_jwt_secret(env_profile: str | None = None) -> str:
     """
     Resolves and enforces JWT signing secret with fail-closed security guarantees.
@@ -38,21 +97,7 @@ def resolve_jwt_secret(env_profile: str | None = None) -> str:
     env_secret = os.environ.get("AGENTTRUST_JWT_SECRET", "").strip()
 
     if env_profile in ("production", "prod"):
-        if not env_secret:
-            raise RuntimeError(
-                "SECURITY VIOLATION: Production environment requires explicit secure AGENTTRUST_JWT_SECRET. "
-                "Refusing to initialize with missing JWT secret."
-            )
-        if len(env_secret) < 32:
-            raise RuntimeError(
-                "SECURITY VIOLATION: Production environment requires AGENTTRUST_JWT_SECRET "
-                "with at least 32 characters of entropy."
-            )
-        if env_secret.lower() in INSECURE_JWT_SECRETS:
-            raise RuntimeError(
-                "SECURITY VIOLATION: AGENTTRUST_JWT_SECRET is set to an insecure placeholder. "
-                "Production requires a cryptographically strong, unique secret."
-            )
+        validate_jwt_secret_entropy(env_secret)
         return env_secret
 
     # Development / Testing profile

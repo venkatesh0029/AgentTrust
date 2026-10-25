@@ -25,7 +25,7 @@ from human_approval.approval_manager import HumanApprovalManager
 # AgentTrust Modules
 from identity_manager.admin_auth import AdminAuthManager
 from identity_manager.certificate_manager import CertificateManager
-from identity_manager.jwt_auth import JWTAuthManager
+from identity_manager.jwt_auth import JWTAuthManager, validate_jwt_secret_entropy
 from identity_manager.signature_manager import SignatureManager
 from policy_engine.policy_evaluator import PolicyEvaluator
 from policy_engine.policy_loader import PolicyLoader
@@ -62,31 +62,7 @@ def validate_production_configuration(env_profile: str, current_mode: str) -> No
                 "Refusing to initialize with default secrets."
             )
         jwt_secret = os.environ.get("AGENTTRUST_JWT_SECRET", "").strip()
-        insecure_jwt_secrets = {
-            "secret",
-            "changeme",
-            "default",
-            "default_jwt_secret",
-            "password",
-            "default_secret_key_change_in_production",
-            "admin",
-            "test",
-        }
-        if not jwt_secret:
-            raise RuntimeError(
-                "SECURITY VIOLATION: Production environment requires explicit secure AGENTTRUST_JWT_SECRET. "
-                "Refusing to initialize with missing JWT secret."
-            )
-        if len(jwt_secret) < 32:
-            raise RuntimeError(
-                "SECURITY VIOLATION: Production environment requires AGENTTRUST_JWT_SECRET "
-                "with at least 32 characters of entropy."
-            )
-        if jwt_secret.lower() in insecure_jwt_secrets:
-            raise RuntimeError(
-                "SECURITY VIOLATION: AGENTTRUST_JWT_SECRET is set to an insecure placeholder. "
-                "Production requires a cryptographically strong, unique secret."
-            )
+        validate_jwt_secret_entropy(jwt_secret)
         cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
         if not cors_origins:
             raise RuntimeError(
@@ -143,6 +119,24 @@ def validate_production_configuration(env_profile: str, current_mode: str) -> No
                     "SECURITY VIOLATION: Production Mode D requires "
                     "FABRIC_GATEWAY_TOKEN with at least 32 characters."
                 )
+
+        insecure_admin_passwords = {
+            "AdminTrust#2026!Secured",
+            "PolicyTrust#2026!Secured",
+            "FinanceTrust#2026!Secured",
+            "AuditorTrust#2026!Secured",
+            "admin",
+            "password",
+            "changeme",
+            "secret",
+        }
+        admin_pw = os.environ.get("AGENTTRUST_ADMIN_PASSWORD", "AdminTrust#2026!Secured")
+        if admin_pw in insecure_admin_passwords or len(admin_pw) < 16:
+            raise RuntimeError(
+                "SECURITY VIOLATION: Production environment forbids default or weak password for 'admin'. "
+                "Configure explicit AGENTTRUST_ADMIN_PASSWORD with at least 16 characters."
+            )
+        AdminAuthManager.initialize_default_users(force=True)
 
 
 validate_production_configuration(ENV_PROFILE, CURRENT_MODE)

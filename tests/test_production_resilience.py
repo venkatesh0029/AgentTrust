@@ -157,6 +157,10 @@ class TestProductionResilience(unittest.TestCase):
             "AGENTTRUST_ENV": "production",
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
             "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
+            "AGENTTRUST_ADMIN_PASSWORD": "ProdAdmin#2026!StrongAuthPassword",
+            "AGENTTRUST_POLICY_ADMIN_PASSWORD": "ProdPolicy#2026!StrongAuthPassword",
+            "AGENTTRUST_FINANCE_APPROVER_PASSWORD": "ProdFinance#2026!StrongAuthPassword",
+            "AGENTTRUST_AUDITOR_PASSWORD": "ProdAuditor#2026!StrongAuthPassword",
             "CORS_ORIGINS": "https://agenttrust.corp.internal",
             "FABRIC_GATEWAY_MODE": "live",
             "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090",
@@ -244,12 +248,73 @@ class TestProductionResilience(unittest.TestCase):
         env = {
             "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
             "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
+            "AGENTTRUST_ADMIN_PASSWORD": "ProdAdmin#2026!StrongAuthPassword",
+            "AGENTTRUST_POLICY_ADMIN_PASSWORD": "ProdPolicy#2026!StrongAuthPassword",
+            "AGENTTRUST_FINANCE_APPROVER_PASSWORD": "ProdFinance#2026!StrongAuthPassword",
+            "AGENTTRUST_AUDITOR_PASSWORD": "ProdAuditor#2026!StrongAuthPassword",
             "CORS_ORIGINS": "https://agenttrust.corp.internal",
         }
         with patch.dict(os.environ, env, clear=False):
             validate_production_configuration(
                 "production", "MODE_C_AGENTTRUST_NO_FABRIC"
             )
+
+    def test_production_fail_closed_on_low_diversity_jwt_secret(self):
+        """Verifies server initialization aborts if AGENTTRUST_JWT_SECRET lacks character diversity (< 8 unique chars)."""
+        env = {
+            "AGENTTRUST_ENV": "production",
+            "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "a1b2a1b2a1b2a1b2a1b2a1b2a1b2a1b2",  # 4 unique chars
+            "CORS_ORIGINS": "https://agenttrust.corp.internal",
+        }
+        with patch.dict(os.environ, env):
+            with self.assertRaises(RuntimeError) as ctx:
+                validate_production_configuration("production", "MODE_C_AGENTTRUST_NO_FABRIC")
+            self.assertIn("insufficient character diversity", str(ctx.exception))
+
+    def test_production_fail_closed_on_repeated_pattern_jwt_secret(self):
+        """Verifies server initialization aborts if AGENTTRUST_JWT_SECRET contains repeated half patterns."""
+        # 16 unique chars, but repeated half
+        half = "abcdefghijklmnop"
+        repeated = half + half
+        env = {
+            "AGENTTRUST_ENV": "production",
+            "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": repeated,
+            "CORS_ORIGINS": "https://agenttrust.corp.internal",
+        }
+        with patch.dict(os.environ, env):
+            with self.assertRaises(RuntimeError) as ctx:
+                validate_production_configuration("production", "MODE_C_AGENTTRUST_NO_FABRIC")
+            self.assertIn("contains repeated half patterns", str(ctx.exception))
+
+    def test_production_fail_closed_on_default_admin_password(self):
+        """Verifies server initialization aborts if default admin password is used in production."""
+        env = {
+            "AGENTTRUST_ENV": "production",
+            "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
+            "AGENTTRUST_ADMIN_PASSWORD": "AdminTrust#2026!Secured",
+            "CORS_ORIGINS": "https://agenttrust.corp.internal",
+        }
+        with patch.dict(os.environ, env):
+            with self.assertRaises(RuntimeError) as ctx:
+                validate_production_configuration("production", "MODE_C_AGENTTRUST_NO_FABRIC")
+            self.assertIn("forbids default or weak password for 'admin'", str(ctx.exception))
+
+    def test_production_fail_closed_on_short_admin_password(self):
+        """Verifies server initialization aborts if admin password is less than 16 characters in production."""
+        env = {
+            "AGENTTRUST_ENV": "production",
+            "GATEWAY_SECRET": "secure-prod-token-xyz-1234567890",
+            "AGENTTRUST_JWT_SECRET": "secure-prod-jwt-secret-xyz-12345678901234",
+            "AGENTTRUST_ADMIN_PASSWORD": "shortPassword!1",
+            "CORS_ORIGINS": "https://agenttrust.corp.internal",
+        }
+        with patch.dict(os.environ, env):
+            with self.assertRaises(RuntimeError) as ctx:
+                validate_production_configuration("production", "MODE_C_AGENTTRUST_NO_FABRIC")
+            self.assertIn("at least 16 characters", str(ctx.exception))
 
 
 class TestTruthfulFabricCommitReporting(unittest.TestCase):

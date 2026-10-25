@@ -14,8 +14,19 @@ from typing import Any
 
 from agent_registry.admin_rbac import AdminRole
 
-PBKDF2_ITERATIONS = 100_000
+PBKDF2_ITERATIONS = 600_000
 PBKDF2_ALGORITHM = "sha256"
+
+INSECURE_PASSWORDS = {
+    "AdminTrust#2026!Secured",
+    "PolicyTrust#2026!Secured",
+    "FinanceTrust#2026!Secured",
+    "AuditorTrust#2026!Secured",
+    "admin",
+    "password",
+    "changeme",
+    "secret",
+}
 
 
 @dataclass
@@ -87,13 +98,17 @@ class AdminAuthManager:
             (
                 "policy_admin",
                 AdminRole.POLICY_ADMIN,
-                os.environ.get("AGENTTRUST_POLICY_PASSWORD", "PolicyTrust#2026!Secured"),
+                os.environ.get("AGENTTRUST_POLICY_ADMIN_PASSWORD")
+                or os.environ.get("AGENTTRUST_POLICY_PASSWORD")
+                or "PolicyTrust#2026!Secured",
                 "Security Policy Administrator",
             ),
             (
                 "finance_approver",
                 AdminRole.FINANCE_APPROVER,
-                os.environ.get("AGENTTRUST_APPROVER_PASSWORD", "FinanceTrust#2026!Secured"),
+                os.environ.get("AGENTTRUST_FINANCE_APPROVER_PASSWORD")
+                or os.environ.get("AGENTTRUST_APPROVER_PASSWORD")
+                or "FinanceTrust#2026!Secured",
                 "Finance Transaction Approver",
             ),
             (
@@ -103,6 +118,15 @@ class AdminAuthManager:
                 "Independent Compliance Auditor",
             ),
         ]
+
+        env_profile = os.environ.get("AGENTTRUST_ENV", "development").lower()
+        if env_profile in ("production", "prod"):
+            for username, role, password, display_name in default_accounts:
+                if password in INSECURE_PASSWORDS or len(password) < 16:
+                    raise RuntimeError(
+                        f"SECURITY VIOLATION: Production environment forbids default or weak password for '{username}'. "
+                        f"Configure explicit strong credentials (>= 16 characters) via AGENTTRUST_{username.upper()}_PASSWORD."
+                    )
 
         for username, role, password, display_name in default_accounts:
             salt_hex, hash_hex = cls.hash_password(password)

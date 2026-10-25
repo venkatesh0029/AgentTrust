@@ -25,6 +25,11 @@ const tokenCache = {};
 
 async function getAuthToken(role = 'SYSTEM_ADMIN') {
   if (tokenCache[role]) return tokenCache[role];
+  const stored = localStorage.getItem(`agenttrust_jwt_token_${role}`) || (role === 'SYSTEM_ADMIN' ? localStorage.getItem('agenttrust_jwt_token') : null);
+  if (stored) {
+    tokenCache[role] = stored;
+    return stored;
+  }
   const creds = ROLE_CREDS[role] || ROLE_CREDS.SYSTEM_ADMIN;
   try {
     const res = await fetch('/auth/login', {
@@ -35,13 +40,16 @@ async function getAuthToken(role = 'SYSTEM_ADMIN') {
     if (res.ok) {
       const data = await res.json();
       tokenCache[role] = data.access_token;
+      localStorage.setItem(`agenttrust_jwt_token_${role}`, data.access_token);
       if (role === 'SYSTEM_ADMIN') {
         localStorage.setItem('agenttrust_jwt_token', data.access_token);
       }
       return data.access_token;
+    } else {
+      console.info(`Authentication required for ${role} (${res.status}). Demo shortcuts inactive.`);
     }
   } catch (err) {
-    console.warn(`Dashboard auth failed for ${role}:`, err);
+    console.warn(`Dashboard auth attempt for ${role}:`, err);
   }
   return null;
 }

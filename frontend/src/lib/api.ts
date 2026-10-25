@@ -233,7 +233,17 @@ export interface AuthSession {
   expiresAt: number;
 }
 
-const DEFAULT_CREDENTIALS: Record<string, { username: string; password: string }> = {
+export const isDemoAuthMode = (): boolean => {
+  if (typeof process !== "undefined" && process.env) {
+    if (process.env.NEXT_PUBLIC_DEMO_MODE === "false") return false;
+    if (process.env.NEXT_PUBLIC_ENV === "production" || process.env.NODE_ENV === "production") {
+      return process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+    }
+  }
+  return true; // dev default
+};
+
+export const DEMO_CREDENTIALS: Record<string, { username: string; password: string }> = {
   SYSTEM_ADMIN: { username: "admin", password: "AdminTrust#2026!Secured" },
   POLICY_ADMIN: { username: "policy_admin", password: "PolicyTrust#2026!Secured" },
   FINANCE_APPROVER: { username: "finance_approver", password: "FinanceTrust#2026!Secured" },
@@ -243,8 +253,15 @@ const DEFAULT_CREDENTIALS: Record<string, { username: string; password: string }
 // CENTRALIZED TYPED API CLIENT
 export const api = {
   async login(username: string = "admin", password?: string): Promise<LoginResponse> {
-    const cred = Object.values(DEFAULT_CREDENTIALS).find((c) => c.username === username);
-    const pwd = password || cred?.password || "AdminTrust#2026!Secured";
+    let pwd = password;
+    if (!pwd) {
+      if (isDemoAuthMode()) {
+        const cred = Object.values(DEMO_CREDENTIALS).find((c) => c.username === username);
+        pwd = cred?.password || "AdminTrust#2026!Secured";
+      } else {
+        throw new Error("SECURITY VIOLATION: Password is mandatory in production environment. Demo persona shortcuts are disabled.");
+      }
+    }
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -301,16 +318,18 @@ export const api = {
     if (roleOrToken && roleOrToken.startsWith("eyJ")) {
       return roleOrToken;
     }
-    const targetRole = roleOrToken && DEFAULT_CREDENTIALS[roleOrToken] ? roleOrToken : null;
+    const targetRole = roleOrToken && DEMO_CREDENTIALS[roleOrToken] ? roleOrToken : null;
     if (typeof window !== "undefined" && targetRole) {
       const cachedToken = localStorage.getItem(`agenttrust_auth_token_${targetRole}`);
       const cachedExpiry = Number(localStorage.getItem(`agenttrust_auth_expiry_${targetRole}`) || "0");
       if (cachedToken && Date.now() < cachedExpiry) {
         return cachedToken;
       }
-      const creds = DEFAULT_CREDENTIALS[targetRole];
-      const loginRes = await this.login(creds.username, creds.password);
-      return loginRes.access_token;
+      if (isDemoAuthMode()) {
+        const creds = DEMO_CREDENTIALS[targetRole];
+        const loginRes = await this.login(creds.username, creds.password);
+        return loginRes.access_token;
+      }
     }
 
     const currentSession = this.getStoredAuth();
@@ -318,8 +337,12 @@ export const api = {
       return currentSession.token;
     }
 
-    const adminLogin = await this.login("admin", "AdminTrust#2026!Secured");
-    return adminLogin.access_token;
+    if (isDemoAuthMode()) {
+      const adminLogin = await this.login("admin", "AdminTrust#2026!Secured");
+      return adminLogin.access_token;
+    }
+
+    return "";
   },
 
   getAuthHeaders(roleOrToken?: string): Record<string, string> {
@@ -327,7 +350,7 @@ export const api = {
       return { Authorization: `Bearer ${roleOrToken}` };
     }
     if (typeof window !== "undefined") {
-      if (roleOrToken && DEFAULT_CREDENTIALS[roleOrToken]) {
+      if (roleOrToken && DEMO_CREDENTIALS[roleOrToken]) {
         const cachedToken = localStorage.getItem(`agenttrust_auth_token_${roleOrToken}`);
         const cachedExpiry = Number(localStorage.getItem(`agenttrust_auth_expiry_${roleOrToken}`) || "0");
         if (cachedToken && Date.now() < cachedExpiry) {
