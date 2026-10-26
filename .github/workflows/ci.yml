@@ -40,7 +40,15 @@ jobs:
       - name: Type Checking Gate (Mypy)
         run: |
           mypy --version
-          mypy --ignore-missing-imports action_gateway agent_registry audit_writer benchmarks evidence_manager fabric human_approval identity_manager policy_engine protected_api replay_protection risk_engine tests
+          mypy --ignore-missing-imports action_gateway agent_registry audit_writer benchmarks evidence_manager fabric human_approval identity_manager policy_engine protected_api replay_protection risk_engine tests > mypy_out.txt 2>&1 || {
+            echo "### Mypy Type Checking Diagnostics" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat mypy_out.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat mypy_out.txt
+            exit 1
+          }
+          cat mypy_out.txt
 
       - name: Run Full Pytest Regression Suite
         run: |
