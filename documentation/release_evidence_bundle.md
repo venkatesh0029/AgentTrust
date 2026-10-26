@@ -2,7 +2,7 @@
 
 ## 1. Release Metadata
 - **Release Candidate Tag**: `v1.0.0-rc2` (Candidate Freeze)
-- **Candidate Commit**: `5242de2` (Documentation Freeze) / `dff4cb0` (Implementation Baseline)
+- **Candidate Commit**: `db17f51` (Verified CI Green Baseline) / `5242de2` (Documentation Freeze) / `dff4cb0` (Implementation Baseline)
 - **Previous Frozen Tag**: `v1.0.0-rc1` (anchored at commit `21333c9`)
 - **Branch**: `feat/fabric-resilience`
 - **Repository**: `https://github.com/venkatesh0029/AgentTrust`

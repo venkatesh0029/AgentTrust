@@ -16,7 +16,7 @@ This release candidate consolidates all deliverables across:
 
 ## Release Checkpoint Identification
 - **Release Candidate Version**: `v1.0.0-rc2`
-- **Candidate Checkpoint Commit**: `5242de2` (Documentation Freeze) / `dff4cb0` (Implementation Baseline)
+- **Candidate Checkpoint Commit**: `db17f51` (Verified CI Green Baseline) / `5242de2` (Documentation Freeze) / `dff4cb0` (Implementation Baseline)
 - **Branch**: `feat/fabric-resilience`
 - **Repository**: `https://github.com/venkatesh0029/AgentTrust`
 - **Release Verification Date**: `2026-10-26`
