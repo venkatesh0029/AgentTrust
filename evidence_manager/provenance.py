@@ -59,7 +59,7 @@ class ProvenanceBuilder:
             "approval_reference": approval_reference,
             "api_execution_result": api_result,
             "error_details": error_details,
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "execution_trace": execution_trace or {"prompt_tokens": 120, "model": "AgentTrust-FinanceAgent-v2"}
         }
         return record

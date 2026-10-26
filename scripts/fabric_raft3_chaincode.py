@@ -13,8 +13,9 @@ import subprocess
 import tarfile
 import time
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 LAB = ROOT / "fabric" / "raft3"
@@ -423,7 +424,7 @@ def smoke_test_command() -> None:
     policy_id = "FIN-POL-001"
     policy_version = "1.0"
     evidence_ref = f"EVID-REF-{uuid.uuid4().hex[:8].upper()}"
-    evidence_payload = f"audit_evidence_data_{uuid.uuid4().hex}".encode("utf-8")
+    evidence_payload = f"audit_evidence_data_{uuid.uuid4().hex}".encode()
     authentic_hash = hashlib.sha256(evidence_payload).hexdigest()
     tampered_hash = "0" * 64
 

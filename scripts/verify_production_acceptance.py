@@ -23,9 +23,10 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from identity_manager.jwt_auth import JWTAuthManager  # noqa: E402
-from server import app, validate_production_configuration  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
+
+from identity_manager.jwt_auth import JWTAuthManager
+from server import app, validate_production_configuration
 
 PROD_ORIGIN = "https://agenttrust.corp.internal"
 PROD_ENV = {

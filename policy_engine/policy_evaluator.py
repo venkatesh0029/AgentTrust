@@ -115,9 +115,9 @@ class PolicyEvaluator:
             if request_timestamp_iso and not use_server_time:
                 dt = datetime.datetime.fromisoformat(request_timestamp_iso.replace("Z", "+00:00"))
                 if dt.tzinfo is not None:
-                    dt = dt.astimezone(datetime.timezone.utc)
+                    dt = dt.astimezone(datetime.UTC)
             else:
-                dt = datetime.datetime.now(datetime.timezone.utc)
+                dt = datetime.datetime.now(datetime.UTC)
 
             request_time = dt.time()
 

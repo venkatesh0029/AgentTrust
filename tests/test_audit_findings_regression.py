@@ -89,7 +89,7 @@ def test_regression_nan_amount_rejection():
         "amount": "NaN",
         "parameters": {"amount": "NaN"},
         "nonce": f"N-{uuid.uuid4().hex[:6]}",
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
     }
     sig = SignatureManager.sign_request(payload, reg["private_key"])
     payload["signature"] = sig
@@ -112,7 +112,7 @@ def test_regression_negative_amount_rejection():
         "amount": -500000.0,
         "parameters": {"amount": -500000.0},
         "nonce": f"N-{uuid.uuid4().hex[:6]}",
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
     }
     sig = SignatureManager.sign_request(payload, reg["private_key"])
     payload["signature"] = sig
@@ -135,7 +135,7 @@ def test_regression_amount_mismatch_rejection():
         "amount": 100.0,
         "parameters": {"amount": 90000.0},
         "nonce": f"N-{uuid.uuid4().hex[:6]}",
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
     }
     sig = SignatureManager.sign_request(payload, reg["private_key"])
     payload["signature"] = sig
@@ -193,7 +193,7 @@ def test_regression_revoked_agent_cannot_reactivate():
 # --- Finding #10: Working Hours Timezone Spoof Prevention ---
 def test_regression_working_hours_normalized_to_utc():
     """Verify that working hours evaluation uses normalized UTC time."""
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     # 09:00 - 18:00 UTC check
     is_valid = PolicyEvaluator._check_working_hours(now_iso, "00:00", "23:59", use_server_time=True)
     assert is_valid is True
@@ -269,7 +269,7 @@ def test_regression_string_amount_invalid_format():
         "amount": "INVALID_NON_NUMERIC_STRING",
         "parameters": {"amount": "INVALID_NON_NUMERIC_STRING"},
         "nonce": f"N-{uuid.uuid4().hex[:6]}",
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
     }
     sig = SignatureManager.sign_request(payload, reg["private_key"])
     payload["signature"] = sig

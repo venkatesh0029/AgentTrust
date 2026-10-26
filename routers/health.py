@@ -3,6 +3,7 @@ Health Check & Enterprise Prometheus Metrics Router.
 """
 
 import time
+
 from fastapi import APIRouter, Response
 
 router = APIRouter(tags=["Health & Telemetry"])

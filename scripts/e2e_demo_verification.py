@@ -1,7 +1,7 @@
-import urllib.request
+import datetime
 import json
 import time
-import datetime
+import urllib.request
 
 BASE_URL = "http://127.0.0.1:8000"
 
@@ -116,7 +116,7 @@ def test_checklist():
         "amount": 2500.0,
         "parameters": {"item": "Server", "quantity": 1, "total_amount": 2500.0},
         "nonce": f"N-E2E-{int(time.time())}",
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         "signature": "AUTO_SIGN"
     })
     req_id = gw_data.get("request_id")

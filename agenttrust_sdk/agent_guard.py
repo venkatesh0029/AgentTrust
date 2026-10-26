@@ -40,7 +40,7 @@ class AgentTrustSDK:
         """
         request_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
         nonce = f"N-{uuid.uuid4().hex[:8].upper()}"
-        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        timestamp = datetime.datetime.now(datetime.UTC).isoformat()
 
         req_amount = amount if amount is not None else parameters.get("amount", 0.0)
 

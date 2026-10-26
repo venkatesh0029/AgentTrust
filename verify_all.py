@@ -24,7 +24,7 @@ def run_step(step_num: int, total_steps: int, title: str, cmd: list[str]) -> boo
     print(f"\n[{step_num}/{total_steps}] {title}...")
     print(f"      Command: {' '.join(cmd)}")
     start = time.time()
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, check=False)
     elapsed = time.time() - start
 
     if res.returncode == 0:

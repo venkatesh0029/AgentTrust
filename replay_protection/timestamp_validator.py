@@ -14,17 +14,17 @@ class TimestampValidator:
         """
         try:
             req_dt = datetime.datetime.fromisoformat(timestamp_iso)
-            now = datetime.datetime.now(datetime.timezone.utc)
+            now = datetime.datetime.now(datetime.UTC)
 
             # Convert naive to UTC if necessary
             if req_dt.tzinfo is None:
-                req_dt = req_dt.replace(tzinfo=datetime.timezone.utc)
+                req_dt = req_dt.replace(tzinfo=datetime.UTC)
 
             # Check expiration header
             if expires_at_iso:
                 exp_dt = datetime.datetime.fromisoformat(expires_at_iso)
                 if exp_dt.tzinfo is None:
-                    exp_dt = exp_dt.replace(tzinfo=datetime.timezone.utc)
+                    exp_dt = exp_dt.replace(tzinfo=datetime.UTC)
                 if now > exp_dt:
                     return False, "EXPIRED_REQUEST"
 

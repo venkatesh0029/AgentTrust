@@ -88,7 +88,7 @@ class TestAuthorizationAssurance(unittest.TestCase):
         )
 
     def _sign_and_build_request(self, agent_id: str, action: str, parameters: dict, amount: float, req_id: str, priv_pem: str | None = None) -> dict:
-        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        timestamp = datetime.datetime.now(datetime.UTC).isoformat()
         req = {
             "request_id": req_id,
             "agent_id": agent_id,

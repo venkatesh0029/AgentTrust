@@ -91,7 +91,7 @@ def register_agent(
         role=role_name,
         public_key_pem=pub_key
     )
-    from server import fabric_client, cache_manager
+    from server import cache_manager, fabric_client
     try:
         fabric_client.chaincode.RegisterAgent(req.agent_id, req.owner, result["certificate_fingerprint"])
         cache_manager.delete("agents:list")

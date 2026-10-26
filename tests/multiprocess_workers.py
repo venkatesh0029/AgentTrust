@@ -3,7 +3,6 @@ Multiprocess Worker Functions for Live Cross-Process Stress Testing.
 Module-level functions designed for Windows 'spawn' compatibility in multiprocessing.
 """
 
-# ruff: noqa: E402
 import copy
 import os
 import sys
@@ -14,13 +13,13 @@ WORKSPACE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if WORKSPACE_DIR not in sys.path:
     sys.path.insert(0, WORKSPACE_DIR)
 
-from fabric.persistent_db import PersistentStorageEngine
 from action_gateway.gateway import ActionGateway
 from action_gateway.retry_queue import RetryQueueManager
 from agent_registry.identity_store import IdentityStore
 from agent_registry.registration import AgentRegistry
 from evidence_manager.evidence_store import EvidenceStore
 from fabric.fabric_client import FabricClient
+from fabric.persistent_db import PersistentStorageEngine
 from human_approval.approval_manager import HumanApprovalManager
 from identity_manager.certificate_manager import CertificateManager
 from policy_engine.policy_evaluator import PolicyEvaluator

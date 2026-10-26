@@ -14,7 +14,7 @@ class PolicyLoader:
     def save_policy(self, policy: PolicyRecord, author: str = "POLICY_ADMIN", reason: str = "Policy Update") -> None:
         """Saves or updates policy record, preserving version history."""
         existing = self._policies.get(policy.policy_id)
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now = datetime.datetime.now(datetime.UTC).isoformat()
 
         if existing and existing.version != policy.version:
             # Archive existing state into history before replacing
@@ -57,7 +57,7 @@ class PolicyLoader:
             return None
 
         # Create new version rolling back values
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now = datetime.datetime.now(datetime.UTC).isoformat()
 
         history_entry = PolicyHistoryEntry(
             version=current.version,

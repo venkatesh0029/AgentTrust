@@ -1,8 +1,8 @@
-from collections.abc import Callable
 import datetime
 import hashlib
 import threading
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from database_config import resolve_database_path
@@ -39,8 +39,7 @@ class HumanApprovalManager:
                     # Adjust approval counter
                     try:
                         num = int(app_id.replace("APPR-REQ-", ""))
-                        if num > self._approval_counter:
-                            self._approval_counter = num
+                        self._approval_counter = max(self._approval_counter, num)
                     except ValueError:
                         pass
         except Exception:
@@ -78,7 +77,7 @@ class HumanApprovalManager:
         with self._lock:
             self._approval_counter += 1
             approval_id = f"APPR-REQ-{self._approval_counter}"
-            now_dt = datetime.datetime.now(datetime.timezone.utc)
+            now_dt = datetime.datetime.now(datetime.UTC)
             expires_dt = now_dt + datetime.timedelta(seconds=expires_in_seconds)
 
             raw_token_data = f"{approval_id}:{request_id}:{agent_id}:{policy_version}:{uuid.uuid4().hex}"
@@ -169,7 +168,7 @@ class HumanApprovalManager:
             expires_at = record.get("expires_at")
             if expires_at:
                 exp_dt = datetime.datetime.fromisoformat(expires_at)
-                now_dt = datetime.datetime.now(datetime.timezone.utc)
+                now_dt = datetime.datetime.now(datetime.UTC)
                 if now_dt > exp_dt:
                     record["status"] = "EXPIRED"
                     self._persist_approval(record)
@@ -186,7 +185,7 @@ class HumanApprovalManager:
             record["approver_id"] = approver_id
             record["approved_by"] = approver_id
             record["approval_reference"] = ref_id
-            record["decision_timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            record["decision_timestamp"] = datetime.datetime.now(datetime.UTC).isoformat()
 
             # Mark token as single-use consumed and persist to SQLite
             self._used_approval_tokens.add(token)
@@ -212,7 +211,7 @@ class HumanApprovalManager:
             record["status"] = "REJECTED"
             record["approver_id"] = approver_id
             record["rejection_reason"] = reason
-            record["decision_timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            record["decision_timestamp"] = datetime.datetime.now(datetime.UTC).isoformat()
 
             self._persist_approval(record)
             return True, record, "REJECTED_SUCCESSFULLY"

@@ -65,7 +65,7 @@ class IdentityStore:
             return False
 
         agent["status"] = new_status.value
-        agent["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        agent["updated_at"] = datetime.datetime.now(datetime.UTC).isoformat()
         agent["status_reason"] = reason
         self.save_agent(agent)
         return True

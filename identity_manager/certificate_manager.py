@@ -60,8 +60,8 @@ class CertificateManager:
             .issuer_name(issuer)
             .public_key(self.ca_private_key.public_key())
             .serial_number(x509.random_serial_number())
-            .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
-            .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3650))
+            .not_valid_before(datetime.datetime.now(datetime.UTC))
+            .not_valid_after(datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=3650))
             .add_extension(
                 x509.BasicConstraints(ca=True, path_length=None), critical=True
             )
@@ -101,7 +101,7 @@ class CertificateManager:
             x509.NameAttribute(NameOID.GIVEN_NAME, agent_name)
         ])
 
-        start_time = datetime.datetime.now(datetime.timezone.utc)
+        start_time = datetime.datetime.now(datetime.UTC)
         end_time = start_time + datetime.timedelta(days=validity_days)
 
         cert = (
@@ -138,7 +138,7 @@ class CertificateManager:
             x509.NameAttribute(NameOID.GIVEN_NAME, agent_name)
         ])
 
-        start_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=start_offset_days)
+        start_time = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=start_offset_days)
         end_time = start_time + datetime.timedelta(days=validity_days)
 
         cert = (
@@ -178,7 +178,7 @@ class CertificateManager:
                 return {"valid": False, "reason": "CERTIFICATE_REVOKED"}
 
             cert = _parse_cert_cached(cert_pem)
-            now = datetime.datetime.now(datetime.timezone.utc)
+            now = datetime.datetime.now(datetime.UTC)
 
             if now < cert.not_valid_before_utc or now > cert.not_valid_after_utc:
                 return {"valid": False, "reason": "CERTIFICATE_EXPIRED"}

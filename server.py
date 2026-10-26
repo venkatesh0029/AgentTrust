@@ -13,19 +13,25 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from action_gateway.gateway import ActionGateway
+from action_gateway.mcp_gateway import MCPGovernanceGateway
+from action_gateway.retry_queue import RetryQueueManager
 from agent_registry.admin_rbac import AdminRole, RBACManager
 from agent_registry.identity_store import IdentityStore
 from agent_registry.registration import AgentRegistry
 from audit_writer.chain_writer import AuditChainWriter
 from benchmarks.benchmark_engine import BenchmarkEngine
+from cache_manager import cache_manager
 from evidence_manager.evidence_store import EvidenceStore
 from evidence_manager.hash_manager import HashManager
+from evidence_manager.merkle_tree import MerkleTree
 from fabric.fabric_client import FabricClient
+from fabric.persistent_db import PersistentStorageEngine
 from human_approval.approval_manager import HumanApprovalManager
 
 # AgentTrust Modules
 from identity_manager.admin_auth import AdminAuthManager
 from identity_manager.certificate_manager import CertificateManager
+from identity_manager.delegation import DelegationTokenManager
 from identity_manager.jwt_auth import JWTAuthManager, validate_jwt_secret_entropy
 from identity_manager.signature_manager import SignatureManager
 from policy_engine.policy_evaluator import PolicyEvaluator
@@ -37,14 +43,7 @@ from policy_engine.policy_models import (
 )
 from protected_api.finance_api import ProtectedFinanceAPI
 from replay_protection.request_tracker import RequestTracker
-
-from action_gateway.mcp_gateway import MCPGovernanceGateway
-from action_gateway.retry_queue import RetryQueueManager
-from fabric.persistent_db import PersistentStorageEngine
-from evidence_manager.merkle_tree import MerkleTree
-from identity_manager.delegation import DelegationTokenManager
 from risk_engine.prompt_injection_guard import PromptInjectionGuard
-from cache_manager import cache_manager
 
 # Operational Mode & Environment Configuration
 CURRENT_MODE = os.environ.get("AGENTTRUST_MODE", "MODE_D_AGENTTRUST_FABRIC")
@@ -282,7 +281,7 @@ def seed_41_demo_agents():
                 role=item["role"],
                 agent_version="2.1"
             )
-            if "private_key" in reg and reg["private_key"]:
+            if reg.get("private_key"):
                 AGENT_PRIVATE_KEYS[aid] = reg["private_key"]
 
         # Set status & cert revocation
@@ -290,7 +289,7 @@ def seed_41_demo_agents():
             agent_registry.update_agent_status(aid, "SUSPENDED", "ADMIN_SECURITY_SUSPENSION")
         elif item["status"] == "REVOKED":
             agent_registry.update_agent_status(aid, "REVOKED", "ADMIN_SECURITY_REVOCATION")
-            if "certificate_fingerprint" in reg and reg["certificate_fingerprint"]:
+            if reg.get("certificate_fingerprint"):
                 cert_manager.revoke_certificate(reg["certificate_fingerprint"])
 
         if aid == "FINANCE-AGENT-001":
@@ -381,7 +380,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from routers import health, agents, gateway, policies, approvals, audit, scenarios  # noqa: E402
+from routers import agents, approvals, audit, gateway, health, policies, scenarios
+
 app.include_router(health.router)
 app.include_router(agents.router)
 app.include_router(gateway.router)
@@ -679,7 +679,7 @@ def logout_admin_session(
         response.delete_cookie(
             key=cname,
             path="/",
-            httponly=True if "session" in cname else False,
+            httponly="session" in cname,
             samesite="lax",
             secure=is_production,
         )
@@ -830,7 +830,6 @@ class FabricVerifyEvidenceRequest(BaseModel):
 
 # --- Mode Processing Helper ---
 def process_request_with_mode(payload: dict[str, Any]) -> dict[str, Any]:
-    global CURRENT_MODE
     if CURRENT_MODE == "MODE_A_DIRECT_API":
         # Mode A: Direct API (bypasses Gateway, signature checks, policy, and audit log)
         headers = finance_api.create_gateway_auth_headers(payload["request_id"])
@@ -871,7 +870,7 @@ def process_request_with_mode(payload: dict[str, Any]) -> dict[str, Any]:
                 "reason": "INVALID_SIGNATURE",
                 "protected_api_result": "DENIED"
             }
-        dec, rsn, pver, _ = policy_evaluator.evaluate(
+        dec, rsn, _pver, _ = policy_evaluator.evaluate(
             policy_id=agent_rec.get("policy_id", "FIN-POLICY-001"),
             action=payload["action"],
             resource=payload["resource"],
@@ -948,7 +947,7 @@ def health_check():
         "current_mode": CURRENT_MODE,
         "redis_connected": cache_manager.is_redis_connected,
         "cache_backend": "redis" if cache_manager.is_redis_connected else "in-memory-fallback",
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
     }
 
 # 0. Operational Mode APIs
@@ -1081,7 +1080,7 @@ def create_purchase_order(req: PurchaseOrderRequest, role: AdminRole = Depends(c
         raise HTTPException(status_code=404, detail=f"Agent '{req.agent_id}' not registered.")
 
     req_id = f"REQ-PO-{uuid.uuid4().hex[:6]}"
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     nonce = f"N-PO-{uuid.uuid4().hex[:8]}"
 
     payload = {
@@ -1115,7 +1114,7 @@ def create_fund_transfer(req: FundTransferRequest, role: AdminRole = Depends(che
         raise HTTPException(status_code=404, detail=f"Agent '{req.agent_id}' not registered.")
 
     req_id = f"REQ-FT-{uuid.uuid4().hex[:6]}"
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     nonce = f"N-FT-{uuid.uuid4().hex[:8]}"
 
     payload = {
@@ -1462,7 +1461,7 @@ def issue_delegation_token(
 
     requested_actions = set(req.allowed_actions)
     if not requested_actions.issubset(allowed_scope):
-        unauthorized = sorted(list(requested_actions - allowed_scope))
+        unauthorized = sorted(requested_actions - allowed_scope)
         raise HTTPException(
             status_code=403,
             detail=f"Requested actions exceed issuer capabilities or policy: {', '.join(unauthorized)}",
@@ -1747,7 +1746,7 @@ def run_performance_benchmarks():
     ablation_study = engine.run_ablation_study(num_requests=25)
 
     return {
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         "stage_latencies": stage_latencies,
         "concurrency_scaling": concurrency_scaling,
         "ablation_study": ablation_study,
@@ -1759,7 +1758,7 @@ def run_performance_benchmarks():
 @app.post("/scenarios/attack-matrix/run/{scenario_id}")
 def run_scenario(scenario_id: int):
     priv_key = default_agent_reg["private_key"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     if scenario_id == 1:
         req_id = f"REQ-ATK1-{uuid.uuid4().hex[:6]}"
@@ -1815,7 +1814,7 @@ def run_scenario(scenario_id: int):
 
     elif scenario_id == 4:
         req_id = f"REQ-ATK4-{uuid.uuid4().hex[:6]}"
-        old_time = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=600)).isoformat()
+        old_time = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=600)).isoformat()
         payload = {
             "request_id": req_id,
             "agent_id": "FINANCE-AGENT-001",
@@ -2117,7 +2116,7 @@ app.mount("/static", StaticFiles(directory=dashboard_dir), name="static")
 def index_page():
     index_path = os.path.join(dashboard_dir, "index.html")
     if os.path.exists(index_path):
-        with open(index_path, "r", encoding="utf-8") as f:
+        with open(index_path, encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
     return HTMLResponse(content="<h1>AgentTrust Framework Dashboard</h1>")
 

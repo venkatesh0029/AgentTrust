@@ -120,7 +120,7 @@ class BenchmarkEngine:
                 "request_id": req_id, "agent_id": "BENCH-AGENT-STAGE",
                 "action": "CREATE_PURCHASE_ORDER", "resource": "SUP-1", "amount": 5000.0,
                 "parameters": {"amount": 5000.0}, "nonce": n,
-                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
             }
 
             # 1. Sig Gen
@@ -223,7 +223,7 @@ class BenchmarkEngine:
                         "amount": 2500.0,
                         "parameters": {"amount": 2500.0},
                         "nonce": f"N-SCALE-{ag_id}-{r}",
-                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                         "key_version": 1
                     }
                     payload["signature"] = SignatureManager.sign_request(payload, pk)
@@ -278,7 +278,7 @@ class BenchmarkEngine:
                     "amount": 2500.0,
                     "parameters": {"amount": 2500.0},
                     "nonce": f"N-ABLATE-{mode[:4]}-{i}",
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     "key_version": 1
                 }
                 payload["signature"] = SignatureManager.sign_request(payload, pk)

@@ -17,22 +17,18 @@ from database_config import resolve_database_path
 
 class InvalidStateTransitionError(ValueError):
     """Raised when an illegal transition is attempted in the transaction intent state machine."""
-    pass
 
 
 class ConcurrentTransitionConflictError(RuntimeError):
     """Raised when a concurrent worker modifies an intent before the current transition completes."""
-    pass
 
 
 class FencingTokenError(RuntimeError):
     """Raised when a worker's lock lease was preempted, stolen, or superseded by a newer fencing token."""
-    pass
 
 
 class LockLeaseExpiredError(RuntimeError):
     """Raised when an operation is attempted after lock lease expiry."""
-    pass
 
 
 class LockAcquisitionResult:
@@ -326,7 +322,7 @@ class PersistentStorageEngine:
             cursor.execute("""
                 INSERT OR REPLACE INTO crl_revocations (fingerprint, revoked_at)
                 VALUES (?, ?)
-            """, (fingerprint.upper(), datetime.datetime.now(datetime.timezone.utc).isoformat()))
+            """, (fingerprint.upper(), datetime.datetime.now(datetime.UTC).isoformat()))
             conn.commit()
             conn.close()
 
@@ -348,7 +344,7 @@ class PersistentStorageEngine:
             cursor.execute("""
                 INSERT OR REPLACE INTO ca_store (key_id, private_key_pem, certificate_pem, created_at)
                 VALUES (?, ?, ?, ?)
-            """, (key_id, private_key_pem, certificate_pem, datetime.datetime.now(datetime.timezone.utc).isoformat()))
+            """, (key_id, private_key_pem, certificate_pem, datetime.datetime.now(datetime.UTC).isoformat()))
             conn.commit()
             conn.close()
 
@@ -464,7 +460,7 @@ class PersistentStorageEngine:
             cursor.execute("""
                 INSERT OR REPLACE INTO delegation_revocations (token_id, revoked_at)
                 VALUES (?, ?)
-            """, (token_id, datetime.datetime.now(datetime.timezone.utc).isoformat()))
+            """, (token_id, datetime.datetime.now(datetime.UTC).isoformat()))
             conn.commit()
             conn.close()
 
@@ -533,7 +529,7 @@ class PersistentStorageEngine:
         Returns LockAcquisitionResult(acquired, fencing_token, owner_id).
         """
         scoped_key = f"{agent_id}:{idempotency_key}"
-        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        now = datetime.datetime.now(datetime.UTC).timestamp()
         actual_owner = owner_id or str(uuid.uuid4())
         new_expires = now + ttl_seconds
 
@@ -592,7 +588,7 @@ class PersistentStorageEngine:
         Returns True if valid, False otherwise.
         """
         scoped_key = f"{agent_id}:{idempotency_key}"
-        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        now = datetime.datetime.now(datetime.UTC).timestamp()
         with self._lock:
             conn = self._get_connection()
             try:
@@ -691,7 +687,7 @@ class PersistentStorageEngine:
 
     def evict_expired_nonces(self, max_age_seconds: int = 300) -> int:
         """Evicts nonces older than max_age_seconds from SQLite."""
-        cutoff = datetime.datetime.now(datetime.timezone.utc).timestamp() - max_age_seconds
+        cutoff = datetime.datetime.now(datetime.UTC).timestamp() - max_age_seconds
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -703,7 +699,7 @@ class PersistentStorageEngine:
 
     def save_retry_record(self, event_id: str, request_id: str, payload: dict[str, Any], error_msg: str, status: str = "PENDING_RETRY", retry_count: int = 0) -> None:
         """Persists failed commit record to durable reconciliation queue without resetting lease fields."""
-        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        now = datetime.datetime.now(datetime.UTC).timestamp()
         with self._lock:
             conn = self._get_connection()
             try:
@@ -728,7 +724,7 @@ class PersistentStorageEngine:
                     error_msg,
                     retry_count,
                     status,
-                    datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    datetime.datetime.now(datetime.UTC).isoformat(),
                     now,
                 ))
                 if cursor.rowcount == 0:
@@ -907,7 +903,7 @@ class PersistentStorageEngine:
             raise ValueError(f"ttl_seconds must be positive, got {ttl_seconds}")
 
         actual_owner = owner_id or str(uuid.uuid4())
-        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        now = datetime.datetime.now(datetime.UTC).timestamp()
         new_expires = now + ttl_seconds
 
         with self._lock:
@@ -974,7 +970,7 @@ class PersistentStorageEngine:
         and that the lease has not expired.
         Returns True if claim is valid and unexpired, False otherwise.
         """
-        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        now = datetime.datetime.now(datetime.UTC).timestamp()
         with self._lock:
             conn = self._get_connection()
             try:
@@ -1011,7 +1007,7 @@ class PersistentStorageEngine:
         Never releases a newer worker's lease or an expired/stale claim.
         Returns True if released, False otherwise.
         """
-        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        now = datetime.datetime.now(datetime.UTC).timestamp()
         with self._lock:
             conn = self._get_connection()
             try:
@@ -1056,7 +1052,7 @@ class PersistentStorageEngine:
           while preserving the fencing token.
         Returns True if finalized, False otherwise.
         """
-        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        now = datetime.datetime.now(datetime.UTC).timestamp()
         with self._lock:
             conn = self._get_connection()
             try:
@@ -1119,7 +1115,7 @@ class PersistentStorageEngine:
         request_fingerprint: str | None = None
     ) -> None:
         """Saves durable transaction intent."""
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now = datetime.datetime.now(datetime.UTC).isoformat()
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -1155,7 +1151,7 @@ class PersistentStorageEngine:
         Raises InvalidStateTransitionError if transition is illegal.
         Raises ConcurrentTransitionConflictError if expected_current_state does not match.
         """
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now = datetime.datetime.now(datetime.UTC).isoformat()
         with self._lock:
             conn = self._get_connection()
             try:

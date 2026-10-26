@@ -12,9 +12,10 @@ Targeted tests for Phase 2 Audit Findings:
 import os
 import tempfile
 import uuid
+
 import pytest
 
-from evidence_manager.evidence_store import EvidenceStore, EvidencePersistenceError
+from evidence_manager.evidence_store import EvidencePersistenceError, EvidenceStore
 from human_approval.approval_manager import HumanApprovalManager
 from identity_manager.delegation import DelegationTokenManager
 from protected_api.finance_api import ProcurementService

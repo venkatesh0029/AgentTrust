@@ -7,7 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.fabric_raft3 import (  # noqa: E402
+from scripts.fabric_raft3 import (
     COMPOSE_FILE,
     RAFT3_ROOT,
     ROOT,

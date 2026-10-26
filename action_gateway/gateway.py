@@ -5,7 +5,7 @@ import json
 import math
 import os
 import uuid
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 from action_gateway.request_validator import RequestValidator
@@ -118,7 +118,7 @@ class ActionGateway:
         if d < 0:
             raise ValueError(f"Financial amount cannot be negative: {amount}")
 
-        quantum = Decimal("1") if scale == 0 else Decimal(f"1e-{scale}")
+        quantum = Decimal(1) if scale == 0 else Decimal(f"1e-{scale}")
         multiplier = Decimal(10) ** scale
 
         if strict_scale:
@@ -796,7 +796,7 @@ class ActionGateway:
                     return False, "CERTIFICATE_FINGERPRINT_CHANGED_SINCE_APPROVAL_ISSUANCE"
 
             # 3. Re-evaluate Risk Engine
-            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
             risk_res = self.risk_evaluator.evaluate(
                 agent_id=agent_id,
                 action=action,

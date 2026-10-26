@@ -61,7 +61,7 @@ def gateway_setup():
 def test_scenario_1_valid_low_value(gateway_setup):
     gw = gateway_setup["gateway"]
     priv_key = gateway_setup["private_key"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     payload = {
         "request_id": f"REQ-S1-{uuid.uuid4().hex[:6]}",
@@ -83,7 +83,7 @@ def test_scenario_1_valid_low_value(gateway_setup):
 def test_scenario_2_excessive_amount(gateway_setup):
     gw = gateway_setup["gateway"]
     priv_key = gateway_setup["private_key"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     payload = {
         "request_id": f"REQ-S2-{uuid.uuid4().hex[:6]}",
@@ -103,7 +103,7 @@ def test_scenario_2_excessive_amount(gateway_setup):
 
 def test_scenario_3_invalid_signature(gateway_setup):
     gw = gateway_setup["gateway"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     payload = {
         "request_id": f"REQ-S3-{uuid.uuid4().hex[:6]}",
@@ -123,7 +123,7 @@ def test_scenario_3_invalid_signature(gateway_setup):
 
 def test_scenario_4_unknown_agent(gateway_setup):
     gw = gateway_setup["gateway"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     payload = {
         "request_id": f"REQ-S4-{uuid.uuid4().hex[:6]}",
@@ -143,7 +143,7 @@ def test_scenario_4_unknown_agent(gateway_setup):
 def test_scenario_5_revoked_agent(gateway_setup):
     gw = gateway_setup["gateway"]
     reg = gateway_setup["registry"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     reg.revoke_agent("FINANCE-AGENT-001")
     payload = {
@@ -164,7 +164,7 @@ def test_scenario_5_revoked_agent(gateway_setup):
 def test_scenario_6_unauthorized_resource(gateway_setup):
     gw = gateway_setup["gateway"]
     priv_key = gateway_setup["private_key"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     payload = {
         "request_id": f"REQ-S6-{uuid.uuid4().hex[:6]}",
@@ -184,7 +184,7 @@ def test_scenario_6_unauthorized_resource(gateway_setup):
 def test_scenario_7_replay_attack(gateway_setup):
     gw = gateway_setup["gateway"]
     priv_key = gateway_setup["private_key"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     req_id = f"REQ-S7-{uuid.uuid4().hex[:6]}"
     nonce = f"N-S7-{uuid.uuid4().hex[:6]}"
@@ -211,7 +211,7 @@ def test_scenario_8_and_9_high_risk_and_human_approval(gateway_setup):
     gw = gateway_setup["gateway"]
     loader = gateway_setup["policy_loader"]
     priv_key = gateway_setup["private_key"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     pol = loader.get_policy("FIN-POLICY-001")
     pol.maximum_amount = 50000.0
@@ -247,7 +247,7 @@ def test_scenario_10_evidence_tampering(gateway_setup):
     ev_store = gateway_setup["evidence_store"]
     fabric = gateway_setup["fabric"]
     priv_key = gateway_setup["private_key"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     payload = {
         "request_id": f"REQ-S10-{uuid.uuid4().hex[:6]}",
@@ -278,7 +278,7 @@ def test_scenario_11_policy_versioning(gateway_setup):
     gw = gateway_setup["gateway"]
     loader = gateway_setup["policy_loader"]
     priv_key = gateway_setup["private_key"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     pol = loader.get_policy("FIN-POLICY-001")
     pol.maximum_amount = 5000.0

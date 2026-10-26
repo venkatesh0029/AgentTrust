@@ -69,7 +69,7 @@ class TestPolicyBypassResilience(unittest.TestCase):
     def _sign_and_build_request(self, action: str, parameters: dict, amount: float, req_id: str) -> dict:
         """Utility to build a properly structured, signed agent request."""
         timestamp = int(time.time())
-        payload_to_sign = f"{self.agent_id}:{action}:{amount}:{timestamp}:{req_id}".encode('utf-8')
+        payload_to_sign = f"{self.agent_id}:{action}:{amount}:{timestamp}:{req_id}".encode()
         sig_b64 = self.kms.sign_payload_in_hsm(self.agent_id, payload_to_sign)
 
         return {

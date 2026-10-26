@@ -48,7 +48,7 @@ class ProcurementService:
                 "currency": currency,
                 "status": "ISSUED",
                 "approval_reference": approval_ref,
-                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
             }
             self._purchase_orders[po_id] = record
             return record
@@ -82,7 +82,7 @@ class ProcurementService:
                 "currency": currency,
                 "status": "TRANSFERRED",
                 "approval_reference": approval_ref,
-                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
             }
             self._fund_transfers[tx_id] = record
             return record
@@ -112,7 +112,7 @@ class ProcurementService:
                 "currency": currency,
                 "status": "PROCESSED",
                 "approval_reference": approval_ref,
-                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
             }
             self._reimbursements[tx_id] = record
             return record
@@ -174,7 +174,7 @@ class ProtectedFinanceAPI:
     def _persist_fencing_token(self, scope: str, token: int) -> None:
         if not self._persistent_db_path:
             return
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now_iso = datetime.datetime.now(datetime.UTC).isoformat()
         with sqlite3.connect(self._persistent_db_path) as conn:
             conn.execute("""
                 INSERT INTO downstream_fencing_tokens (scope, fencing_token, updated_at)
@@ -200,7 +200,7 @@ class ProtectedFinanceAPI:
 
     def create_gateway_auth_headers(self, request_id: str) -> dict[str, str]:
         """Helper for Action Gateway to generate signed service-to-service headers."""
-        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        timestamp = datetime.datetime.now(datetime.UTC).isoformat()
         payload = {
             "gateway_service": "AgentTrust-ActionGateway-Service",
             "request_id": request_id,

@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 
 class EvidencePersistenceError(Exception):
     """Raised when evidence fails to persist to persistent storage engine."""
-    pass
 
 
 class EvidenceStore:

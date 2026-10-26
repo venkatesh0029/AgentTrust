@@ -36,7 +36,7 @@ class AgentTrustChaincode:
             "owner": owner,
             "certificate_fingerprint": cert_fingerprint,
             "status": status,
-            "registered_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            "registered_at": datetime.datetime.now(datetime.UTC).isoformat()
         }
         self._put_state(key, agent_data)
         return agent_data
@@ -49,7 +49,7 @@ class AgentTrustChaincode:
         if not agent:
             return False
         agent["status"] = new_status
-        agent["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        agent["updated_at"] = datetime.datetime.now(datetime.UTC).isoformat()
         self._put_state(f"AGENT_{agent_id}", agent)
         return True
 
@@ -67,7 +67,7 @@ class AgentTrustChaincode:
             "policy_id": policy_id,
             "agent_id": agent_id,
             "policy_data": policy_data,
-            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            "created_at": datetime.datetime.now(datetime.UTC).isoformat()
         }
         self._put_state(key, policy_record)
         return policy_record
@@ -107,7 +107,7 @@ class AgentTrustChaincode:
             "policy_version": policy_version,
             "evidence_reference": evidence_reference,
             "evidence_hash": evidence_hash,
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
         }
         self._put_state(key, event_record)
         self.tx_history.append(event_record)
@@ -167,7 +167,7 @@ class AgentTrustChaincode:
             "decision": decision,
             "policy_version": policy_version,
             "organization": organization,
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
         }
         self._put_state(key, record)
         self.tx_history.append(record)

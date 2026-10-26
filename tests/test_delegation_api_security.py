@@ -1,10 +1,10 @@
 from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
 from agent_registry.admin_rbac import AdminRole
 from identity_manager.jwt_auth import JWTAuthManager
-from server import app, agent_registry, AGENT_PRIVATE_KEYS
-
+from server import AGENT_PRIVATE_KEYS, agent_registry, app
 
 client = TestClient(app)
 

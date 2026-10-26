@@ -53,7 +53,7 @@ class AgentRegistry:
             )
 
         serial_str = self._extract_serial_from_cert(cert_pem)
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now = datetime.datetime.now(datetime.UTC).isoformat()
 
         record = {
             "agent_id": agent_id,
@@ -125,7 +125,7 @@ class AgentRegistry:
             )
 
         serial_str = self._extract_serial_from_cert(cert_pem)
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now = datetime.datetime.now(datetime.UTC).isoformat()
 
         agent["key_version"] = agent.get("key_version", 1) + 1
         agent["certificate"] = cert_pem

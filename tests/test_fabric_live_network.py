@@ -6,12 +6,13 @@ transaction validation, and peer disconnection recovery against Fabric network s
 
 import os
 import unittest
+
 import pytest
 
+from action_gateway.retry_queue import RetryQueueManager
+from fabric.chaincode.agent_trust_chaincode import AgentTrustChaincode
 from fabric.fabric_client import FabricClient
 from fabric.ledger_service import FabricLedgerService
-from fabric.chaincode.agent_trust_chaincode import AgentTrustChaincode
-from action_gateway.retry_queue import RetryQueueManager
 
 
 class TestFabricLiveNetworkIntegration(unittest.TestCase):

@@ -31,7 +31,6 @@ from policy_engine.policy_loader import PolicyLoader
 from policy_engine.policy_models import PolicyRecord, WorkingHours
 from protected_api.finance_api import ProtectedFinanceAPI
 from replay_protection.request_tracker import RequestTracker
-
 from tests.multiprocess_workers import (
     worker_claim_nonce,
     worker_process_request,
@@ -120,7 +119,7 @@ class TestLiveMultiprocessAndBoundaryAssurance(unittest.TestCase):
         nonce: str,
         idempotency_key: str | None = None
     ) -> dict:
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now_iso = datetime.datetime.now(datetime.UTC).isoformat()
         payload = {
             "request_id": req_id,
             "agent_id": self.agent_id,
@@ -568,7 +567,7 @@ class TestLiveMultiprocessAndBoundaryAssurance(unittest.TestCase):
             "parameters": {"recipient": "Attacker"},
             "amount": 2500.00,
             "nonce": "NONCE-BYPASS-01",
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "key_version": 1,
             "signature": "FORGED_SIGNATURE_BYTES_BASE64=="
         }

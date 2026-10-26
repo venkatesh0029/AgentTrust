@@ -28,7 +28,7 @@ if not os.environ.get("FABRIC_GATEWAY_TOKEN"):
         "'. .\\scripts\\load_fabric_gateway_env.ps1' before running this suite."
     )
 
-from fabric.fabric_client import FabricClient  # noqa: E402
+from fabric.fabric_client import FabricClient
 
 
 def run_live_fabric_verification() -> int:

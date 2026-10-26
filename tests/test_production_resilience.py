@@ -437,7 +437,7 @@ class TestTruthfulFabricCommitReporting(unittest.TestCase):
             const savedNodeEnv = process.env.NODE_ENV;
             const savedNextPublicEnv = process.env.NEXT_PUBLIC_ENV;
             const savedDemo = process.env.NEXT_PUBLIC_DEMO_MODE;
-            
+
             process.env.NODE_ENV = nodeEnv;
             process.env.NEXT_PUBLIC_ENV = nextPublicEnv;
             process.env.NEXT_PUBLIC_DEMO_MODE = nextPublicDemoMode;
@@ -493,6 +493,7 @@ class TestTruthfulFabricCommitReporting(unittest.TestCase):
     def test_backend_enforces_auth_independently_of_ui_demo_mode(self):
         """Verifies backend strictly rejects unauthenticated calls even if client sends demo flags or headers."""
         from fastapi.testclient import TestClient
+
         from server import app
 
         test_client = TestClient(app)

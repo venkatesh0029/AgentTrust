@@ -10,11 +10,10 @@ Covers:
 import pytest
 from fastapi.testclient import TestClient
 
-from server import app, run_all_attack_scenarios
 from audit_writer.chain_writer import AuditChainWriter
 from benchmarks.benchmark_engine import calculate_percentiles
 from routers.scenarios import run_attack_matrix as router_run_attack_matrix
-
+from server import app, run_all_attack_scenarios
 
 client = TestClient(app)
 

@@ -19,6 +19,7 @@ import atexit
 import os
 import shutil
 import tempfile
+
 import pytest
 
 # Module-level setup: runs BEFORE any test files are imported by pytest
@@ -42,7 +43,7 @@ local_env_path = os.path.join(
 )
 if os.path.exists(local_env_path):
     try:
-        with open(local_env_path, "r", encoding="utf-8") as f:
+        with open(local_env_path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line.startswith("FABRIC_GATEWAY_TOKEN="):

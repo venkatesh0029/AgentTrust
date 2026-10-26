@@ -21,7 +21,11 @@ from typing import Any
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from benchmarks.held_out_v2_benchmark import HELD_OUT_ADVERSARIAL_V2, HELD_OUT_BENIGN_V2
-from risk_engine.prompt_injection_guard import HOMOGLYPH_MAP, PROMPT_INJECTION_PATTERNS, PromptInjectionGuard
+from risk_engine.prompt_injection_guard import (
+    HOMOGLYPH_MAP,
+    PROMPT_INJECTION_PATTERNS,
+    PromptInjectionGuard,
+)
 
 
 class AblationStudyBenchmark:

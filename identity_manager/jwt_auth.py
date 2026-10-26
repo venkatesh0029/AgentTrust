@@ -14,6 +14,7 @@ from collections import Counter
 from typing import Any
 
 import jwt
+
 from database_config import resolve_database_path
 
 INSECURE_JWT_SECRETS = {

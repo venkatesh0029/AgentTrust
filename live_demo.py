@@ -45,7 +45,7 @@ def print_step(scenario_num: int, name: str, result_status: str, details: str):
 
 def run_live_demo():
     print_header("AgentTrust Security & Accountability Framework - Live Demonstration")
-    print(f"System Time: {datetime.datetime.now(datetime.timezone.utc).isoformat()}")
+    print(f"System Time: {datetime.datetime.now(datetime.UTC).isoformat()}")
     print("Initialising AgentTrust Cryptographic Authority, Policy Engine, Gateway & Ledger...\n")
 
     # Core System Initialization
@@ -85,7 +85,7 @@ def run_live_demo():
 
     # --- SCENARIO 1: Valid ₹7,500 Reimbursement ---
     print_header("Scenario 1: Valid Rs 7,500 Reimbursement Request")
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     p1 = {
         "request_id": f"REQ-DEMO-01-{uuid.uuid4().hex[:6]}",
         "agent_id": "FINANCE-AGENT-001",

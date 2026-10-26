@@ -73,7 +73,7 @@ def test_setup():
     }
 
 def build_signed_payload(agent_id, action, resource, amount, priv_key, key_version=1, request_id=None, nonce=None, timestamp=None, idempotency_key=None, extra_fields=None):
-    now_iso = timestamp or datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = timestamp or datetime.datetime.now(datetime.UTC).isoformat()
     req_id = request_id or f"REQ-{uuid.uuid4().hex[:6]}"
     n = nonce or f"NONCE-{uuid.uuid4().hex[:6]}"
 
@@ -138,7 +138,7 @@ def test_attack_03_replay_attack(test_setup):
 def test_attack_04_expired_request(test_setup):
     """Attack #4: Expired request outside freshness window must be rejected."""
     gw = test_setup["gw"]
-    old_time = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=600)).isoformat()
+    old_time = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=600)).isoformat()
     payload = build_signed_payload("PROCUREMENT-AGENT-001", "CREATE_PURCHASE_ORDER", "SUPPLIER-101", 2000.0, test_setup["priv_key"], timestamp=old_time)
 
     res = gw.process_request(payload)

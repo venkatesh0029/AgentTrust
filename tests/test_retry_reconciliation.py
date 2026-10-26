@@ -551,7 +551,7 @@ class TestRetryReconciliation(unittest.TestCase):
         def blocking_get_event(event_id):
             started_event.set()
             proceed_event.wait(timeout=5.0)
-            return None  # Absent from ledger in simulator mode
+            # Absent from ledger in simulator mode
 
         client.get_event.side_effect = blocking_get_event
 

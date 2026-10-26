@@ -1,9 +1,9 @@
 from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
-from server import app, evidence_store, chain_writer
 from evidence_manager.merkle_tree import MerkleTree
-
+from server import app, chain_writer, evidence_store
 
 client = TestClient(app)
 

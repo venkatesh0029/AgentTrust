@@ -1,9 +1,9 @@
 """Unit tests for AgentTrust Fabric lifecycle safety and readiness helpers."""
 from scripts.fabric_lifecycle import (
+    _has_gossip_membership_event,
     bridge_health_ready,
     build_down_args,
     build_parser,
-    _has_gossip_membership_event,
     is_running_state,
     is_successful_one_shot_state,
 )

@@ -12,8 +12,8 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
