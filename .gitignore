@@ -28,7 +28,7 @@ MANIFEST
 *.db.backup_*
 agenttrust_persistent.db
 
-# Environments
+# Environments & Secrets
 venv/
 env/
 ENV/
@@ -36,6 +36,9 @@ env.bak/
 venv.bak/
 .venv/
 *.bak
+.env
+.env.local
+.env.*.local
 
 # Pytest / Testing
 .pytest_cache/

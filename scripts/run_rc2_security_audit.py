@@ -17,7 +17,6 @@ import shutil
 import sys
 import tempfile
 import time
-from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -41,10 +40,9 @@ from identity_manager.certificate_manager import CertificateManager
 from identity_manager.jwt_auth import JWTAuthManager
 from policy_engine.policy_evaluator import PolicyEvaluator
 from policy_engine.policy_loader import PolicyLoader
-from policy_engine.policy_models import PolicyRecord, WorkingHours
 from protected_api.finance_api import ProtectedFinanceAPI
 from replay_protection.request_tracker import RequestTracker
-from server import app, validate_production_configuration
+from server import app
 
 PROD_ORIGIN = "https://agenttrust.corp.internal"
 PROD_ENV = {
@@ -290,7 +288,7 @@ def run_boundary_3_policy_invariants(isolated_db: str) -> None:
     replay_tracker = RequestTracker(300, persistent_db=persistent_db)
     retry_queue = RetryQueueManager(persistent_db=persistent_db)
 
-    gateway = ActionGateway(
+    _ = ActionGateway(
         registry=registry,
         cert_manager=cert_mgr,
         policy_evaluator=policy_evaluator,
@@ -308,7 +306,7 @@ def run_boundary_3_policy_invariants(isolated_db: str) -> None:
     agent_id = agent["agent_id"]
 
     # 3.1 Replay Attack Mitigation (Duplicate Nonce & Expired Timestamp)
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     nonce = "audit_nonce_unique_12345"
 
     # First attempt records nonce & request_id
@@ -329,7 +327,7 @@ def run_boundary_3_policy_invariants(isolated_db: str) -> None:
     )
 
     # 3.2 Timestamp Drift Mitigation (>300s)
-    stale_iso = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=350)).isoformat()
+    stale_iso = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=350)).isoformat()
     allowed_stale, reason_stale = replay_tracker.check_and_track("REQ-STALE-01", "nonce_stale", stale_iso)
     assert allowed_stale is False
 
@@ -481,6 +479,7 @@ The assessment systematically audited all five primary trust boundaries using de
 | **Security Boundaries Audited** | **5 / 5** | 5 Core Boundaries | **COMPREHENSIVE** |
 | **Audit Test Cases Evaluated** | **{total_tests}** | Zero Regressions | **100% EXECUTED** |
 | **Audit Checks Passed** | **{passed_tests}** | 100% Pass Rate | **PASS** |
+| **Audit Checks Failed** | **{failed_tests}** | Zero Tolerance | **0** |
 | **Critical / High Unresolved Vulnerabilities** | **0** | Zero Tolerance | **SATISFIED** |
 | **Evaluation Environment** | **Isolated Temp DB** | Canonical DB Pristine | **VERIFIED** |
 
@@ -542,7 +541,7 @@ The audit evaluated five core technical boundaries:
 
 ## 6. Audit Verdict
 
-**VERDICT: ACCEPTANCE SATISFIED (GREEN)**  
+**VERDICT: ACCEPTANCE SATISFIED (GREEN)**
 All empirical penetration checks, invariant tests, and boundary assertions passed with zero critical or high-severity vulnerabilities. AgentTrust **v1.0.0-rc2** fulfills its security and resilience specifications.
 """
     report_path.write_text(content, encoding="utf-8")
