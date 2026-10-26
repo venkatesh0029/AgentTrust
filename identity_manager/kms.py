@@ -114,7 +114,9 @@ class KMSProvider:
                         import ctypes
                         cdll = ctypes.CDLL(self.softhsm_lib)
                         probe_session = token.open(rw=True)
-                        cdll.C_Logout(ctypes.c_ulong(probe_session._handle))
+                        handle = getattr(probe_session, "_handle", 0)
+                        if handle:
+                            cdll.C_Logout(ctypes.c_ulong(handle))
                         probe_session.close()
                     except Exception:
                         pass

@@ -32,9 +32,14 @@ jobs:
           pip install -r requirements.txt
           pip install ruff==0.17.2 mypy==1.15.0
 
-      - name: Code Quality & Static Analysis Gates (Ruff & Mypy)
+      - name: Code Quality Gate (Ruff Linting)
         run: |
+          ruff --version
           ruff check .
+
+      - name: Type Checking Gate (Mypy)
+        run: |
+          mypy --version
           mypy --ignore-missing-imports action_gateway agent_registry audit_writer evidence_manager fabric human_approval identity_manager policy_engine protected_api replay_protection risk_engine tests benchmarks/held_out_v2_benchmark.py benchmarks/held_out_v3_benchmark.py
 
       - name: Run Full Pytest Regression Suite
