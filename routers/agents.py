@@ -3,7 +3,7 @@ Agent Management & Identity Lifecycle Router.
 Handles Agent Registration, X.509 Certificate Issuance, Status Changes, and Delegation Tokens.
 """
 
-from fastapi import APIRouter, Cookie, Header, HTTPException
+from fastapi import APIRouter, Cookie, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/agents", tags=["Agent Identity & Lifecycle"])
@@ -39,19 +39,42 @@ def get_agent_registry():
     return agent_registry
 
 
-def check_perm(perm: str, x_admin_role: str | None, authorization: str | None, cookie_token: str | None = None):
+def check_perm(
+    perm: str,
+    x_admin_role: str | None = None,
+    authorization: str | None = None,
+    cookie_token: str | None = None,
+    request: Request | None = None,
+    x_csrf_token: str | None = None,
+):
     from server import check_admin_permission
-    return check_admin_permission(perm, x_admin_role, authorization, cookie_token)
+    return check_admin_permission(
+        perm,
+        x_admin_role=x_admin_role,
+        authorization=authorization,
+        cookie_token=cookie_token,
+        request=request,
+        x_csrf_token=x_csrf_token,
+    )
 
 
 @router.post("/register", summary="Register New Agent & Issue X.509 Certificate")
 def register_agent(
     req: RegisterAgentRequest,
+    request: Request,
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
     authorization: str | None = Header(None),
     cookie_token: str | None = Cookie(None, alias="agenttrust_session"),
+    x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
 ):
-    role = check_perm("register_agent", x_admin_role, authorization, cookie_token)
+    role = check_perm(
+        "register_agent",
+        x_admin_role=x_admin_role,
+        authorization=authorization,
+        cookie_token=cookie_token,
+        request=request,
+        x_csrf_token=x_csrf_token,
+    )
     registry = get_agent_registry()
     caps = req.capabilities if req.capabilities else (req.roles if req.roles else ["finance_agent"])
     role_name = req.role if req.role else (req.roles[0] if req.roles else "finance_agent")
@@ -104,12 +127,21 @@ def get_agent(agent_id: str):
 @router.put("/status", summary="Update Agent Status (ACTIVE / SUSPENDED / REVOKED)")
 def update_agent_status(
     req: AgentStatusUpdateRequest,
+    request: Request,
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
     authorization: str | None = Header(None),
     cookie_token: str | None = Cookie(None, alias="agenttrust_session"),
+    x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
 ):
     perm = "revoke_agent" if req.status == "REVOKED" else ("suspend_agent" if req.status == "SUSPENDED" else "reactivate_agent")
-    check_perm(perm, x_admin_role, authorization, cookie_token)
+    check_perm(
+        perm,
+        x_admin_role=x_admin_role,
+        authorization=authorization,
+        cookie_token=cookie_token,
+        request=request,
+        x_csrf_token=x_csrf_token,
+    )
     registry = get_agent_registry()
     success, msg = registry.update_status(req.agent_id, req.status, req.reason)
     if not success:
@@ -120,11 +152,20 @@ def update_agent_status(
 @router.post("/rotate-key", summary="Rotate Agent Public/Private Key Pair")
 def rotate_key(
     req: KeyRotationRequest,
+    request: Request,
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
     authorization: str | None = Header(None),
     cookie_token: str | None = Cookie(None, alias="agenttrust_session"),
+    x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
 ):
-    check_perm("rotate_agent_key", x_admin_role, authorization, cookie_token)
+    check_perm(
+        "rotate_agent_key",
+        x_admin_role=x_admin_role,
+        authorization=authorization,
+        cookie_token=cookie_token,
+        request=request,
+        x_csrf_token=x_csrf_token,
+    )
     registry = get_agent_registry()
     res = registry.rotate_key(req.agent_id, req.new_public_key_pem)
     return res

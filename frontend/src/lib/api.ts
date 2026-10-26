@@ -223,6 +223,7 @@ export const LoginResponseSchema = z.object({
   role: z.string(),
   identity: z.string().default("admin"),
   username: z.string().default("admin"),
+  csrf_token: z.string().optional(),
 });
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
 
@@ -253,6 +254,7 @@ export const DEMO_CREDENTIALS: Record<string, { username: string; password: stri
 
 // OWASP anti-XSS Hardening: In-memory session store; tokens are NEVER stored in localStorage or sessionStorage
 let inMemorySession: AuthSession | null = null;
+let inMemoryCsrfToken: string | null = null;
 const inMemoryRoleTokens: Record<string, { token: string; expiresAt: number }> = {};
 
 // Clean up legacy tokens from localStorage if present
@@ -303,6 +305,7 @@ export const api = {
       username: data.username,
       expiresAt,
     };
+    inMemoryCsrfToken = (data as { csrf_token?: string }).csrf_token || null;
     inMemoryRoleTokens[data.role] = { token: data.access_token, expiresAt };
 
     if (typeof window !== "undefined") {
@@ -313,15 +316,17 @@ export const api = {
 
   async logout(): Promise<void> {
     try {
+      const authHeaders = this.getAuthHeaders();
       await fetch(`${API_BASE}/auth/logout`, {
         method: "POST",
         credentials: "include",
-        headers: inMemorySession?.token ? { Authorization: `Bearer ${inMemorySession.token}` } : {},
+        headers: authHeaders,
       });
     } catch {
       // Ignore network errors during logout
     }
     inMemorySession = null;
+    inMemoryCsrfToken = null;
     Object.keys(inMemoryRoleTokens).forEach((k) => delete inMemoryRoleTokens[k]);
     if (typeof window !== "undefined") {
       try {
@@ -350,6 +355,7 @@ export const api = {
           username: data.username,
           expiresAt: (data.expires_at || 0) * 1000,
         };
+        inMemoryCsrfToken = data.csrf_token || inMemoryCsrfToken;
         return inMemorySession;
       }
     } catch {
@@ -412,20 +418,27 @@ export const api = {
   },
 
   getAuthHeaders(roleOrToken?: string): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (inMemoryCsrfToken) {
+      headers["X-CSRF-Token"] = inMemoryCsrfToken;
+    }
     if (roleOrToken && roleOrToken.startsWith("eyJ")) {
-      return { Authorization: `Bearer ${roleOrToken}` };
+      headers["Authorization"] = `Bearer ${roleOrToken}`;
+      return headers;
     }
     if (roleOrToken && inMemoryRoleTokens[roleOrToken]) {
       const entry = inMemoryRoleTokens[roleOrToken];
       if (Date.now() < entry.expiresAt) {
-        return { Authorization: `Bearer ${entry.token}` };
+        headers["Authorization"] = `Bearer ${entry.token}`;
+        return headers;
       }
     }
     const session = this.getStoredAuth();
     if (session?.token) {
-      return { Authorization: `Bearer ${session.token}` };
+      headers["Authorization"] = `Bearer ${session.token}`;
+      return headers;
     }
-    return {};
+    return headers;
   },
 
   async fetchHealth(): Promise<HealthData> {

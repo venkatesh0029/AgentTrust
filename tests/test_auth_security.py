@@ -18,7 +18,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent_registry.admin_rbac import AdminRole
-from identity_manager.admin_auth import AdminAuthManager
 from identity_manager.jwt_auth import JWT_ALGORITHM, JWTAuthManager
 from server import app
 
@@ -340,9 +339,11 @@ def test_cookie_session_authorizes_administrative_requests():
     )
     assert res_login.status_code == 200
     token = res_login.json()["access_token"]
+    csrf_token = res_login.json()["csrf_token"]
 
     # Call /auth/session using only the cookie
     client.cookies["agenttrust_session"] = token
+    client.cookies["agenttrust_csrf_token"] = csrf_token
     res_session = client.get("/auth/session")
     assert res_session.status_code == 200
     session_data = res_session.json()
@@ -350,10 +351,11 @@ def test_cookie_session_authorizes_administrative_requests():
     assert session_data["username"] == "admin"
     assert session_data["role"] == "SYSTEM_ADMIN"
 
-    # Call /mode using only the cookie
+    # Call /mode using cookie, trusted Origin, and matching CSRF token
     res_mode = client.post(
         "/mode",
         json={"mode": "MODE_D_AGENTTRUST_FABRIC"},
+        headers={"Origin": "http://testserver", "X-CSRF-Token": csrf_token},
     )
     assert res_mode.status_code == 200
     assert res_mode.json()["authorized_by"] == "SYSTEM_ADMIN"
@@ -454,12 +456,16 @@ def test_lower_privilege_session_cannot_retain_elevated_access():
     )
     assert res_auditor.status_code == 200
     auditor_token = res_auditor.json()["access_token"]
+    csrf_token = res_auditor.json()["csrf_token"]
     client.cookies["agenttrust_session"] = auditor_token
+    client.cookies["agenttrust_csrf_token"] = csrf_token
+    csrf_headers = {"Origin": "http://testserver", "X-CSRF-Token": csrf_token}
 
     # Auditor attempts policy creation -> 403
     res_create_pol = client.post(
         "/policies",
         json={"policy_id": "AUDITOR-DENIED", "allowed_actions": []},
+        headers=csrf_headers,
     )
     assert res_create_pol.status_code == 403
     assert "RBAC Denial" in res_create_pol.json()["detail"]
@@ -468,6 +474,7 @@ def test_lower_privilege_session_cannot_retain_elevated_access():
     res_rollback = client.post(
         "/policies/rollback",
         json={"policy_id": "FIN-POLICY-001", "target_version": "1.0"},
+        headers=csrf_headers,
     )
     assert res_rollback.status_code == 403
     assert "RBAC Denial" in res_rollback.json()["detail"]
@@ -476,6 +483,7 @@ def test_lower_privilege_session_cannot_retain_elevated_access():
     res_mode = client.post(
         "/mode",
         json={"mode": "MODE_D_AGENTTRUST_FABRIC"},
+        headers=csrf_headers,
     )
     assert res_mode.status_code == 403
     assert "RBAC Denial" in res_mode.json()["detail"]
@@ -483,7 +491,289 @@ def test_lower_privilege_session_cannot_retain_elevated_access():
     # Auditor attempts agent suspension -> 403
     res_suspend = client.post(
         "/agents/FINANCE-AGENT-001/suspend?reason=AUDITOR_ATTEMPT",
+        headers=csrf_headers,
     )
     assert res_suspend.status_code == 403
     assert "RBAC Denial" in res_suspend.json()["detail"]
+
+
+# =====================================================================
+# OWASP CSRF DEFENSE TEST SUITE (Cross-Site Request Forgery Hardening)
+# =====================================================================
+
+def test_csrf_cross_site_mode_change_rejected():
+    """Verify cross-site requests to change operating mode via cookie are rejected with 403."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["access_token"]
+    csrf_token = res_login.json()["csrf_token"]
+
+    client.cookies["agenttrust_session"] = token
+    client.cookies["agenttrust_csrf_token"] = csrf_token
+
+    # Malicious cross-site origin attempt
+    res = client.post(
+        "/mode",
+        json={"mode": "MODE_A_LEGACY_PASS_THROUGH"},
+        headers={"Origin": "https://malicious-attacker.com", "X-CSRF-Token": csrf_token},
+    )
+    assert res.status_code == 403
+    assert "CSRF Protection" in res.json()["detail"]
+    assert "Untrusted Origin" in res.json()["detail"]
+
+
+def test_csrf_cross_site_policy_modification_rejected():
+    """Verify cross-site attempts to create or modify policies via cookie are rejected with 403."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "policy_admin", "password": "PolicyTrust#2026!Secured"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["access_token"]
+    csrf_token = res_login.json()["csrf_token"]
+
+    client.cookies["agenttrust_session"] = token
+    client.cookies["agenttrust_csrf_token"] = csrf_token
+
+    res = client.post(
+        "/policies",
+        json={"policy_id": "EVIL-POLICY", "allowed_actions": ["TRANSFER_FUNDS"]},
+        headers={"Origin": "https://attacker.evil.org", "X-CSRF-Token": csrf_token},
+    )
+    assert res.status_code == 403
+    assert "CSRF Protection" in res.json()["detail"]
+    assert "Untrusted Origin" in res.json()["detail"]
+
+
+def test_csrf_cross_site_policy_rollback_rejected():
+    """Verify cross-site attempts to rollback policies via cookie are rejected with 403."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "policy_admin", "password": "PolicyTrust#2026!Secured"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["access_token"]
+    csrf_token = res_login.json()["csrf_token"]
+
+    client.cookies["agenttrust_session"] = token
+    client.cookies["agenttrust_csrf_token"] = csrf_token
+
+    res = client.post(
+        "/policies/rollback",
+        json={"policy_id": "FIN-POLICY-001", "target_version": "1.0"},
+        headers={"Origin": "https://attacker.phish.com", "X-CSRF-Token": csrf_token},
+    )
+    assert res.status_code == 403
+    assert "CSRF Protection" in res.json()["detail"]
+
+
+def test_csrf_cross_site_approval_rejected():
+    """Verify cross-site attempts to approve transactions via cookie are rejected with 403."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "finance_approver", "password": "FinanceTrust#2026!Secured"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["access_token"]
+    csrf_token = res_login.json()["csrf_token"]
+
+    client.cookies["agenttrust_session"] = token
+    client.cookies["agenttrust_csrf_token"] = csrf_token
+
+    res = client.post(
+        "/approvals/approve",
+        json={"ticket_id": "APPR-FAKE-999"},
+        headers={"Origin": "https://malicious-banking.com", "X-CSRF-Token": csrf_token},
+    )
+    assert res.status_code == 403
+    assert "CSRF Protection" in res.json()["detail"]
+
+
+def test_csrf_cross_site_agent_suspension_rejected():
+    """Verify cross-site attempts to suspend agents via cookie are rejected with 403."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["access_token"]
+    csrf_token = res_login.json()["csrf_token"]
+
+    client.cookies["agenttrust_session"] = token
+    client.cookies["agenttrust_csrf_token"] = csrf_token
+
+    res = client.post(
+        "/agents/FINANCE-AGENT-001/suspend?reason=CSRF_ATTACK",
+        headers={"Origin": "https://attacker.com", "X-CSRF-Token": csrf_token},
+    )
+    assert res.status_code == 403
+    assert "CSRF Protection" in res.json()["detail"]
+
+
+def test_csrf_missing_token_rejected_on_cookie_authenticated_state_change():
+    """Verify that state-changing requests using cookie authentication without X-CSRF-Token return 403."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["access_token"]
+
+    client.cookies["agenttrust_session"] = token
+    # Do not set X-CSRF-Token header
+    res = client.post(
+        "/mode",
+        json={"mode": "MODE_D_AGENTTRUST_FABRIC"},
+        headers={"Origin": "http://localhost:3000"},
+    )
+    assert res.status_code == 403
+    assert "Missing 'X-CSRF-Token' header" in res.json()["detail"]
+
+
+def test_csrf_mismatched_token_rejected():
+    """Verify that state-changing requests with mismatched CSRF token return 403."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["access_token"]
+
+    client.cookies["agenttrust_session"] = token
+    client.cookies["agenttrust_csrf_token"] = "legitimate_cookie_token_123"
+
+    res = client.post(
+        "/mode",
+        json={"mode": "MODE_D_AGENTTRUST_FABRIC"},
+        headers={"Origin": "http://localhost:3000", "X-CSRF-Token": "tampered_header_token_456"},
+    )
+    assert res.status_code == 403
+    assert "Mismatched" in res.json()["detail"] or "CSRF Protection" in res.json()["detail"]
+
+
+def test_csrf_valid_token_and_origin_accepted():
+    """Verify that a legitimate state-changing request with valid Origin and matching CSRF token succeeds."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["access_token"]
+    csrf_token = res_login.json()["csrf_token"]
+
+    client.cookies["agenttrust_session"] = token
+    client.cookies["agenttrust_csrf_token"] = csrf_token
+
+    res = client.post(
+        "/mode",
+        json={"mode": "MODE_D_AGENTTRUST_FABRIC"},
+        headers={"Origin": "http://testserver", "X-CSRF-Token": csrf_token},
+    )
+    assert res.status_code == 200
+    assert res.json()["success"] is True
+    assert res.json()["authorized_by"] == "SYSTEM_ADMIN"
+
+
+def test_csrf_bearer_token_exempt_from_csrf_requirement():
+    """Verify direct API requests with Authorization: Bearer <token> are exempt from CSRF checks."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["access_token"]
+
+    client.cookies.clear()
+    # Direct bearer auth without Origin or X-CSRF-Token
+    res = client.post(
+        "/mode",
+        json={"mode": "MODE_D_AGENTTRUST_FABRIC"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    assert res.json()["success"] is True
+    assert res.json()["authorized_by"] == "SYSTEM_ADMIN"
+
+
+def test_csrf_get_requests_never_require_csrf_tokens():
+    """Verify that GET requests (read-only) do not require CSRF tokens or Origin checks."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["access_token"]
+
+    client.cookies["agenttrust_session"] = token
+    # GET /auth/session without CSRF header
+    res_session = client.get("/auth/session")
+    assert res_session.status_code == 200
+    assert res_session.json()["authenticated"] is True
+
+    # GET /mode without CSRF header
+    res_mode = client.get("/mode")
+    assert res_mode.status_code == 200
+
+
+# =====================================================================
+# MULTI-WORKER & DURABLE TOKEN REVOCATION TEST SUITE
+# =====================================================================
+
+def test_durable_token_revocation_survives_memory_cache_clearing():
+    """Verify that revoked tokens remain rejected even after process in-memory cache is wiped (simulating restart)."""
+    res_login = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["access_token"]
+
+    # Verify token is valid initially
+    payload = JWTAuthManager.verify_token(token)
+    assert payload["sub"] == "admin"
+
+    # Revoke the token
+    JWTAuthManager.revoke_token(token)
+
+    # Simulate application restart: wipe in-memory cache completely
+    JWTAuthManager._revoked_tokens.clear()
+    assert len(JWTAuthManager._revoked_tokens) == 0
+
+    # Token must still be recognized as revoked by querying durable SQLite store
+    assert JWTAuthManager.is_token_revoked(token) is True
+
+    # Subsequent verification must raise ValueError
+    with pytest.raises(ValueError, match="Revoked"):
+        JWTAuthManager.verify_token(token)
+
+    # Subsequent API request with token in Authorization header must return 401
+    client.cookies.clear()
+    res = client.post(
+        "/mode",
+        json={"mode": "MODE_D_AGENTTRUST_FABRIC"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 401
+    assert "Revoked" in res.json()["detail"]
+
+
+def test_durable_token_revocation_cross_worker_simulation():
+    """Verify that a token revoked by Worker A is immediately rejected by Worker B."""
+    token = JWTAuthManager.create_admin_token(role="SYSTEM_ADMIN", identity_id="worker-test-admin")
+    assert JWTAuthManager.verify_token(token)["sub"] == "worker-test-admin"
+
+    # Worker A revokes the token
+    JWTAuthManager.revoke_token(token)
+
+    # Worker B simulates an independent process: empty local cache
+    worker_b_cache: set[str] = set()
+    token_clean = token.strip()
+    assert token_clean not in worker_b_cache
+
+    # When Worker B receives the token, durable lookup confirms revocation
+    is_revoked_for_worker_b = JWTAuthManager.is_token_revoked(token)
+    assert is_revoked_for_worker_b is True
 

@@ -111,7 +111,7 @@ Transaction processing MUST immediately halt and trip the emergency circuit brea
 
 ### 5.2. Go / No-Go Release Checklist
 Before promoting any release to production:
-- [x] Full automated test suite passes with zero failures (**279 passed, 5 skipped, 0 failures**).
+- [x] Full automated test suite passes with zero failures (**320 passed, 5 skipped, 0 failures** across 325 test items).
 - [x] Ruff linting clean with 0 warnings or errors.
 - [x] Mypy strict type checking clean across all source files.
 - [x] Next.js production build passes with 0 errors across all 14 routes.
@@ -122,6 +122,6 @@ Before promoting any release to production:
 - [x] Cryptographic JWT secret enforces supplementary weak-secret heuristic sanity checks ($H \ge 3.0$ bits/char, diversity $\ge 8$, length $\ge 32$) with explicit qualification that cryptographic unpredictability derives from CSPRNG generation (`secrets.token_bytes(32)`) or an enterprise secret manager.
 - [x] PBKDF2-HMAC-SHA256 hardened to 600,000 iterations per OWASP password storage guidance (~229ms latency benchmarked).
 - [x] Production demo-mode gate takes strict precedence: `isDemoAuthMode()` returns `false` unconditionally when `NODE_ENV=production` or `NEXT_PUBLIC_ENV=production` regardless of `NEXT_PUBLIC_DEMO_MODE=true`; Next.js build-time check in `next.config.ts` fails closed on demo mode configurations; persona controls hidden; automatic default credential submission disabled; backend enforces authentication independently of UI.
-- [x] Administrative credentials and JWT tokens protected against XSS per OWASP guidance: zero token persistence in `localStorage`/`sessionStorage` across `frontend/src/lib/api.ts` and `dashboard/app.js`; sessions managed via `HttpOnly; Secure; SameSite=Lax` cookies (`agenttrust_session`) and in-memory caches; clean session revocation and cookie purge on `/auth/logout`.
+- [x] Administrative credentials and JWT tokens protected against XSS and CSRF per OWASP guidance: zero token persistence in `localStorage`/`sessionStorage` across `frontend/src/lib/api.ts` and `dashboard/app.js`; sessions managed via `HttpOnly; Secure; SameSite=Lax` cookies (`__Host-agenttrust_session` in production) and in-memory caches; state-changing cookie requests protected by double-submit `X-CSRF-Token` headers and Origin validation; durable multi-worker JWT revocation persisted across worker instances in SQLite; clean session revocation and cookie purge on `/auth/logout`.
 - [x] Database isolation verified: persistent SQLite store remains completely untouched during all testnet and consensus scenarios.
 - [x] Release governance: All technical risks addressed; production release tagging held pending unconditional Step 4 signoff.

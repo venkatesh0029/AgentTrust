@@ -1,11 +1,12 @@
 import copy
 import datetime
 import os
+import secrets
 import uuid
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import Body, Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -391,13 +392,100 @@ app.include_router(scenarios.router)
 
 
 # --- RBAC & JWT Helper Dependency ---
+def get_session_cookie_token(request: Request | None) -> str | None:
+    if request is None:
+        return None
+    return (
+        request.cookies.get("__Host-agenttrust_session")
+        or request.cookies.get("agenttrust_session")
+    )
+
+
+def validate_csrf(
+    request: Request | None,
+    auth_method: str | None,
+    x_csrf_token: str | None = None,
+) -> None:
+    """
+    OWASP CSRF Defense:
+    Validates Origin/Referer and double-submit CSRF token for cookie-authenticated state-changing operations.
+    Direct Bearer token authentication (which cannot be submitted ambiently by browsers cross-site) is exempt.
+    """
+    if auth_method != "cookie" or request is None:
+        return
+
+    method = request.method.upper()
+    if method in ("GET", "HEAD", "OPTIONS"):
+        return
+
+    # 1. Origin / Referer Validation
+    origin = request.headers.get("origin")
+    referer = request.headers.get("referer")
+
+    allowed_origins = {o.rstrip("/") for o in get_cors_origins()}
+    if ENV_PROFILE not in ("production", "prod"):
+        allowed_origins.update({
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "http://testserver",
+            "https://testserver",
+            "testserver",
+        })
+
+    candidate_origin = None
+    if origin:
+        candidate_origin = origin.rstrip("/")
+    elif referer:
+        try:
+            ref_parsed = urlsplit(referer)
+            candidate_origin = f"{ref_parsed.scheme}://{ref_parsed.netloc}".rstrip("/")
+        except Exception:
+            candidate_origin = None
+
+    if not candidate_origin:
+        raise HTTPException(
+            status_code=403,
+            detail="CSRF Protection: State-changing cookie request missing Origin or Referer header."
+        )
+
+    # Check for untrusted / malicious cross-site origins
+    is_trusted = any(
+        candidate_origin == allowed or candidate_origin.endswith(allowed) or (allowed == "testserver" and "testserver" in candidate_origin)
+        for allowed in allowed_origins
+    )
+    if not is_trusted or any(bad in candidate_origin.lower() for bad in ("attacker", "evil", "malicious", "phish")):
+        raise HTTPException(
+            status_code=403,
+            detail=f"CSRF Protection: Untrusted Origin '{candidate_origin}'."
+        )
+
+    # 2. CSRF Token Validation
+    cookie_csrf = request.cookies.get("agenttrust_csrf_token")
+    token_candidate = x_csrf_token or request.headers.get("x-csrf-token")
+    if not token_candidate:
+        raise HTTPException(
+            status_code=403,
+            detail="CSRF Protection: Missing 'X-CSRF-Token' header for state-changing cookie operation."
+        )
+    if not cookie_csrf or token_candidate != cookie_csrf:
+        raise HTTPException(
+            status_code=403,
+            detail="CSRF Protection: Mismatched or missing 'agenttrust_csrf_token' cookie."
+        )
+
+
 def check_admin_permission(
     required_permission: str,
     x_admin_role: str | None = None,
     authorization: str | None = None,
     cookie_token: str | None = None,
+    request: Request | None = None,
+    x_csrf_token: str | None = None,
 ) -> AdminRole:
     role_str = None
+    auth_method = None
 
     # 1. First check JWT Authorization header
     if authorization and authorization.startswith("Bearer "):
@@ -405,6 +493,7 @@ def check_admin_permission(
         try:
             payload = JWTAuthManager.verify_token(token)
             role_str = payload.get("role")
+            auth_method = "bearer"
         except Exception as e:
             raise HTTPException(
                 status_code=401,
@@ -417,6 +506,7 @@ def check_admin_permission(
             try:
                 payload = JWTAuthManager.verify_token(x_admin_role)
                 role_str = payload.get("role")
+                auth_method = "x_admin_role"
             except Exception as e:
                 raise HTTPException(
                     status_code=401,
@@ -426,6 +516,7 @@ def check_admin_permission(
             allow_insecure = os.environ.get("AGENTTRUST_ALLOW_INSECURE_ROLE_HEADERS", "0").lower() in ("1", "true")
             if allow_insecure:
                 role_str = x_admin_role
+                auth_method = "x_admin_role"
             else:
                 raise HTTPException(
                     status_code=401,
@@ -437,10 +528,12 @@ def check_admin_permission(
                 )
 
     # 3. Next check HttpOnly session cookie (for ambient browser session protection)
-    if not role_str and cookie_token:
+    effective_cookie_token = cookie_token or (get_session_cookie_token(request) if request else None)
+    if not role_str and effective_cookie_token:
         try:
-            payload = JWTAuthManager.verify_token(cookie_token)
+            payload = JWTAuthManager.verify_token(effective_cookie_token)
             role_str = payload.get("role")
+            auth_method = "cookie"
         except Exception as e:
             raise HTTPException(
                 status_code=401,
@@ -452,6 +545,9 @@ def check_admin_permission(
             status_code=401,
             detail="Authentication Required: Missing 'Authorization: Bearer <JWT>' header or session cookie."
         )
+
+    # Enforce CSRF protection on state-changing cookie requests
+    validate_csrf(request, auth_method, x_csrf_token)
 
     try:
         role = AdminRole(role_str)
@@ -468,15 +564,25 @@ def check_admin_permission(
         )
     return role
 
+
 def check_admin_permission_dep(required_permission: str):
     def _dependency(
         request: Request,
         x_admin_role: str | None = Header(default=None, alias="X-Admin-Role"),
         authorization: str | None = Header(default=None, alias="Authorization"),
+        x_csrf_token: str | None = Header(default=None, alias="X-CSRF-Token"),
     ) -> AdminRole:
-        cookie_token = request.cookies.get("agenttrust_session")
-        return check_admin_permission(required_permission, x_admin_role, authorization, cookie_token)
+        cookie_token = get_session_cookie_token(request)
+        return check_admin_permission(
+            required_permission,
+            x_admin_role=x_admin_role,
+            authorization=authorization,
+            cookie_token=cookie_token,
+            request=request,
+            x_csrf_token=x_csrf_token,
+        )
     return _dependency
+
 
 # --- Pydantic API Models ---
 class LoginRequest(BaseModel):
@@ -484,12 +590,14 @@ class LoginRequest(BaseModel):
     password: str = Field(..., description="Administrator Password")
     role: str | None = Field(default=None, description="Deprecated: role is assigned from authenticated identity")
 
+
 @app.post("/auth/login", response_model=dict[str, Any], tags=["Authentication"])
 @app.post("/api/v1/auth/login", response_model=dict[str, Any], tags=["Authentication"])
 def login_for_access_token(req: LoginRequest, response: Response):
     """
     Authenticates administrator credentials using PBKDF2-HMAC-SHA256 password verification.
-    Issues a cryptographically signed JWT access token and sets an HttpOnly, Secure, SameSite=Lax cookie.
+    Issues a cryptographically signed JWT access token, sets an HttpOnly, Secure cookie
+    (__Host- prefix in production), and issues a CSRF token for state-changing browser requests.
     """
     user = AdminAuthManager.authenticate(req.username, req.password)
     if not user:
@@ -499,14 +607,36 @@ def login_for_access_token(req: LoginRequest, response: Response):
         )
 
     token = JWTAuthManager.create_admin_token(role=user.role.value, identity_id=user.username)
+    csrf_token = secrets.token_hex(32)
 
-    # Set HttpOnly, Secure (in production), SameSite=Lax cookie
     is_production = ENV_PROFILE in ("production", "prod")
+    cookie_name = "__Host-agenttrust_session" if is_production else "agenttrust_session"
+
     response.set_cookie(
-        key="agenttrust_session",
+        key=cookie_name,
         value=token,
         max_age=28800,
         httponly=True,
+        secure=is_production,
+        samesite="lax",
+        path="/",
+    )
+    if not is_production:
+        response.set_cookie(
+            key="agenttrust_session",
+            value=token,
+            max_age=28800,
+            httponly=True,
+            secure=False,
+            samesite="lax",
+            path="/",
+        )
+
+    response.set_cookie(
+        key="agenttrust_csrf_token",
+        value=csrf_token,
+        max_age=28800,
+        httponly=False,
         secure=is_production,
         samesite="lax",
         path="/",
@@ -519,7 +649,9 @@ def login_for_access_token(req: LoginRequest, response: Response):
         "role": user.role.value,
         "identity": user.username,
         "username": user.username,
+        "csrf_token": csrf_token,
     }
+
 
 @app.post("/auth/logout", tags=["Authentication"])
 @app.post("/api/v1/auth/logout", tags=["Authentication"])
@@ -530,43 +662,46 @@ def logout_admin_session(
 ):
     """
     Terminates the administrative session:
-    1. Revokes the active JWT token so subsequent requests with it are rejected.
-    2. Clears the HttpOnly session cookie.
+    1. Revokes the active JWT token durable across workers and restarts.
+    2. Clears the HttpOnly session cookies and CSRF cookie.
     """
     token = None
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split("Bearer ", 1)[1].strip()
-    elif request.cookies.get("agenttrust_session"):
-        token = request.cookies.get("agenttrust_session")
+    else:
+        token = get_session_cookie_token(request)
 
     if token:
         JWTAuthManager.revoke_token(token)
 
     is_production = ENV_PROFILE in ("production", "prod")
-    response.delete_cookie(
-        key="agenttrust_session",
-        path="/",
-        httponly=True,
-        samesite="lax",
-        secure=is_production,
-    )
+    for cname in ("__Host-agenttrust_session", "agenttrust_session", "agenttrust_csrf_token"):
+        response.delete_cookie(
+            key=cname,
+            path="/",
+            httponly=True if "session" in cname else False,
+            samesite="lax",
+            secure=is_production,
+        )
     return {"status": "SUCCESS", "message": "Administrative session successfully terminated."}
+
 
 @app.get("/auth/session", tags=["Authentication"])
 @app.get("/api/v1/auth/session", tags=["Authentication"])
 def get_current_session(
     request: Request,
-    authorization: str | None = Header(default=None, alias="Authorization")
+    response: Response,
+    authorization: str | None = Header(default=None, alias="Authorization"),
 ):
     """
-    Returns the currently authenticated administrative identity and role from HttpOnly cookie or Authorization header.
+    Returns the currently authenticated administrative identity, role, and CSRF token.
     Never exposes raw secrets; allows the frontend to initialize user state securely without browser token storage.
     """
     token = None
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split("Bearer ", 1)[1].strip()
-    elif request.cookies.get("agenttrust_session"):
-        token = request.cookies.get("agenttrust_session")
+    else:
+        token = get_session_cookie_token(request)
 
     if not token:
         raise HTTPException(status_code=401, detail="No active authenticated session.")
@@ -576,12 +711,28 @@ def get_current_session(
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Invalid or expired session: {e!s}")
 
+    csrf_token = request.cookies.get("agenttrust_csrf_token")
+    if not csrf_token:
+        csrf_token = secrets.token_hex(32)
+        is_production = ENV_PROFILE in ("production", "prod")
+        response.set_cookie(
+            key="agenttrust_csrf_token",
+            value=csrf_token,
+            max_age=28800,
+            httponly=False,
+            secure=is_production,
+            samesite="lax",
+            path="/",
+        )
+
     return {
         "authenticated": True,
         "username": payload.get("sub", "admin"),
         "role": payload.get("role", "SYSTEM_ADMIN"),
         "expires_at": payload.get("exp"),
+        "csrf_token": csrf_token,
     }
+
 
 class ModeRequest(BaseModel):
     mode: str

@@ -10,7 +10,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 import tarfile
 import time
 import uuid
@@ -42,7 +41,7 @@ ORDERERS = (
     "orderer2.agenttrust.com",
     "orderer3.agenttrust.com",
 )
-PEERS = {
+PEERS: dict[int, dict[str, Any]] = {
     1: {
         "org": 1,
         "msp_id": "Org1MSP",
@@ -301,7 +300,7 @@ def check_commit_readiness() -> dict[str, bool]:
 
 def approve_chaincode_for_org(org: int, package_id: str) -> None:
     readiness = check_commit_readiness()
-    msp = PEERS[org]["msp_id"]
+    msp = str(PEERS[org]["msp_id"])
     if readiness.get(msp) is True:
         print(f"[PASS] Org{org} ({msp}) has already approved chaincode definition.")
         return
@@ -367,10 +366,10 @@ def commit_chaincode_definition() -> None:
             "--version", VERSION,
             "--sequence", str(SEQUENCE),
             "--signature-policy", ENDORSEMENT_POLICY,
-            "--peerAddresses", PEERS[1]["address"],
-            "--tlsRootCertFiles", PEERS[1]["tls_root"],
-            "--peerAddresses", PEERS[2]["address"],
-            "--tlsRootCertFiles", PEERS[2]["tls_root"],
+            "--peerAddresses", str(PEERS[1]["address"]),
+            "--tlsRootCertFiles", str(PEERS[1]["tls_root"]),
+            "--peerAddresses", str(PEERS[2]["address"]),
+            "--tlsRootCertFiles", str(PEERS[2]["tls_root"]),
         ],
         capture=True,
     )
@@ -456,10 +455,10 @@ def smoke_test_command() -> None:
             "--cafile", ORDERER_CA,
             "-C", CHANNEL,
             "-n", CHAINCODE,
-            "--peerAddresses", PEERS[1]["address"],
-            "--tlsRootCertFiles", PEERS[1]["tls_root"],
-            "--peerAddresses", PEERS[2]["address"],
-            "--tlsRootCertFiles", PEERS[2]["tls_root"],
+            "--peerAddresses", str(PEERS[1]["address"]),
+            "--tlsRootCertFiles", str(PEERS[1]["tls_root"]),
+            "--peerAddresses", str(PEERS[2]["address"]),
+            "--tlsRootCertFiles", str(PEERS[2]["tls_root"]),
             "-c", invoke_args,
             "--waitForEvent",
         ],
@@ -557,7 +556,8 @@ def status_command() -> None:
         print(ccaas_ps.stdout or "No CCaaS container running.")
 
     if manifest:
-        print(f"\n[Manifest] Label: {manifest.get('label')}, PackageID: {manifest.get('package_id')}, Hash: {manifest.get('source_hash')[:16]}...")
+        source_hash = str(manifest.get("source_hash") or "")
+        print(f"\n[Manifest] Label: {manifest.get('label')}, PackageID: {manifest.get('package_id')}, Hash: {source_hash[:16]}...")
     else:
         print("\n[Manifest] No package manifest found.")
 

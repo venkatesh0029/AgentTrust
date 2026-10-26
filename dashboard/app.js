@@ -22,6 +22,7 @@ const ROLE_CREDS = {
 };
 
 const tokenCache = {};
+let csrfTokenCache = null;
 
 // Clean up any legacy tokens from browser localStorage on load (OWASP anti-XSS storage compliance)
 try {
@@ -45,6 +46,7 @@ async function getAuthToken(role = 'SYSTEM_ADMIN') {
     if (res.ok) {
       const data = await res.json();
       tokenCache[role] = data.access_token;
+      if (data.csrf_token) csrfTokenCache = data.csrf_token;
       return data.access_token;
     } else {
       console.info(`Authentication required for ${role} (${res.status}). Demo shortcuts inactive.`);
@@ -60,6 +62,9 @@ async function getAuthHeaders(role = 'SYSTEM_ADMIN', extraHeaders = {}) {
   const headers = { ...extraHeaders };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+  }
+  if (csrfTokenCache) {
+    headers['X-CSRF-Token'] = csrfTokenCache;
   }
   return headers;
 }
