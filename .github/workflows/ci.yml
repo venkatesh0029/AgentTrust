@@ -40,7 +40,7 @@ jobs:
       - name: Type Checking Gate (Mypy)
         run: |
           mypy --version
-          mypy --ignore-missing-imports action_gateway agent_registry audit_writer evidence_manager fabric human_approval identity_manager policy_engine protected_api replay_protection risk_engine tests benchmarks/held_out_v2_benchmark.py benchmarks/held_out_v3_benchmark.py
+          mypy --ignore-missing-imports action_gateway agent_registry audit_writer benchmarks evidence_manager fabric human_approval identity_manager policy_engine protected_api replay_protection risk_engine tests
 
       - name: Run Full Pytest Regression Suite
         run: |

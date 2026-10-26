@@ -60,6 +60,7 @@ def main() -> int:
         "action_gateway",
         "agent_registry",
         "audit_writer",
+        "benchmarks",
         "evidence_manager",
         "fabric",
         "human_approval",
@@ -69,8 +70,6 @@ def main() -> int:
         "replay_protection",
         "risk_engine",
         "tests",
-        "benchmarks/held_out_v2_benchmark.py",
-        "benchmarks/held_out_v3_benchmark.py",
     ]
     step2_ok = run_step(2, total_steps, "Running Mypy Type Checking", mypy_cmd)
     if not step2_ok:
