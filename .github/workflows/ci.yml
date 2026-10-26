@@ -56,11 +56,19 @@ jobs:
 
       - name: Run 5-Stage Verification Pipeline
         run: |
-          python verify_all.py
+          python verify_all.py 2>&1 | tee verify_all_output.log || {
+            ERR_MSG=$(tail -n 40 verify_all_output.log | tr '\r\n' '  ')
+            echo "::error title=Verify All Failure Diagnostics::$ERR_MSG"
+            exit 1
+          }
 
       - name: Run Production-Profile Acceptance Suite
         run: |
-          python scripts/verify_production_acceptance.py
+          python scripts/verify_production_acceptance.py 2>&1 | tee acceptance_output.log || {
+            ERR_MSG=$(tail -n 40 acceptance_output.log | tr '\r\n' '  ')
+            echo "::error title=Acceptance Failure Diagnostics::$ERR_MSG"
+            exit 1
+          }
 
   frontend-build:
     name: Frontend Next.js Production Build
