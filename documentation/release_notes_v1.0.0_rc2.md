@@ -1,8 +1,11 @@
-# AgentTrust — Release Candidate Notes (v1.0.0-rc1)
+# AgentTrust — Release Candidate Notes (v1.0.0-rc2)
 
 ## Executive Summary
 
-AgentTrust **v1.0.0-rc1** marks the official **Release Candidate Freeze** for the cryptographic security and distributed governance platform protecting enterprise systems against autonomous AI agent misbehavior.
+AgentTrust **v1.0.0-rc2** marks the official **Release Candidate 2 Freeze** for the cryptographic security and distributed governance platform protecting enterprise systems against autonomous AI agent misbehavior. 
+
+> **Release Tag Lineage Note**:
+> The earlier tag `v1.0.0-rc1` remains permanently assigned to checkpoint commit `21333c9` (Raft topology & fault boundary disclosures). This subsequent release candidate **`v1.0.0-rc2`** supersedes rc1 by incorporating all completed Step 4 & Step 5 security implementations (OWASP 600k PBKDF2 iterations, double-submit CSRF protection, `__Host-` session cookies, durable multi-worker SQLite token revocation, and test suite isolation).
 
 This release candidate consolidates all deliverables across:
 1. **Multi-Peer Hyperledger Fabric Raft-3 Resilience**: Isolated 3-node Raft consensus topology, crash fault tolerance, dynamic leader re-election, deterministic CCaaS chaincode, and outbox reconciliation.
@@ -12,8 +15,8 @@ This release candidate consolidates all deliverables across:
 ---
 
 ## Release Checkpoint Identification
-- **Release Candidate Version**: `v1.0.0-rc1`
-- **Candidate Checkpoint Commit**: `dff4cb076da8c6981a7168fc7323d48816dd3d88` (`dff4cb0`)
+- **Release Candidate Version**: `v1.0.0-rc2`
+- **Candidate Checkpoint Commit**: `5242de2` (Documentation Freeze) / `dff4cb0` (Implementation Baseline)
 - **Branch**: `feat/fabric-resilience`
 - **Repository**: `https://github.com/venkatesh0029/AgentTrust`
 - **Release Verification Date**: `2026-10-26`

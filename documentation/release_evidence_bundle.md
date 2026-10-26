@@ -1,8 +1,9 @@
-# AgentTrust — Release Evidence Bundle (v1.0.0-rc1)
+# AgentTrust — Release Evidence Bundle (v1.0.0-rc2)
 
 ## 1. Release Metadata
-- **Release Candidate Tag**: `v1.0.0-rc1` (Candidate Freeze)
-- **Candidate Commit**: `dff4cb076da8c6981a7168fc7323d48816dd3d88` (`dff4cb0`)
+- **Release Candidate Tag**: `v1.0.0-rc2` (Candidate Freeze)
+- **Candidate Commit**: `5242de2` (Documentation Freeze) / `dff4cb0` (Implementation Baseline)
+- **Previous Frozen Tag**: `v1.0.0-rc1` (anchored at commit `21333c9`)
 - **Branch**: `feat/fabric-resilience`
 - **Repository**: `https://github.com/venkatesh0029/AgentTrust`
 - **Release Verification Date**: `2026-10-26`
