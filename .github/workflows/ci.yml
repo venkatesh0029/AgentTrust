@@ -48,7 +48,11 @@ jobs:
 
       - name: Run Full Pytest Regression Suite
         run: |
-          pytest -v --tb=short
+          pytest tests attack_lab -v --tb=short 2>&1 | tee pytest_output.log || {
+            ERR_MSG=$(tail -n 40 pytest_output.log | tr '\r\n' '  ')
+            echo "::error title=Pytest Failure Diagnostics::$ERR_MSG"
+            exit 1
+          }
 
       - name: Run 5-Stage Verification Pipeline
         run: |

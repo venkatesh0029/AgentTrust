@@ -24,3 +24,14 @@ ignore = [
     "E402",   # Module level import not at top of file
     "UP042",  # Class inherits from both str and enum.Enum
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "attack_lab"]
+norecursedirs = [
+    ".git",
+    "frontend",
+    "node_modules",
+    "fabric",
+    ".softhsm2",
+    ".hypothesis",
+]
