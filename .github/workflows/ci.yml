@@ -2,7 +2,7 @@ name: AgentTrust Enterprise Security CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, 'feat/**' ]
   pull_request:
     branches: [ main ]
 
@@ -32,19 +32,42 @@ jobs:
           pip install -r requirements.txt
           pip install ruff mypy
 
-      - name: Code Quality & Static Analysis Gates
+      - name: Code Quality & Static Analysis Gates (Ruff & Mypy)
         run: |
-          ruff check . --select E,F,W --ignore E501
-          mypy --ignore-missing-imports action_gateway/ policy_engine/ identity_manager/ risk_engine/
+          ruff check .
+          mypy --ignore-missing-imports action_gateway agent_registry audit_writer evidence_manager fabric human_approval identity_manager policy_engine protected_api replay_protection risk_engine tests benchmarks/held_out_v2_benchmark.py benchmarks/held_out_v3_benchmark.py
 
-      - name: Run Pytest Regression Suite & 20-Scenario Attack Lab
+      - name: Run Full Pytest Regression Suite
         run: |
-          pytest tests attack_lab -v --tb=short
+          pytest -v --tb=short
 
-      - name: Run Comparative OPA & OAuth2 Benchmark Engine
+      - name: Run 5-Stage Verification Pipeline
         run: |
-          python benchmarks/comparative_benchmark.py
+          python verify_all.py
 
-      - name: Run Real Labeled Prompt Injection Dataset Benchmark
+      - name: Run Production-Profile Acceptance Suite
         run: |
-          python benchmarks/real_dataset_benchmark.py
+          python scripts/verify_production_acceptance.py
+
+  frontend-build:
+    name: Frontend Next.js Production Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Next.js Production Build
+        working-directory: frontend
+        run: npm run build
