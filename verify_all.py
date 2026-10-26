@@ -77,7 +77,7 @@ def main() -> int:
         return 1
 
     # Step 3: Pytest Regression Suite
-    step3_ok = run_step(3, total_steps, "Running Full Pytest Regression Suite", ["pytest", "-q"])
+    step3_ok = run_step(3, total_steps, "Running Full Pytest Regression Suite", ["pytest", "tests", "attack_lab", "-q"])
     if not step3_ok:
         print("\nVerification FAILED at Step 3 (Pytest).")
         return 1
