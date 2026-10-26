@@ -3,8 +3,8 @@ Comparative Performance & Architecture Benchmark Engine.
 Compares AgentTrust 13-Stage Gateway against standard OAuth2 + mTLS and Open Policy Agent (OPA) baselines.
 """
 
-import time
 import math
+import time
 from typing import Any
 
 

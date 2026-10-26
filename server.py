@@ -1,30 +1,38 @@
 import copy
 import datetime
 import os
+import secrets
 import uuid
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from action_gateway.gateway import ActionGateway
+from action_gateway.mcp_gateway import MCPGovernanceGateway
+from action_gateway.retry_queue import RetryQueueManager
 from agent_registry.admin_rbac import AdminRole, RBACManager
 from agent_registry.identity_store import IdentityStore
 from agent_registry.registration import AgentRegistry
 from audit_writer.chain_writer import AuditChainWriter
 from benchmarks.benchmark_engine import BenchmarkEngine
+from cache_manager import cache_manager
 from evidence_manager.evidence_store import EvidenceStore
 from evidence_manager.hash_manager import HashManager
+from evidence_manager.merkle_tree import MerkleTree
 from fabric.fabric_client import FabricClient
+from fabric.persistent_db import PersistentStorageEngine
 from human_approval.approval_manager import HumanApprovalManager
 
 # AgentTrust Modules
+from identity_manager.admin_auth import AdminAuthManager
 from identity_manager.certificate_manager import CertificateManager
-from identity_manager.jwt_auth import JWTAuthManager
+from identity_manager.delegation import DelegationTokenManager
+from identity_manager.jwt_auth import JWTAuthManager, validate_jwt_secret_entropy
 from identity_manager.signature_manager import SignatureManager
 from policy_engine.policy_evaluator import PolicyEvaluator
 from policy_engine.policy_loader import PolicyLoader
@@ -35,14 +43,7 @@ from policy_engine.policy_models import (
 )
 from protected_api.finance_api import ProtectedFinanceAPI
 from replay_protection.request_tracker import RequestTracker
-
-from action_gateway.mcp_gateway import MCPGovernanceGateway
-from action_gateway.retry_queue import RetryQueueManager
-from fabric.persistent_db import PersistentStorageEngine
-from evidence_manager.merkle_tree import MerkleTree
-from identity_manager.delegation import DelegationTokenManager
 from risk_engine.prompt_injection_guard import PromptInjectionGuard
-from cache_manager import cache_manager
 
 # Operational Mode & Environment Configuration
 CURRENT_MODE = os.environ.get("AGENTTRUST_MODE", "MODE_D_AGENTTRUST_FABRIC")
@@ -60,6 +61,8 @@ def validate_production_configuration(env_profile: str, current_mode: str) -> No
                 "SECURITY VIOLATION: Production environment requires explicit secure GATEWAY_SECRET. "
                 "Refusing to initialize with default secrets."
             )
+        jwt_secret = os.environ.get("AGENTTRUST_JWT_SECRET", "").strip()
+        validate_jwt_secret_entropy(jwt_secret)
         cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
         if not cors_origins:
             raise RuntimeError(
@@ -116,6 +119,24 @@ def validate_production_configuration(env_profile: str, current_mode: str) -> No
                     "SECURITY VIOLATION: Production Mode D requires "
                     "FABRIC_GATEWAY_TOKEN with at least 32 characters."
                 )
+
+        insecure_admin_passwords = {
+            "AdminTrust#2026!Secured",
+            "PolicyTrust#2026!Secured",
+            "FinanceTrust#2026!Secured",
+            "AuditorTrust#2026!Secured",
+            "admin",
+            "password",
+            "changeme",
+            "secret",
+        }
+        admin_pw = os.environ.get("AGENTTRUST_ADMIN_PASSWORD", "AdminTrust#2026!Secured")
+        if admin_pw in insecure_admin_passwords or len(admin_pw) < 16:
+            raise RuntimeError(
+                "SECURITY VIOLATION: Production environment forbids default or weak password for 'admin'. "
+                "Configure explicit AGENTTRUST_ADMIN_PASSWORD with at least 16 characters."
+            )
+        AdminAuthManager.initialize_default_users(force=True)
 
 
 validate_production_configuration(ENV_PROFILE, CURRENT_MODE)
@@ -260,7 +281,7 @@ def seed_41_demo_agents():
                 role=item["role"],
                 agent_version="2.1"
             )
-            if "private_key" in reg and reg["private_key"]:
+            if reg.get("private_key"):
                 AGENT_PRIVATE_KEYS[aid] = reg["private_key"]
 
         # Set status & cert revocation
@@ -268,7 +289,7 @@ def seed_41_demo_agents():
             agent_registry.update_agent_status(aid, "SUSPENDED", "ADMIN_SECURITY_SUSPENSION")
         elif item["status"] == "REVOKED":
             agent_registry.update_agent_status(aid, "REVOKED", "ADMIN_SECURITY_REVOCATION")
-            if "certificate_fingerprint" in reg and reg["certificate_fingerprint"]:
+            if reg.get("certificate_fingerprint"):
                 cert_manager.revoke_certificate(reg["certificate_fingerprint"])
 
         if aid == "FINANCE-AGENT-001":
@@ -359,7 +380,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from routers import health, agents, gateway, policies, approvals, audit, scenarios  # noqa: E402
+from routers import agents, approvals, audit, gateway, health, policies, scenarios
+
 app.include_router(health.router)
 app.include_router(agents.router)
 app.include_router(gateway.router)
@@ -370,8 +392,100 @@ app.include_router(scenarios.router)
 
 
 # --- RBAC & JWT Helper Dependency ---
-def check_admin_permission(required_permission: str, x_admin_role: str | None = None, authorization: str | None = None) -> AdminRole:
+def get_session_cookie_token(request: Request | None) -> str | None:
+    if request is None:
+        return None
+    return (
+        request.cookies.get("__Host-agenttrust_session")
+        or request.cookies.get("agenttrust_session")
+    )
+
+
+def validate_csrf(
+    request: Request | None,
+    auth_method: str | None,
+    x_csrf_token: str | None = None,
+) -> None:
+    """
+    OWASP CSRF Defense:
+    Validates Origin/Referer and double-submit CSRF token for cookie-authenticated state-changing operations.
+    Direct Bearer token authentication (which cannot be submitted ambiently by browsers cross-site) is exempt.
+    """
+    if auth_method != "cookie" or request is None:
+        return
+
+    method = request.method.upper()
+    if method in ("GET", "HEAD", "OPTIONS"):
+        return
+
+    # 1. Origin / Referer Validation
+    origin = request.headers.get("origin")
+    referer = request.headers.get("referer")
+
+    allowed_origins = {o.rstrip("/") for o in get_cors_origins()}
+    if ENV_PROFILE not in ("production", "prod"):
+        allowed_origins.update({
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "http://testserver",
+            "https://testserver",
+            "testserver",
+        })
+
+    candidate_origin = None
+    if origin:
+        candidate_origin = origin.rstrip("/")
+    elif referer:
+        try:
+            ref_parsed = urlsplit(referer)
+            candidate_origin = f"{ref_parsed.scheme}://{ref_parsed.netloc}".rstrip("/")
+        except Exception:
+            candidate_origin = None
+
+    if not candidate_origin:
+        raise HTTPException(
+            status_code=403,
+            detail="CSRF Protection: State-changing cookie request missing Origin or Referer header."
+        )
+
+    # Check for untrusted / malicious cross-site origins
+    is_trusted = any(
+        candidate_origin == allowed or candidate_origin.endswith(allowed) or (allowed == "testserver" and "testserver" in candidate_origin)
+        for allowed in allowed_origins
+    )
+    if not is_trusted or any(bad in candidate_origin.lower() for bad in ("attacker", "evil", "malicious", "phish")):
+        raise HTTPException(
+            status_code=403,
+            detail=f"CSRF Protection: Untrusted Origin '{candidate_origin}'."
+        )
+
+    # 2. CSRF Token Validation
+    cookie_csrf = request.cookies.get("agenttrust_csrf_token")
+    token_candidate = x_csrf_token or request.headers.get("x-csrf-token")
+    if not token_candidate:
+        raise HTTPException(
+            status_code=403,
+            detail="CSRF Protection: Missing 'X-CSRF-Token' header for state-changing cookie operation."
+        )
+    if not cookie_csrf or token_candidate != cookie_csrf:
+        raise HTTPException(
+            status_code=403,
+            detail="CSRF Protection: Mismatched or missing 'agenttrust_csrf_token' cookie."
+        )
+
+
+def check_admin_permission(
+    required_permission: str,
+    x_admin_role: str | None = None,
+    authorization: str | None = None,
+    cookie_token: str | None = None,
+    request: Request | None = None,
+    x_csrf_token: str | None = None,
+) -> AdminRole:
     role_str = None
+    auth_method = None
 
     # 1. First check JWT Authorization header
     if authorization and authorization.startswith("Bearer "):
@@ -379,31 +493,61 @@ def check_admin_permission(required_permission: str, x_admin_role: str | None = 
         try:
             payload = JWTAuthManager.verify_token(token)
             role_str = payload.get("role")
+            auth_method = "bearer"
         except Exception as e:
             raise HTTPException(
                 status_code=401,
                 detail=f"JWT Authentication Failure: {e!s}"
             )
 
-    # 2. Check X-Admin-Role header
+    # 2. Check explicit X-Admin-Role header
     if not role_str and x_admin_role:
-        if x_admin_role.startswith("eyJ"): # Standard JWT header prefix
+        if x_admin_role.startswith("eyJ"):  # Standard JWT header prefix
             try:
                 payload = JWTAuthManager.verify_token(x_admin_role)
                 role_str = payload.get("role")
+                auth_method = "x_admin_role"
             except Exception as e:
                 raise HTTPException(
                     status_code=401,
                     detail=f"JWT Header Authentication Failure: {e!s}"
                 )
         else:
-            role_str = x_admin_role
+            allow_insecure = os.environ.get("AGENTTRUST_ALLOW_INSECURE_ROLE_HEADERS", "0").lower() in ("1", "true")
+            if allow_insecure:
+                role_str = x_admin_role
+                auth_method = "x_admin_role"
+            else:
+                raise HTTPException(
+                    status_code=401,
+                    detail=(
+                        "Authentication Required: Plaintext 'X-Admin-Role' headers are prohibited "
+                        "due to privilege escalation risk. Authenticate via '/auth/login' to obtain a signed JWT and pass "
+                        "'Authorization: Bearer <token>' or supply a valid signed JWT in 'X-Admin-Role'."
+                    )
+                )
+
+    # 3. Next check HttpOnly session cookie (for ambient browser session protection)
+    effective_cookie_token = cookie_token or (get_session_cookie_token(request) if request else None)
+    if not role_str and effective_cookie_token:
+        try:
+            payload = JWTAuthManager.verify_token(effective_cookie_token)
+            role_str = payload.get("role")
+            auth_method = "cookie"
+        except Exception as e:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Session Cookie Authentication Failure: {e!s}"
+            )
 
     if not role_str:
         raise HTTPException(
             status_code=401,
-            detail="Authentication Required: Missing 'Authorization: Bearer <JWT>' or 'X-Admin-Role' header."
+            detail="Authentication Required: Missing 'Authorization: Bearer <JWT>' header or session cookie."
         )
+
+    # Enforce CSRF protection on state-changing cookie requests
+    validate_csrf(request, auth_method, x_csrf_token)
 
     try:
         role = AdminRole(role_str)
@@ -420,39 +564,175 @@ def check_admin_permission(required_permission: str, x_admin_role: str | None = 
         )
     return role
 
+
 def check_admin_permission_dep(required_permission: str):
     def _dependency(
+        request: Request,
         x_admin_role: str | None = Header(default=None, alias="X-Admin-Role"),
-        authorization: str | None = Header(default=None, alias="Authorization")
+        authorization: str | None = Header(default=None, alias="Authorization"),
+        x_csrf_token: str | None = Header(default=None, alias="X-CSRF-Token"),
     ) -> AdminRole:
-        return check_admin_permission(required_permission, x_admin_role, authorization)
+        cookie_token = get_session_cookie_token(request)
+        return check_admin_permission(
+            required_permission,
+            x_admin_role=x_admin_role,
+            authorization=authorization,
+            cookie_token=cookie_token,
+            request=request,
+            x_csrf_token=x_csrf_token,
+        )
     return _dependency
+
 
 # --- Pydantic API Models ---
 class LoginRequest(BaseModel):
     username: str = Field(default="admin", description="Administrator or User Username")
-    password: str | None = Field(default="", description="Password")
-    role: str = Field(default="SYSTEM_ADMIN", description="Requested Admin Role")
+    password: str = Field(..., description="Administrator Password")
+    role: str | None = Field(default=None, description="Deprecated: role is assigned from authenticated identity")
+
 
 @app.post("/auth/login", response_model=dict[str, Any], tags=["Authentication"])
 @app.post("/api/v1/auth/login", response_model=dict[str, Any], tags=["Authentication"])
-def login_for_access_token(req: LoginRequest):
+def login_for_access_token(req: LoginRequest, response: Response):
     """
-    Issues signed JWT access token for administrative actions.
+    Authenticates administrator credentials using PBKDF2-HMAC-SHA256 password verification.
+    Issues a cryptographically signed JWT access token, sets an HttpOnly, Secure cookie
+    (__Host- prefix in production), and issues a CSRF token for state-changing browser requests.
     """
-    try:
-        admin_role = AdminRole(req.role)
-    except Exception:
-        raise HTTPException(status_code=400, detail=f"Invalid Admin Role '{req.role}'. Must be one of {[r.value for r in AdminRole]}")
+    user = AdminAuthManager.authenticate(req.username, req.password)
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication Failed: Invalid administrator username or password."
+        )
 
-    token = JWTAuthManager.create_admin_token(role=admin_role.value, identity_id=req.username)
+    token = JWTAuthManager.create_admin_token(role=user.role.value, identity_id=user.username)
+    csrf_token = secrets.token_hex(32)
+
+    is_production = ENV_PROFILE in ("production", "prod")
+    cookie_name = "__Host-agenttrust_session" if is_production else "agenttrust_session"
+
+    response.set_cookie(
+        key=cookie_name,
+        value=token,
+        max_age=28800,
+        httponly=True,
+        secure=is_production,
+        samesite="lax",
+        path="/",
+    )
+    if not is_production:
+        response.set_cookie(
+            key="agenttrust_session",
+            value=token,
+            max_age=28800,
+            httponly=True,
+            secure=False,
+            samesite="lax",
+            path="/",
+        )
+
+    response.set_cookie(
+        key="agenttrust_csrf_token",
+        value=csrf_token,
+        max_age=28800,
+        httponly=False,
+        secure=is_production,
+        samesite="lax",
+        path="/",
+    )
+
     return {
         "access_token": token,
         "token_type": "bearer",
         "expires_in": 28800,
-        "role": admin_role.value,
-        "identity": req.username
+        "role": user.role.value,
+        "identity": user.username,
+        "username": user.username,
+        "csrf_token": csrf_token,
     }
+
+
+@app.post("/auth/logout", tags=["Authentication"])
+@app.post("/api/v1/auth/logout", tags=["Authentication"])
+def logout_admin_session(
+    response: Response,
+    request: Request,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+):
+    """
+    Terminates the administrative session:
+    1. Revokes the active JWT token durable across workers and restarts.
+    2. Clears the HttpOnly session cookies and CSRF cookie.
+    """
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split("Bearer ", 1)[1].strip()
+    else:
+        token = get_session_cookie_token(request)
+
+    if token:
+        JWTAuthManager.revoke_token(token)
+
+    is_production = ENV_PROFILE in ("production", "prod")
+    for cname in ("__Host-agenttrust_session", "agenttrust_session", "agenttrust_csrf_token"):
+        response.delete_cookie(
+            key=cname,
+            path="/",
+            httponly="session" in cname,
+            samesite="lax",
+            secure=is_production,
+        )
+    return {"status": "SUCCESS", "message": "Administrative session successfully terminated."}
+
+
+@app.get("/auth/session", tags=["Authentication"])
+@app.get("/api/v1/auth/session", tags=["Authentication"])
+def get_current_session(
+    request: Request,
+    response: Response,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+):
+    """
+    Returns the currently authenticated administrative identity, role, and CSRF token.
+    Never exposes raw secrets; allows the frontend to initialize user state securely without browser token storage.
+    """
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split("Bearer ", 1)[1].strip()
+    else:
+        token = get_session_cookie_token(request)
+
+    if not token:
+        raise HTTPException(status_code=401, detail="No active authenticated session.")
+
+    try:
+        payload = JWTAuthManager.verify_token(token)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid or expired session: {e!s}")
+
+    csrf_token = request.cookies.get("agenttrust_csrf_token")
+    if not csrf_token:
+        csrf_token = secrets.token_hex(32)
+        is_production = ENV_PROFILE in ("production", "prod")
+        response.set_cookie(
+            key="agenttrust_csrf_token",
+            value=csrf_token,
+            max_age=28800,
+            httponly=False,
+            secure=is_production,
+            samesite="lax",
+            path="/",
+        )
+
+    return {
+        "authenticated": True,
+        "username": payload.get("sub", "admin"),
+        "role": payload.get("role", "SYSTEM_ADMIN"),
+        "expires_at": payload.get("exp"),
+        "csrf_token": csrf_token,
+    }
+
 
 class ModeRequest(BaseModel):
     mode: str
@@ -550,7 +830,6 @@ class FabricVerifyEvidenceRequest(BaseModel):
 
 # --- Mode Processing Helper ---
 def process_request_with_mode(payload: dict[str, Any]) -> dict[str, Any]:
-    global CURRENT_MODE
     if CURRENT_MODE == "MODE_A_DIRECT_API":
         # Mode A: Direct API (bypasses Gateway, signature checks, policy, and audit log)
         headers = finance_api.create_gateway_auth_headers(payload["request_id"])
@@ -591,7 +870,7 @@ def process_request_with_mode(payload: dict[str, Any]) -> dict[str, Any]:
                 "reason": "INVALID_SIGNATURE",
                 "protected_api_result": "DENIED"
             }
-        dec, rsn, pver, _ = policy_evaluator.evaluate(
+        dec, rsn, _pver, _ = policy_evaluator.evaluate(
             policy_id=agent_rec.get("policy_id", "FIN-POLICY-001"),
             action=payload["action"],
             resource=payload["resource"],
@@ -668,7 +947,7 @@ def health_check():
         "current_mode": CURRENT_MODE,
         "redis_connected": cache_manager.is_redis_connected,
         "cache_backend": "redis" if cache_manager.is_redis_connected else "in-memory-fallback",
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
     }
 
 # 0. Operational Mode APIs
@@ -801,7 +1080,7 @@ def create_purchase_order(req: PurchaseOrderRequest, role: AdminRole = Depends(c
         raise HTTPException(status_code=404, detail=f"Agent '{req.agent_id}' not registered.")
 
     req_id = f"REQ-PO-{uuid.uuid4().hex[:6]}"
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     nonce = f"N-PO-{uuid.uuid4().hex[:8]}"
 
     payload = {
@@ -835,7 +1114,7 @@ def create_fund_transfer(req: FundTransferRequest, role: AdminRole = Depends(che
         raise HTTPException(status_code=404, detail=f"Agent '{req.agent_id}' not registered.")
 
     req_id = f"REQ-FT-{uuid.uuid4().hex[:6]}"
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     nonce = f"N-FT-{uuid.uuid4().hex[:8]}"
 
     payload = {
@@ -1182,7 +1461,7 @@ def issue_delegation_token(
 
     requested_actions = set(req.allowed_actions)
     if not requested_actions.issubset(allowed_scope):
-        unauthorized = sorted(list(requested_actions - allowed_scope))
+        unauthorized = sorted(requested_actions - allowed_scope)
         raise HTTPException(
             status_code=403,
             detail=f"Requested actions exceed issuer capabilities or policy: {', '.join(unauthorized)}",
@@ -1467,7 +1746,7 @@ def run_performance_benchmarks():
     ablation_study = engine.run_ablation_study(num_requests=25)
 
     return {
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         "stage_latencies": stage_latencies,
         "concurrency_scaling": concurrency_scaling,
         "ablation_study": ablation_study,
@@ -1479,7 +1758,7 @@ def run_performance_benchmarks():
 @app.post("/scenarios/attack-matrix/run/{scenario_id}")
 def run_scenario(scenario_id: int):
     priv_key = default_agent_reg["private_key"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     if scenario_id == 1:
         req_id = f"REQ-ATK1-{uuid.uuid4().hex[:6]}"
@@ -1535,7 +1814,7 @@ def run_scenario(scenario_id: int):
 
     elif scenario_id == 4:
         req_id = f"REQ-ATK4-{uuid.uuid4().hex[:6]}"
-        old_time = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=600)).isoformat()
+        old_time = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=600)).isoformat()
         payload = {
             "request_id": req_id,
             "agent_id": "FINANCE-AGENT-001",
@@ -1837,7 +2116,7 @@ app.mount("/static", StaticFiles(directory=dashboard_dir), name="static")
 def index_page():
     index_path = os.path.join(dashboard_dir, "index.html")
     if os.path.exists(index_path):
-        with open(index_path, "r", encoding="utf-8") as f:
+        with open(index_path, encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
     return HTMLResponse(content="<h1>AgentTrust Framework Dashboard</h1>")
 

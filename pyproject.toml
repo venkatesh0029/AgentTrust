@@ -1,0 +1,37 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    ".git",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".hypothesis",
+    "frontend",
+    "fabric/gateway-bridge",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "UP",
+]
+ignore = [
+    "E501",   # Line too long
+    "E402",   # Module level import not at top of file
+    "UP042",  # Class inherits from both str and enum.Enum
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "attack_lab"]
+norecursedirs = [
+    ".git",
+    "frontend",
+    "node_modules",
+    "fabric",
+    ".softhsm2",
+    ".hypothesis",
+]

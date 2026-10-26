@@ -1,0 +1,6 @@
+# Generated, local-only identity material and ledger artifacts for the isolated Raft-3 lab.
+crypto-config/
+channel-artifacts/
+*.block
+*.tx
+*.tar.gz

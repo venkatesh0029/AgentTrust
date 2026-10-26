@@ -26,9 +26,10 @@ import {
 } from "lucide-react";
 import { ModeBadge } from "@/components/domain/components";
 import { CommandPalette } from "@/components/ui/primitives";
+import { AuthModal } from "@/components/ui/auth-modal";
 import { useTheme } from "next-themes";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, type AuthSession } from "@/lib/api";
 
 const emptySubscribe = () => () => {};
 
@@ -39,7 +40,43 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
   
   const [collapsed, setCollapsed] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false);
+
+  useEffect(() => {
+    // Read or initialize active authentication session
+    const session = api.getStoredAuth();
+    if (session) {
+      setAuthSession(session);
+    } else {
+      api.checkServerSession().then((srvSession) => {
+        if (srvSession) {
+          setAuthSession(srvSession);
+        } else {
+          api.ensureAuth().then(() => {
+            setAuthSession(api.getStoredAuth());
+          }).catch((e) => console.warn("Auto-auth error:", e));
+        }
+      }).catch(() => {});
+    }
+
+    const onAuthChange = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail) {
+        setAuthSession({
+          token: detail.access_token,
+          username: detail.username,
+          role: detail.role,
+          expiresAt: Date.now() + (detail.expires_in || 28800) * 1000,
+        });
+      } else {
+        setAuthSession(null);
+      }
+    };
+    window.addEventListener("agenttrust-auth-changed", onAuthChange);
+    return () => window.removeEventListener("agenttrust-auth-changed", onAuthChange);
+  }, []);
 
   // Poll Chain Integrity
   const { data: chainIntegrity, isLoading: chainIntegrityLoading, isError: chainIntegrityError } = useQuery({
@@ -214,13 +251,29 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
               {mounted && theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
 
-            {/* User Profile */}
-            <div className="flex items-center gap-2 pl-2 border-l border-[var(--border)]">
-              <div className="w-7 h-7 rounded-full bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-[var(--muted)] text-xs">
-                <User className="w-4 h-4" />
+            {/* User Profile & Auth Trigger */}
+            <button
+              id="auth-profile-button"
+              type="button"
+              onClick={() => setAuthOpen(true)}
+              className="flex items-center gap-2 pl-2 border-l border-[var(--border)] hover:opacity-80 transition-opacity text-left"
+              title="Click to manage authentication & switch role"
+            >
+              <div className="relative">
+                <div className="w-7 h-7 rounded-full bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-[var(--muted)] text-xs">
+                  <User className="w-4 h-4" />
+                </div>
+                <span className="w-2 h-2 rounded-full bg-[var(--allowed)] absolute -bottom-0.5 -right-0.5 border border-[var(--surface)]" />
               </div>
-              <span className="text-xs font-mono text-[var(--fg)] hidden md:inline">SYSTEM_ADMIN</span>
-            </div>
+              <div className="hidden md:flex flex-col">
+                <span className="text-[11px] font-semibold text-[var(--fg)] leading-none">
+                  {authSession?.username || "admin"}
+                </span>
+                <span className="text-[9px] font-mono text-[var(--muted)] leading-none mt-0.5">
+                  {authSession?.role || "SYSTEM_ADMIN"}
+                </span>
+              </div>
+            </button>
           </div>
         </header>
 
@@ -235,6 +288,13 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
         isOpen={cmdOpen}
         onClose={() => setCmdOpen(false)}
         onNavigate={(route) => router.push(route)}
+      />
+
+      {/* Auth & RBAC Modal */}
+      <AuthModal
+        isOpen={authOpen}
+        onClose={() => setAuthOpen(false)}
+        currentSession={authSession}
       />
     </div>
   );

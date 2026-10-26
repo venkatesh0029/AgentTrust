@@ -1,6 +1,7 @@
 import base64
 import os
 import unittest
+
 import rsa
 
 from identity_manager.kms import KMSProvider

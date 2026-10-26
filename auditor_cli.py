@@ -13,10 +13,10 @@ from evidence_manager.merkle_tree import MerkleTree
 
 def verify_evidence_proof(evidence_file: str, merkle_root: str, proof_file: str) -> bool:
     """Verifies off-chain evidence inclusion against Merkle root."""
-    with open(evidence_file, 'r') as f:
+    with open(evidence_file) as f:
         evidence_data = json.load(f)
 
-    with open(proof_file, 'r') as f:
+    with open(proof_file) as f:
         proof_data = json.load(f)
 
     evidence_hash = evidence_data.get("evidence_hash") or evidence_data.get("request_hash")

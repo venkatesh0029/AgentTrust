@@ -26,9 +26,8 @@ class TestCorsSecurity(unittest.TestCase):
             os.environ,
             {"CORS_ORIGINS": "http://localhost:3000,*"},
             clear=False,
-        ):
-            with self.assertRaises(RuntimeError):
-                get_cors_origins()
+        ), self.assertRaises(RuntimeError):
+            get_cors_origins()
 
     def test_empty_origin_configuration_is_rejected(self):
         with patch.dict(os.environ, {"CORS_ORIGINS": " , "}, clear=False):

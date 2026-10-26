@@ -48,13 +48,14 @@ class PromptInjectionDatasetBenchmark:
         # 1. Test Benign Payload Samples (Expecting Negative: False)
         for i in range(samples_per_category):
             tmpl = cls.BENIGN_TEMPLATES[i % len(cls.BENIGN_TEMPLATES)]
+            tmpl_params = tmpl.get("parameters")
+            params: dict[str, Any] = dict(tmpl_params) if isinstance(tmpl_params, dict) else {}
+            params["reference_id"] = f"REF-{i:05d}"
             payload = {
-                "action": tmpl["action"],
-                "parameters": dict(tmpl["parameters"]),
-                "amount": 100.0 + (i % 500)
+                "action": str(tmpl.get("action", "")),
+                "parameters": params,
+                "amount": 100.0 + (i % 500),
             }
-            # Add dynamic benign variation
-            payload["parameters"]["reference_id"] = f"REF-{i:05d}"
 
             detected, _, _ = PromptInjectionGuard.evaluate_payload(payload)
             if detected:
@@ -65,12 +66,14 @@ class PromptInjectionDatasetBenchmark:
         # 2. Test Adversarial Payload Samples (Expecting Positive: True)
         for i in range(samples_per_category):
             tmpl = cls.ADVERSARIAL_TEMPLATES[i % len(cls.ADVERSARIAL_TEMPLATES)]
+            tmpl_params = tmpl.get("parameters")
+            params = dict(tmpl_params) if isinstance(tmpl_params, dict) else {}
+            params["nonce_var"] = f"adv-var-{i}"
             payload = {
-                "action": tmpl["action"],
-                "parameters": dict(tmpl["parameters"]),
-                "amount": 500.0 + (i % 1000)
+                "action": str(tmpl.get("action", "")),
+                "parameters": params,
+                "amount": 500.0 + (i % 1000),
             }
-            payload["parameters"]["nonce_var"] = f"adv-var-{i}"
 
             detected, _, _ = PromptInjectionGuard.evaluate_payload(payload)
             if detected:

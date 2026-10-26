@@ -53,7 +53,7 @@ class PolicyRecord(BaseModel):
     working_hours: WorkingHours = Field(default_factory=WorkingHours)
     version: str = "1.0"
     status: str = "ACTIVE"
-    effective_from: str = Field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
+    effective_from: str = Field(default_factory=lambda: datetime.datetime.now(datetime.UTC).isoformat())
     effective_until: str | None = None
     change_author: str = "POLICY_ADMIN"
     change_reason: str = "Initial Policy Setup"

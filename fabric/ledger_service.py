@@ -19,7 +19,7 @@ class Block:
         self.index = index
         self.transactions = transactions
         self.previous_hash = previous_hash
-        self.timestamp = timestamp or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self.timestamp = timestamp or datetime.datetime.now(datetime.UTC).isoformat()
         self.hash = self.calculate_hash()
 
     def calculate_hash(self) -> str:
@@ -60,7 +60,7 @@ class FabricLedgerService:
             "tx_id": "TX-GENESIS-000",
             "type": "GENESIS",
             "message": "AgentTrust Permissioned Blockchain Network Initialized",
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
         }
         genesis_block = Block(
             index=0,

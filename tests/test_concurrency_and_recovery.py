@@ -115,7 +115,7 @@ class TestConcurrencyAndRecoveryAssurance(unittest.TestCase):
         nonce: str,
         idempotency_key: str | None = None
     ) -> dict:
-        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        timestamp = datetime.datetime.now(datetime.UTC).isoformat()
         payload = {
             "request_id": req_id,
             "agent_id": self.agent_id,

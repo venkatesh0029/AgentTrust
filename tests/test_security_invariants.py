@@ -78,7 +78,7 @@ def build_payload(agent_id, action, resource, amount, priv_key, key_version=1):
         "amount": amount,
         "parameters": {"amount": amount},
         "nonce": f"N-{uuid.uuid4().hex[:6]}",
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         "key_version": key_version
     }
     sig = SignatureManager.sign_request(payload, priv_key)
@@ -165,7 +165,7 @@ def test_invariant_i8_client_supplied_risk_ignored(inv_setup):
         "amount": 40000.0,
         "parameters": {"amount": 40000.0},
         "nonce": f"N-{uuid.uuid4().hex[:6]}",
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         "key_version": 1,
         "risk_score": 0.0,
         "risk_level": "LOW"

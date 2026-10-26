@@ -2,7 +2,7 @@ name: AgentTrust Enterprise Security CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, 'feat/**' ]
   pull_request:
     branches: [ main ]
 
@@ -30,21 +30,65 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff mypy
+          pip install ruff==0.17.2 mypy==1.15.0
 
-      - name: Code Quality & Static Analysis Gates
+      - name: Code Quality Gate (Ruff Linting)
         run: |
-          ruff check . --select E,F,W --ignore E501
-          mypy --ignore-missing-imports action_gateway/ policy_engine/ identity_manager/ risk_engine/
+          ruff --version
+          ruff check .
 
-      - name: Run Pytest Regression Suite & 20-Scenario Attack Lab
+      - name: Type Checking Gate (Mypy)
         run: |
-          pytest tests attack_lab -v --tb=short
+          python -m mypy --version
+          python -m mypy --ignore-missing-imports action_gateway agent_registry audit_writer benchmarks evidence_manager fabric human_approval identity_manager policy_engine protected_api replay_protection risk_engine tests 2>&1 | tee mypy_output.log || {
+            ERR_MSG=$(head -n 30 mypy_output.log | tr '\r\n' '  ')
+            echo "::error title=Mypy Type Checking Failed::$ERR_MSG"
+            exit 1
+          }
 
-      - name: Run Comparative OPA & OAuth2 Benchmark Engine
+      - name: Run Full Pytest Regression Suite
         run: |
-          python benchmarks/comparative_benchmark.py
+          pytest tests attack_lab -v --tb=short 2>&1 | tee pytest_output.log || {
+            ERR_MSG=$(tail -n 40 pytest_output.log | tr '\r\n' '  ')
+            echo "::error title=Pytest Failure Diagnostics::$ERR_MSG"
+            exit 1
+          }
 
-      - name: Run Real Labeled Prompt Injection Dataset Benchmark
+      - name: Run 5-Stage Verification Pipeline
         run: |
-          python benchmarks/real_dataset_benchmark.py
+          python verify_all.py 2>&1 | tee verify_all_output.log || {
+            ERR_MSG=$(tail -n 40 verify_all_output.log | tr '\r\n' '  ')
+            echo "::error title=Verify All Failure Diagnostics::$ERR_MSG"
+            exit 1
+          }
+
+      - name: Run Production-Profile Acceptance Suite
+        run: |
+          python scripts/verify_production_acceptance.py 2>&1 | tee acceptance_output.log || {
+            ERR_MSG=$(tail -n 40 acceptance_output.log | tr '\r\n' '  ')
+            echo "::error title=Acceptance Failure Diagnostics::$ERR_MSG"
+            exit 1
+          }
+
+  frontend-build:
+    name: Frontend Next.js Production Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Next.js Production Build
+        working-directory: frontend
+        run: npm run build

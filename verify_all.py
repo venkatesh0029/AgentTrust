@@ -23,21 +23,30 @@ def print_banner(text: str) -> None:
 def run_step(step_num: int, total_steps: int, title: str, cmd: list[str]) -> bool:
     print(f"\n[{step_num}/{total_steps}] {title}...")
     print(f"      Command: {' '.join(cmd)}")
+    sys.stdout.flush()
     start = time.time()
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    elapsed = time.time() - start
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        elapsed = time.time() - start
 
-    if res.returncode == 0:
-        print(f"      Status:  PASS ({elapsed:.2f}s)")
-        return True
-    else:
-        print(f"      Status:  FAILED (Exit Code {res.returncode})")
-        print("\n--- Output ---")
-        if res.stdout:
-            print(res.stdout.strip())
-        if res.stderr:
-            print(res.stderr.strip())
-        print("--------------\n")
+        if res.returncode == 0:
+            print(f"      Status:  PASS ({elapsed:.2f}s)")
+            sys.stdout.flush()
+            return True
+        else:
+            print(f"      Status:  FAILED (Exit Code {res.returncode})")
+            print("\n--- Output ---")
+            if res.stdout:
+                print(res.stdout.strip())
+            if res.stderr:
+                print(res.stderr.strip())
+            print("--------------\n")
+            sys.stdout.flush()
+            return False
+    except Exception as exc:
+        elapsed = time.time() - start
+        print(f"      Status:  EXCEPTION ({elapsed:.2f}s) -> {exc}")
+        sys.stdout.flush()
         return False
 
 
@@ -48,18 +57,21 @@ def main() -> int:
     print("Independent security validation requires external peer inspection and audit.\n")
 
     # Step 1: Ruff Linting
-    step1_ok = run_step(1, total_steps, "Running Ruff Static Analysis", ["ruff", "check", "."])
+    step1_ok = run_step(1, total_steps, "Running Ruff Static Analysis", [sys.executable, "-m", "ruff", "check", "."])
     if not step1_ok:
         print("\nVerification FAILED at Step 1 (Ruff).")
         return 1
 
     # Step 2: Mypy Type Checking
     mypy_cmd = [
+        sys.executable,
+        "-m",
         "mypy",
         "--ignore-missing-imports",
         "action_gateway",
         "agent_registry",
         "audit_writer",
+        "benchmarks",
         "evidence_manager",
         "fabric",
         "human_approval",
@@ -69,8 +81,6 @@ def main() -> int:
         "replay_protection",
         "risk_engine",
         "tests",
-        "benchmarks/held_out_v2_benchmark.py",
-        "benchmarks/held_out_v3_benchmark.py",
     ]
     step2_ok = run_step(2, total_steps, "Running Mypy Type Checking", mypy_cmd)
     if not step2_ok:
@@ -78,7 +88,9 @@ def main() -> int:
         return 1
 
     # Step 3: Pytest Regression Suite
-    step3_ok = run_step(3, total_steps, "Running Full Pytest Regression Suite", ["pytest", "-q"])
+    step3_ok = run_step(
+        3, total_steps, "Running Full Pytest Regression Suite", [sys.executable, "-m", "pytest", "tests", "attack_lab", "-q"]
+    )
     if not step3_ok:
         print("\nVerification FAILED at Step 3 (Pytest).")
         return 1

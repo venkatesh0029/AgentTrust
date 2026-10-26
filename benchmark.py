@@ -138,7 +138,7 @@ def run_performance_benchmarks(num_requests: int = 100, num_repetitions: int = 3
     # --- WARM-UP PROCEDURE ---
     print(f"\n[+] Executing {warmup_requests} Warm-Up Iterations (Cold Cache & JIT Eviction)...")
     for w in range(warmup_requests):
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now_iso = datetime.datetime.now(datetime.UTC).isoformat()
         w_payload = {
             "request_id": f"REQ-WARM-{w}",
             "agent_id": "FINANCE-AGENT-001",
@@ -171,7 +171,7 @@ def run_performance_benchmarks(num_requests: int = 100, num_repetitions: int = 3
         start_rep_time = time.perf_counter()
         for i in range(num_requests):
             req_idx = rep * num_requests + i
-            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
             req_id = f"REQ-BENCH-R{rep}-{i:04d}"
             nonce = f"N-BENCH-R{rep}-{i:04d}"
             amount = 7500.0 if (i % 2 == 0) else 80000.0  # Alternating valid vs excessive

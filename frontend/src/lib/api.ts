@@ -216,8 +216,231 @@ export interface GenericApiResponse {
   [key: string]: unknown;
 }
 
+export const LoginResponseSchema = z.object({
+  access_token: z.string(),
+  token_type: z.string().default("bearer"),
+  expires_in: z.number().default(28800),
+  role: z.string(),
+  identity: z.string().default("admin"),
+  username: z.string().default("admin"),
+  csrf_token: z.string().optional(),
+});
+export type LoginResponse = z.infer<typeof LoginResponseSchema>;
+
+export interface AuthSession {
+  token: string;
+  role: string;
+  username: string;
+  expiresAt: number;
+}
+
+export const isDemoAuthMode = (): boolean => {
+  if (
+    process.env.NODE_ENV === "production" ||
+    process.env.NEXT_PUBLIC_ENV === "production"
+  ) {
+    return false;
+  }
+
+  return process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+};
+
+export const DEMO_CREDENTIALS: Record<string, { username: string; password: string }> = {
+  SYSTEM_ADMIN: { username: "admin", password: "AdminTrust#2026!Secured" },
+  POLICY_ADMIN: { username: "policy_admin", password: "PolicyTrust#2026!Secured" },
+  FINANCE_APPROVER: { username: "finance_approver", password: "FinanceTrust#2026!Secured" },
+  AUDITOR: { username: "auditor", password: "AuditorTrust#2026!Secured" },
+};
+
+// OWASP anti-XSS Hardening: In-memory session store; tokens are NEVER stored in localStorage or sessionStorage
+let inMemorySession: AuthSession | null = null;
+let inMemoryCsrfToken: string | null = null;
+const inMemoryRoleTokens: Record<string, { token: string; expiresAt: number }> = {};
+
+// Clean up legacy tokens from localStorage if present
+if (typeof window !== "undefined") {
+  try {
+    [
+      "agenttrust_auth_token",
+      "agenttrust_auth_user",
+      "agenttrust_auth_role",
+      "agenttrust_auth_expiry",
+      "agenttrust_auth_token_SYSTEM_ADMIN",
+      "agenttrust_auth_token_POLICY_ADMIN",
+      "agenttrust_auth_token_FINANCE_APPROVER",
+      "agenttrust_auth_token_AUDITOR",
+    ].forEach((k) => localStorage.removeItem(k));
+  } catch {}
+}
+
 // CENTRALIZED TYPED API CLIENT
 export const api = {
+  async login(username: string = "admin", password?: string): Promise<LoginResponse> {
+    let pwd = password;
+    if (!pwd) {
+      if (isDemoAuthMode()) {
+        const cred = Object.values(DEMO_CREDENTIALS).find((c) => c.username === username);
+        pwd = cred?.password || "AdminTrust#2026!Secured";
+      } else {
+        throw new Error("SECURITY VIOLATION: Password is mandatory in production environment. Demo persona shortcuts are disabled.");
+      }
+    }
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ username, password: pwd }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Login failed" }));
+      throw new Error((err as { detail?: string }).detail || `Authentication failed (${res.status})`);
+    }
+    const data = LoginResponseSchema.parse(await res.json());
+    const expiresAt = Date.now() + (data.expires_in || 28800) * 1000;
+
+    // Maintain token strictly in-memory
+    inMemorySession = {
+      token: data.access_token,
+      role: data.role,
+      username: data.username,
+      expiresAt,
+    };
+    inMemoryCsrfToken = (data as { csrf_token?: string }).csrf_token || null;
+    inMemoryRoleTokens[data.role] = { token: data.access_token, expiresAt };
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("agenttrust-auth-changed", { detail: data }));
+    }
+    return data;
+  },
+
+  async logout(): Promise<void> {
+    try {
+      const authHeaders = this.getAuthHeaders();
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+        headers: authHeaders,
+      });
+    } catch {
+      // Ignore network errors during logout
+    }
+    inMemorySession = null;
+    inMemoryCsrfToken = null;
+    Object.keys(inMemoryRoleTokens).forEach((k) => delete inMemoryRoleTokens[k]);
+    if (typeof window !== "undefined") {
+      try {
+        [
+          "agenttrust_auth_token",
+          "agenttrust_auth_user",
+          "agenttrust_auth_role",
+          "agenttrust_auth_expiry",
+        ].forEach((k) => localStorage.removeItem(k));
+      } catch {}
+      window.dispatchEvent(new CustomEvent("agenttrust-auth-changed", { detail: null }));
+    }
+  },
+
+  async checkServerSession(): Promise<AuthSession | null> {
+    try {
+      const res = await fetch(`${API_BASE}/auth/session`, {
+        method: "GET",
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        inMemorySession = {
+          token: inMemorySession?.token || "",
+          role: data.role,
+          username: data.username,
+          expiresAt: (data.expires_at || 0) * 1000,
+        };
+        inMemoryCsrfToken = data.csrf_token || inMemoryCsrfToken;
+        return inMemorySession;
+      }
+    } catch {
+      // Ignore network errors
+    }
+    return null;
+  },
+
+  getStoredAuth(): AuthSession | null {
+    if (inMemorySession) {
+      if (Date.now() > inMemorySession.expiresAt) {
+        this.logout();
+        return null;
+      }
+      return inMemorySession;
+    }
+    return null;
+  },
+
+  async ensureAuth(roleOrToken?: string): Promise<string> {
+    if (roleOrToken && roleOrToken.startsWith("eyJ")) {
+      return roleOrToken;
+    }
+
+    // 1. Check existing in-memory session
+    const currentSession = this.getStoredAuth();
+    if (currentSession?.token) {
+      if (!roleOrToken || currentSession.role === roleOrToken) {
+        return currentSession.token;
+      }
+    }
+
+    // 2. Check cached role tokens in memory
+    const targetRole = roleOrToken && DEMO_CREDENTIALS[roleOrToken] ? roleOrToken : null;
+    if (targetRole && inMemoryRoleTokens[targetRole]) {
+      const entry = inMemoryRoleTokens[targetRole];
+      if (Date.now() < entry.expiresAt) {
+        return entry.token;
+      }
+    }
+
+    // 3. In production, check if active HttpOnly session cookie exists
+    if (!isDemoAuthMode()) {
+      const serverSession = await this.checkServerSession();
+      if (serverSession) {
+        return serverSession.token || "COOKIE_AUTHENTICATED";
+      }
+      return "";
+    }
+
+    // 4. Demo mode only (development)
+    if (targetRole) {
+      const creds = DEMO_CREDENTIALS[targetRole];
+      const loginRes = await this.login(creds.username, creds.password);
+      return loginRes.access_token;
+    }
+
+    const adminLogin = await this.login("admin", "AdminTrust#2026!Secured");
+    return adminLogin.access_token;
+  },
+
+  getAuthHeaders(roleOrToken?: string): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (inMemoryCsrfToken) {
+      headers["X-CSRF-Token"] = inMemoryCsrfToken;
+    }
+    if (roleOrToken && roleOrToken.startsWith("eyJ")) {
+      headers["Authorization"] = `Bearer ${roleOrToken}`;
+      return headers;
+    }
+    if (roleOrToken && inMemoryRoleTokens[roleOrToken]) {
+      const entry = inMemoryRoleTokens[roleOrToken];
+      if (Date.now() < entry.expiresAt) {
+        headers["Authorization"] = `Bearer ${entry.token}`;
+        return headers;
+      }
+    }
+    const session = this.getStoredAuth();
+    if (session?.token) {
+      headers["Authorization"] = `Bearer ${session.token}`;
+      return headers;
+    }
+    return headers;
+  },
+
   async fetchHealth(): Promise<HealthData> {
     const res = await fetch(`${API_BASE}/api/health`, { cache: "no-store" });
     if (!res.ok) throw new Error(`Health check failed (${res.status})`);
@@ -232,12 +455,14 @@ export const api = {
     return ModeSchema.parse(data);
   },
 
-  async setMode(mode: string, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async setMode(mode: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/mode`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify({ mode }),
     });
@@ -256,12 +481,14 @@ export const api = {
     return parsed.agents;
   },
 
-  async updateAgentStatus(agentId: string, status: string, reason: string = "", role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async updateAgentStatus(agentId: string, status: string, reason: string = "", roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/agents/${agentId}/status`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify({ status, reason }),
     });
@@ -272,37 +499,45 @@ export const api = {
     return res.json();
   },
 
-  async suspendAgent(agentId: string, reason: string = "ADMIN_SUSPENSION", role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async suspendAgent(agentId: string, reason: string = "ADMIN_SUSPENSION", roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/agents/${agentId}/suspend?reason=${encodeURIComponent(reason)}`, {
       method: "POST",
-      headers: { "X-Admin-Role": role },
+      headers: { ...authHeaders },
     });
     if (!res.ok) throw new Error(`Suspend agent failed (${res.status})`);
     return res.json();
   },
 
-  async reactivateAgent(agentId: string, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async reactivateAgent(agentId: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/agents/${agentId}/reactivate`, {
       method: "POST",
-      headers: { "X-Admin-Role": role },
+      headers: { ...authHeaders },
     });
     if (!res.ok) throw new Error(`Reactivate agent failed (${res.status})`);
     return res.json();
   },
 
-  async revokeAgent(agentId: string, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async revokeAgent(agentId: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/agents/${agentId}/revoke`, {
       method: "POST",
-      headers: { "X-Admin-Role": role },
+      headers: { ...authHeaders },
     });
     if (!res.ok) throw new Error(`Revoke agent failed (${res.status})`);
     return res.json();
   },
 
-  async rotateAgentKey(agentId: string, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async rotateAgentKey(agentId: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/agents/${agentId}/rotate-key`, {
       method: "POST",
-      headers: { "X-Admin-Role": role },
+      headers: { ...authHeaders },
     });
     if (!res.ok) throw new Error(`Rotate key failed (${res.status})`);
     return res.json();
@@ -323,12 +558,14 @@ export const api = {
     return parsed.policies;
   },
 
-  async rollbackPolicy(policyId: string, targetVersion: string, role: string = "POLICY_ADMIN"): Promise<GenericApiResponse> {
+  async rollbackPolicy(policyId: string, targetVersion: string, roleOrToken: string = "POLICY_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/policies/rollback`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify({ policy_id: policyId, target_version: targetVersion }),
     });
@@ -347,10 +584,12 @@ export const api = {
     return parsed.pending_approvals;
   },
 
-  async approveTicket(approvalId: string, role: string = "FINANCE_APPROVER"): Promise<GenericApiResponse> {
+  async approveTicket(approvalId: string, roleOrToken: string = "FINANCE_APPROVER"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/approvals/${approvalId}/approve`, {
       method: "POST",
-      headers: { "X-Admin-Role": role },
+      headers: { ...authHeaders },
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: "Approve ticket failed" }));
@@ -359,10 +598,12 @@ export const api = {
     return res.json();
   },
 
-  async rejectTicket(approvalId: string, reason: string = "REJECTED_BY_HUMAN", role: string = "FINANCE_APPROVER"): Promise<GenericApiResponse> {
+  async rejectTicket(approvalId: string, reason: string = "REJECTED_BY_HUMAN", roleOrToken: string = "FINANCE_APPROVER"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/approvals/${approvalId}/reject?reason=${encodeURIComponent(reason)}`, {
       method: "POST",
-      headers: { "X-Admin-Role": role },
+      headers: { ...authHeaders },
     });
     if (!res.ok) throw new Error(`Reject ticket failed (${res.status})`);
     return res.json();
@@ -447,12 +688,14 @@ export const api = {
     return res.json();
   },
 
-  async simulateEvidenceTamper(evidenceId: string, fieldName: string, newValue: unknown, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async simulateEvidenceTamper(evidenceId: string, fieldName: string, newValue: unknown, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/evidence/${evidenceId}/simulate-tamper`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify({ field_name: fieldName, new_value: newValue }),
     });
@@ -463,12 +706,14 @@ export const api = {
     return res.json();
   },
 
-  async simulateChainTamper(sequenceNumber: number, fieldName: string, newValue: unknown, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async simulateChainTamper(sequenceNumber: number, fieldName: string, newValue: unknown, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/audit/chain/simulate-tamper`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify({ sequence_number: sequenceNumber, field_name: fieldName, new_value: newValue }),
     });
@@ -479,12 +724,14 @@ export const api = {
     return res.json();
   },
 
-  async registerAgent(data: Record<string, unknown>, role: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+  async registerAgent(data: Record<string, unknown>, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/agents/register`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify(data),
     });
@@ -514,19 +761,25 @@ export const api = {
     return res.json();
   },
 
-
-  async deleteAgent(agentId: string): Promise<GenericApiResponse> {
-    const res = await fetch(`${API_BASE}/agents/${agentId}`, { method: "DELETE" });
+  async deleteAgent(agentId: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const res = await fetch(`${API_BASE}/agents/${agentId}`, {
+      method: "DELETE",
+      headers: { ...authHeaders },
+    });
     if (!res.ok) throw new Error(`Delete agent failed (${res.status})`);
     return res.json();
   },
 
-  async createPolicy(data: Record<string, unknown>, role: string = "POLICY_ADMIN"): Promise<GenericApiResponse> {
+  async createPolicy(data: Record<string, unknown>, roleOrToken: string = "POLICY_ADMIN"): Promise<GenericApiResponse> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/policies`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify(data),
     });
@@ -551,12 +804,14 @@ export const api = {
     return res.json();
   },
 
-  async issueDelegationToken(data: Record<string, unknown>, role: string = "SYSTEM_ADMIN"): Promise<unknown> {
+  async issueDelegationToken(data: Record<string, unknown>, roleOrToken: string = "SYSTEM_ADMIN"): Promise<unknown> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
     const res = await fetch(`${API_BASE}/identity/delegation/issue`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Role": role,
+        ...authHeaders,
       },
       body: JSON.stringify(data),
     });
@@ -613,8 +868,13 @@ export const api = {
     return res.json();
   },
 
-  async flushRetryQueue(): Promise<unknown> {
-    const res = await fetch(`${API_BASE}/gateway/retry-queue/flush`, { method: "POST" });
+  async flushRetryQueue(roleOrToken: string = "SYSTEM_ADMIN"): Promise<unknown> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const res = await fetch(`${API_BASE}/gateway/retry-queue/flush`, {
+      method: "POST",
+      headers: { ...authHeaders },
+    });
     if (!res.ok) throw new Error(`Flush retry queue failed (${res.status})`);
     return res.json();
   },

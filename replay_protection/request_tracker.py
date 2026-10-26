@@ -67,7 +67,7 @@ class RequestTracker:
             if not valid_time:
                 return False, reason
 
-            now_ts = datetime.datetime.now(datetime.timezone.utc).timestamp()
+            now_ts = datetime.datetime.now(datetime.UTC).timestamp()
 
             # 4. Atomic cross-process nonce and request ID registration in SQLite
             if self.persistent_db:
@@ -84,7 +84,7 @@ class RequestTracker:
     def _evict_expired_entries(self) -> None:
         """Evicts expired nonces and request IDs outside the timestamp window."""
         self.nonce_manager.evict_expired(self.timestamp_window)
-        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        now = datetime.datetime.now(datetime.UTC).timestamp()
         expired_reqs = [r for r, ts in self._processed_request_ids.items() if ts > 0 and now - ts > self.timestamp_window]
         for r in expired_reqs:
             del self._processed_request_ids[r]

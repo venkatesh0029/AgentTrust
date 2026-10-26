@@ -10,11 +10,11 @@ import uuid
 import pytest
 
 hypothesis = pytest.importorskip("hypothesis")
-from hypothesis import given, settings  # noqa: E402
-from hypothesis import strategies as st  # noqa: E402
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
-from identity_manager.signature_manager import SignatureManager  # noqa: E402
-from server import action_gateway, agent_registry  # noqa: E402
+from identity_manager.signature_manager import SignatureManager
+from server import action_gateway, agent_registry
 
 # Generate test agent identity once for fuzzing session
 FUZZ_AGENT_ID = "AGENT-PROPERTY-TEST-001"
@@ -51,7 +51,7 @@ class TestPropertyBasedSecurity:
 
         req_id = f"REQ-PROP-{uuid.uuid4().hex[:6]}"
         nonce = f"N-PROP-{uuid.uuid4().hex[:6]}"
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
         payload = {
             "request_id": req_id,
@@ -91,7 +91,7 @@ class TestPropertyBasedSecurity:
         """
         req_id = f"REQ-PROP-MIS-{uuid.uuid4().hex[:6]}"
         nonce = f"N-PROP-MIS-{uuid.uuid4().hex[:6]}"
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
         payload = {
             "request_id": req_id,
@@ -122,7 +122,7 @@ class TestPropertyBasedSecurity:
         """
         req_id = f"REQ-PROP-SIG-{uuid.uuid4().hex[:6]}"
         nonce = f"N-PROP-SIG-{uuid.uuid4().hex[:6]}"
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
         payload = {
             "request_id": req_id,

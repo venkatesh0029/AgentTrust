@@ -8,6 +8,7 @@ import base64
 import os
 import secrets
 from typing import Any, cast
+
 import rsa
 
 from identity_manager.key_manager import KeyManager
@@ -15,7 +16,7 @@ from identity_manager.key_manager import KeyManager
 # Attempt to load native PKCS#11 library bindings
 try:
     import pkcs11
-    from pkcs11 import KeyType, Mechanism, Attribute
+    from pkcs11 import Attribute, KeyType, Mechanism
     HAS_PKCS11_LIB = True
 except ImportError:
     HAS_PKCS11_LIB = False
@@ -113,7 +114,9 @@ class KMSProvider:
                         import ctypes
                         cdll = ctypes.CDLL(self.softhsm_lib)
                         probe_session = token.open(rw=True)
-                        cdll.C_Logout(ctypes.c_ulong(getattr(probe_session, "_handle")))
+                        handle = getattr(probe_session, "_handle", 0)
+                        if handle:
+                            cdll.C_Logout(ctypes.c_ulong(handle))
                         probe_session.close()
                     except Exception:
                         pass

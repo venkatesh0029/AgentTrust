@@ -5,6 +5,7 @@ and Metamorphic Specificity (non-blocking of benign business requests containing
 """
 
 import unittest
+
 from risk_engine.prompt_injection_guard import PromptInjectionGuard
 
 

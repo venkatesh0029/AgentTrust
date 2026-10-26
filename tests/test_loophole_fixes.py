@@ -31,9 +31,21 @@ from server import app
 
 client = TestClient(app)
 
+
+@pytest.fixture(autouse=True)
+def clean_loophole_client():
+    client.cookies.clear()
+    JWTAuthManager.clear_revoked_tokens()
+    yield
+    client.cookies.clear()
+    JWTAuthManager.clear_revoked_tokens()
+
 # 1. JWT Authentication & Plain Header Rejection
 def test_jwt_auth_login_and_token_issuance():
-    response = client.post("/auth/login", json={"username": "sec_admin", "role": "SYSTEM_ADMIN"})
+    response = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "AdminTrust#2026!Secured"}
+    )
     assert response.status_code == 200
     data = response.json()
     assert "access_token" in data
@@ -41,7 +53,7 @@ def test_jwt_auth_login_and_token_issuance():
 
     # Verify token payload
     verified = JWTAuthManager.verify_token(data["access_token"])
-    assert verified["sub"] == "sec_admin"
+    assert verified["sub"] == "admin"
     assert verified["role"] == "SYSTEM_ADMIN"
 
 def test_unauthenticated_plain_role_rejected_when_not_demo():

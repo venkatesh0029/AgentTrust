@@ -21,7 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from database_config import resolve_database_path  # noqa: E402
+from database_config import resolve_database_path
 
 CANONICAL_DEMO_AGENT_IDS = [
     # 1-25: Active Valid Agents
@@ -116,7 +116,7 @@ def reset_demo_data(db_path: str, reset_ledger: bool = False, dry_run: bool = Fa
         return
 
     # Safety Backup
-    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S")
     backup_file_timestamped = f"{target_path}.backup_{timestamp}"
     backup_file_standard = f"{target_path}.bak"
 
@@ -168,7 +168,7 @@ def reset_demo_data(db_path: str, reset_ledger: bool = False, dry_run: bool = Fa
             cursor.execute("DELETE FROM evidence_store")
             cursor.execute("DELETE FROM block_ledger")
             # Insert Genesis Block 0
-            genesis_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            genesis_time = datetime.datetime.now(datetime.UTC).isoformat()
             cursor.execute("""
                 INSERT INTO block_ledger (block_number, previous_hash, block_hash, tx_count, block_data_json, timestamp)
                 VALUES (0, '0000000000000000000000000000000000000000000000000000000000000000',

@@ -116,7 +116,7 @@ class TestProductionReadinessAudit(unittest.TestCase):
         idempotency_key: str | None = None,
         destination: str = "ACC-AUDIT-99"
     ) -> dict:
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now_iso = datetime.datetime.now(datetime.UTC).isoformat()
         payload = {
             "request_id": request_id,
             "agent_id": self.agent_id,
@@ -466,7 +466,7 @@ class TestProductionReadinessAudit(unittest.TestCase):
         - Top-level destination mismatch vs parameters destination is rejected with DESTINATION_MISMATCH.
         """
         # 1. Currency mismatch (top USD vs param EUR)
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now_iso = datetime.datetime.now(datetime.UTC).isoformat()
         payload_curr_mismatch = {
             "request_id": "REQ-MISMATCH-CURR-01",
             "agent_id": self.agent_id,

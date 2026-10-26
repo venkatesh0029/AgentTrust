@@ -4,7 +4,8 @@ Manages approval queue, ticket inspection, and single-use resumption validation.
 """
 
 from typing import Any
-from fastapi import APIRouter, Body, Header, HTTPException
+
+from fastapi import APIRouter, Body, Cookie, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/approvals", tags=["Human-in-the-Loop Approval"])
@@ -31,9 +32,23 @@ def get_action_gateway():
     return action_gateway
 
 
-def check_perm(perm: str, x_admin_role: str | None, authorization: str | None):
+def check_perm(
+    perm: str,
+    x_admin_role: str | None = None,
+    authorization: str | None = None,
+    cookie_token: str | None = None,
+    request: Request | None = None,
+    x_csrf_token: str | None = None,
+):
     from server import check_admin_permission
-    return check_admin_permission(perm, x_admin_role, authorization)
+    return check_admin_permission(
+        perm,
+        x_admin_role=x_admin_role,
+        authorization=authorization,
+        cookie_token=cookie_token,
+        request=request,
+        x_csrf_token=x_csrf_token,
+    )
 
 
 @router.get("/pending", summary="List Pending Approval Tickets")
@@ -55,10 +70,20 @@ def get_ticket(ticket_id: str):
 @router.post("/approve", summary="Approve High-Risk Ticket")
 def approve_ticket(
     req: TicketActionRequest,
+    request: Request,
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
-    authorization: str | None = Header(None)
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias="agenttrust_session"),
+    x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
 ):
-    role = check_perm("approve_transaction", x_admin_role, authorization)
+    role = check_perm(
+        "approve_transaction",
+        x_admin_role=x_admin_role,
+        authorization=authorization,
+        cookie_token=cookie_token,
+        request=request,
+        x_csrf_token=x_csrf_token,
+    )
     gateway = get_action_gateway()
     res = gateway.process_human_approval_resume(req.ticket_id, approver_id=req.approver_id or role.value)
     return res
@@ -67,10 +92,20 @@ def approve_ticket(
 @router.post("/{approval_id}/approve", summary="Approve High-Risk Ticket by ID")
 def approve_ticket_by_id(
     approval_id: str,
+    request: Request,
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
-    authorization: str | None = Header(None)
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias="agenttrust_session"),
+    x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
 ):
-    role = check_perm("approve_transaction", x_admin_role, authorization)
+    role = check_perm(
+        "approve_transaction",
+        x_admin_role=x_admin_role,
+        authorization=authorization,
+        cookie_token=cookie_token,
+        request=request,
+        x_csrf_token=x_csrf_token,
+    )
     gateway = get_action_gateway()
     res = gateway.process_human_approval_resume(approval_id, approver_id=role.value)
     return res
@@ -79,10 +114,20 @@ def approve_ticket_by_id(
 @router.post("/reject", summary="Reject High-Risk Ticket")
 def reject_ticket(
     req: TicketActionRequest,
+    request: Request,
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
-    authorization: str | None = Header(None)
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias="agenttrust_session"),
+    x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
 ):
-    role = check_perm("reject_transaction", x_admin_role, authorization)
+    role = check_perm(
+        "reject_transaction",
+        x_admin_role=x_admin_role,
+        authorization=authorization,
+        cookie_token=cookie_token,
+        request=request,
+        x_csrf_token=x_csrf_token,
+    )
     mgr = get_approval_manager()
     ok, record, msg = mgr.reject_request(req.ticket_id, approver_id=req.approver_id or role.value, reason=req.reason)
     if not ok:
@@ -93,11 +138,21 @@ def reject_ticket(
 @router.post("/{approval_id}/reject", summary="Reject High-Risk Ticket by ID")
 def reject_ticket_by_id(
     approval_id: str,
+    request: Request,
     reason: str = "REJECTED_BY_HUMAN",
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
-    authorization: str | None = Header(None)
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias="agenttrust_session"),
+    x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
 ):
-    role = check_perm("reject_transaction", x_admin_role, authorization)
+    role = check_perm(
+        "reject_transaction",
+        x_admin_role=x_admin_role,
+        authorization=authorization,
+        cookie_token=cookie_token,
+        request=request,
+        x_csrf_token=x_csrf_token,
+    )
     mgr = get_approval_manager()
     ok, record, msg = mgr.reject_request(approval_id, approver_id=role.value, reason=reason)
     if not ok:

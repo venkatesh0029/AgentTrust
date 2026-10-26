@@ -1,14 +1,19 @@
 from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
-from server import app, agent_registry, AGENT_PRIVATE_KEYS
-
+from agent_registry.admin_rbac import AdminRole
+from identity_manager.jwt_auth import JWTAuthManager
+from server import AGENT_PRIVATE_KEYS, agent_registry, app
 
 client = TestClient(app)
 
+ADMIN_HEADERS = {"Authorization": f"Bearer {JWTAuthManager.create_admin_token(role=AdminRole.SYSTEM_ADMIN, identity_id='admin')}"}
+AUDITOR_HEADERS = {"Authorization": f"Bearer {JWTAuthManager.create_admin_token(role=AdminRole.AUDITOR, identity_id='auditor')}"}
+
 
 def test_delegation_requires_admin_authorization():
-    """Verify that issuing a delegation token requires admin authorization (fails with 403 if missing or unauthorized)."""
+    """Verify that issuing a delegation token requires admin authorization (fails with 401 if missing/plaintext, 403 if unauthorized role)."""
     payload = {
         "issuer_agent_id": "FINANCE-AGENT-001",
         "delegate_agent_id": "PROCUREMENT-AGENT-002",
@@ -21,11 +26,19 @@ def test_delegation_requires_admin_authorization():
     res_no_auth = client.post("/identity/delegation/issue", json=payload)
     assert res_no_auth.status_code == 401
 
+    # Plaintext role header returns 401 Unauthorized (privilege escalation blocked)
+    res_raw = client.post(
+        "/identity/delegation/issue",
+        json=payload,
+        headers={"X-Admin-Role": "SYSTEM_ADMIN"},
+    )
+    assert res_raw.status_code == 401
+
     # Auditor role has no issue_delegation permission -> returns 403 Forbidden
     res_auditor = client.post(
         "/identity/delegation/issue",
         json=payload,
-        headers={"X-Admin-Role": "AUDITOR"},
+        headers=AUDITOR_HEADERS,
     )
     assert res_auditor.status_code == 403
 
@@ -42,7 +55,7 @@ def test_delegation_rejects_same_issuer_and_delegate():
     res = client.post(
         "/identity/delegation/issue",
         json=payload,
-        headers={"X-Admin-Role": "SYSTEM_ADMIN"},
+        headers=ADMIN_HEADERS,
     )
     assert res.status_code == 422
     assert "different" in res.json()["detail"].lower()
@@ -61,7 +74,7 @@ def test_delegation_rejects_unregistered_agents():
     res_issuer = client.post(
         "/identity/delegation/issue",
         json=payload_unknown_issuer,
-        headers={"X-Admin-Role": "SYSTEM_ADMIN"},
+        headers=ADMIN_HEADERS,
     )
     assert res_issuer.status_code == 404
 
@@ -76,7 +89,7 @@ def test_delegation_rejects_unregistered_agents():
     res_delegate = client.post(
         "/identity/delegation/issue",
         json=payload_unknown_delegate,
-        headers={"X-Admin-Role": "SYSTEM_ADMIN"},
+        headers=ADMIN_HEADERS,
     )
     assert res_delegate.status_code == 404
 
@@ -114,7 +127,7 @@ def test_delegation_rejects_inactive_agents():
                 "maximum_amount": 1000.0,
                 "ttl_seconds": 3600,
             },
-            headers={"X-Admin-Role": "SYSTEM_ADMIN"},
+            headers=ADMIN_HEADERS,
         )
         assert res.status_code == 409
 
@@ -152,7 +165,7 @@ def test_delegation_rejects_missing_signing_key():
                     "maximum_amount": 1000.0,
                     "ttl_seconds": 3600,
                 },
-                headers={"X-Admin-Role": "SYSTEM_ADMIN"},
+                headers=ADMIN_HEADERS,
             )
             assert res.status_code == 400
             assert "key" in res.json()["detail"].lower()
@@ -170,7 +183,7 @@ def test_delegation_rejects_scope_exceeding_capabilities_or_policy():
             "maximum_amount": 1000.0,
             "ttl_seconds": 3600,
         },
-        headers={"X-Admin-Role": "SYSTEM_ADMIN"},
+        headers=ADMIN_HEADERS,
     )
     assert res_bad_action.status_code == 403
 
@@ -184,7 +197,7 @@ def test_delegation_rejects_scope_exceeding_capabilities_or_policy():
             "maximum_amount": 999999999.0,
             "ttl_seconds": 3600,
         },
-        headers={"X-Admin-Role": "SYSTEM_ADMIN"},
+        headers=ADMIN_HEADERS,
     )
     assert res_excess_amount.status_code == 403
 
@@ -202,7 +215,7 @@ def test_valid_delegation_issuance_and_retrieval():
     res_issue = client.post(
         "/identity/delegation/issue",
         json=payload,
-        headers={"X-Admin-Role": "SYSTEM_ADMIN"},
+        headers=ADMIN_HEADERS,
     )
     assert res_issue.status_code == 200
     data = res_issue.json()

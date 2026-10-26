@@ -72,7 +72,7 @@ def test_adv_1_expired_certificate(adv_setup):
         "policy_id": "FIN-POLICY-001"
     })
 
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     payload = {
         "request_id": f"REQ-EXP-{uuid.uuid4().hex[:6]}",
         "agent_id": "EXP-AGENT-01",
@@ -91,7 +91,7 @@ def test_adv_1_expired_certificate(adv_setup):
 def test_adv_2_modified_request_parameters_after_signing(adv_setup):
     gw = adv_setup["gateway"]
     priv_key = adv_setup["private_key"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     payload = {
         "request_id": f"REQ-MOD-{uuid.uuid4().hex[:6]}",
@@ -115,7 +115,7 @@ def test_adv_2_modified_request_parameters_after_signing(adv_setup):
 def test_adv_3_modified_timestamp_after_signing(adv_setup):
     gw = adv_setup["gateway"]
     priv_key = adv_setup["private_key"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     payload = {
         "request_id": f"REQ-TS-{uuid.uuid4().hex[:6]}",
@@ -139,8 +139,8 @@ def test_adv_3_modified_timestamp_after_signing(adv_setup):
 def test_adv_4_expired_request_header(adv_setup):
     gw = adv_setup["gateway"]
     priv_key = adv_setup["private_key"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    past_iso = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=10)).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
+    past_iso = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=10)).isoformat()
 
     payload = {
         "request_id": f"REQ-EXPH-{uuid.uuid4().hex[:6]}",
@@ -161,7 +161,7 @@ def test_adv_4_expired_request_header(adv_setup):
 def test_adv_5_future_timestamp_skew_attack(adv_setup):
     gw = adv_setup["gateway"]
     priv_key = adv_setup["private_key"]
-    future_iso = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=5)).isoformat()
+    future_iso = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=5)).isoformat()
 
     payload = {
         "request_id": f"REQ-FUT-{uuid.uuid4().hex[:6]}",
@@ -183,7 +183,7 @@ def test_adv_6_direct_api_forged_signature_header_denied(adv_setup):
 
     fake_headers = {
         "X-Gateway-Service": "AgentTrust-ActionGateway-Service",
-        "X-Gateway-Timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "X-Gateway-Timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         "X-Gateway-Signature": "FORGED_SIGNATURE_STRING"
     }
 

@@ -12,7 +12,7 @@ class FailedCommitRecord:
         self.request_id = request_id
         self.payload = payload
         self.error_msg = error_msg
-        self.created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self.created_at = datetime.datetime.now(datetime.UTC).isoformat()
         self.retry_count = retry_count
         self.max_retries = 3
         self.status = status  # PENDING_RETRY, RETRIED_SUCCESS, DEAD_LETTER_QUEUE

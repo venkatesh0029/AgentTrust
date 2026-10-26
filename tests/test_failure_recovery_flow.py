@@ -55,7 +55,7 @@ def test_complete_8step_failure_recovery_sequence():
     fabric.record_action_event = mock_orderer_failure
 
     req_id = f"REQ-REC-{uuid.uuid4().hex[:6]}"
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     payload = {
         "request_id": req_id,
         "agent_id": "FINANCE-AGENT-001",

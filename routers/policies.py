@@ -3,8 +3,9 @@ Policy Engine & Version Control Router.
 Manages versioned agent authorization policies, limits, working hours, and rollbacks.
 """
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Cookie, Header, HTTPException, Request
 from pydantic import BaseModel, Field
+
 from policy_engine.policy_models import PolicyRecord, WorkingHours
 
 router = APIRouter(prefix="/policies", tags=["Policy Engine & Versioning"])
@@ -36,9 +37,23 @@ def get_policy_loader():
     return policy_loader
 
 
-def check_perm(perm: str, x_admin_role: str | None, authorization: str | None):
+def check_perm(
+    perm: str,
+    x_admin_role: str | None = None,
+    authorization: str | None = None,
+    cookie_token: str | None = None,
+    request: Request | None = None,
+    x_csrf_token: str | None = None,
+):
     from server import check_admin_permission
-    return check_admin_permission(perm, x_admin_role, authorization)
+    return check_admin_permission(
+        perm,
+        x_admin_role=x_admin_role,
+        authorization=authorization,
+        cookie_token=cookie_token,
+        request=request,
+        x_csrf_token=x_csrf_token,
+    )
 
 
 @router.get("", summary="List All Active Security Policies")
@@ -60,10 +75,20 @@ def get_policy(policy_id: str):
 @router.post("", summary="Create or Update Versioned Policy")
 def create_or_update_policy(
     req: PolicyCreateRequest,
+    request: Request,
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
-    authorization: str | None = Header(None)
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias="agenttrust_session"),
+    x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
 ):
-    role = check_perm("create_policy", x_admin_role, authorization)
+    role = check_perm(
+        "create_policy",
+        x_admin_role=x_admin_role,
+        authorization=authorization,
+        cookie_token=cookie_token,
+        request=request,
+        x_csrf_token=x_csrf_token,
+    )
     role_val = role.value if hasattr(role, "value") else str(role)
 
     resource = req.allowed_resource
@@ -118,10 +143,20 @@ def create_or_update_policy(
 @router.post("/rollback", summary="Roll Back Policy to Previous Version")
 def rollback_policy(
     req: PolicyRollbackRequest,
+    request: Request,
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
-    authorization: str | None = Header(None)
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias="agenttrust_session"),
+    x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
 ):
-    role = check_perm("rollback_policy", x_admin_role, authorization)
+    role = check_perm(
+        "rollback_policy",
+        x_admin_role=x_admin_role,
+        authorization=authorization,
+        cookie_token=cookie_token,
+        request=request,
+        x_csrf_token=x_csrf_token,
+    )
     role_val = role.value if hasattr(role, "value") else str(role)
 
     loader = get_policy_loader()

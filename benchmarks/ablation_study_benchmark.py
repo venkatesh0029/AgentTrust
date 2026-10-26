@@ -21,7 +21,11 @@ from typing import Any
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from benchmarks.held_out_v2_benchmark import HELD_OUT_ADVERSARIAL_V2, HELD_OUT_BENIGN_V2
-from risk_engine.prompt_injection_guard import HOMOGLYPH_MAP, PROMPT_INJECTION_PATTERNS, PromptInjectionGuard
+from risk_engine.prompt_injection_guard import (
+    HOMOGLYPH_MAP,
+    PROMPT_INJECTION_PATTERNS,
+    PromptInjectionGuard,
+)
 
 
 class AblationStudyBenchmark:
@@ -136,14 +140,24 @@ class AblationStudyBenchmark:
         for var_name, eval_fn in variants.items():
             tp = fp = tn = fn = 0
             for sample in HELD_OUT_BENIGN_V2:
-                payload = {"action": sample["action"], "parameters": dict(sample["parameters"]), "amount": sample.get("amount", 100.0)}
+                b_params = sample.get("parameters")
+                payload = {
+                    "action": str(sample.get("action", "")),
+                    "parameters": dict(b_params) if isinstance(b_params, dict) else {},
+                    "amount": float(str(sample.get("amount", 100.0))),
+                }
                 if eval_fn(payload):
                     fp += 1
                 else:
                     tn += 1
 
             for sample in HELD_OUT_ADVERSARIAL_V2:
-                payload = {"action": sample["action"], "parameters": dict(sample["parameters"]), "amount": sample.get("amount", 500.0)}
+                a_params = sample.get("parameters")
+                payload = {
+                    "action": str(sample.get("action", "")),
+                    "parameters": dict(a_params) if isinstance(a_params, dict) else {},
+                    "amount": float(str(sample.get("amount", 500.0))),
+                }
                 if eval_fn(payload):
                     tp += 1
                 else:

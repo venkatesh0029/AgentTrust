@@ -13,6 +13,62 @@ function initLucideIcons() {
   }
 }
 
+// Authentication & JWT Bearer token management
+const ROLE_CREDS = {
+  SYSTEM_ADMIN: { username: 'admin', password: 'AdminTrust#2026!Secured' },
+  POLICY_ADMIN: { username: 'policy_admin', password: 'PolicyTrust#2026!Secured' },
+  FINANCE_APPROVER: { username: 'finance_approver', password: 'FinanceTrust#2026!Secured' },
+  AUDITOR: { username: 'auditor', password: 'AuditorTrust#2026!Secured' }
+};
+
+const tokenCache = {};
+let csrfTokenCache = null;
+
+// Clean up any legacy tokens from browser localStorage on load (OWASP anti-XSS storage compliance)
+try {
+  ['agenttrust_jwt_token', 'agenttrust_jwt_token_SYSTEM_ADMIN', 'agenttrust_jwt_token_POLICY_ADMIN', 'agenttrust_jwt_token_FINANCE_APPROVER', 'agenttrust_jwt_token_AUDITOR'].forEach(k => localStorage.removeItem(k));
+} catch (e) {
+  // Ignore in sandboxed contexts
+}
+
+async function getAuthToken(role = 'SYSTEM_ADMIN') {
+  // OWASP Hardening: Administrative tokens are maintained strictly in-memory (tokenCache)
+  // and never written to localStorage or sessionStorage.
+  if (tokenCache[role]) return tokenCache[role];
+  const creds = ROLE_CREDS[role] || ROLE_CREDS.SYSTEM_ADMIN;
+  try {
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(creds)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      tokenCache[role] = data.access_token;
+      if (data.csrf_token) csrfTokenCache = data.csrf_token;
+      return data.access_token;
+    } else {
+      console.info(`Authentication required for ${role} (${res.status}). Demo shortcuts inactive.`);
+    }
+  } catch (err) {
+    console.warn(`Dashboard auth attempt for ${role}:`, err);
+  }
+  return null;
+}
+
+async function getAuthHeaders(role = 'SYSTEM_ADMIN', extraHeaders = {}) {
+  const token = await getAuthToken(role);
+  const headers = { ...extraHeaders };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  if (csrfTokenCache) {
+    headers['X-CSRF-Token'] = csrfTokenCache;
+  }
+  return headers;
+}
+
 // Global Operational Mode State
 let currentOperationalMode = "MODE_D_AGENTTRUST_FABRIC";
 
@@ -90,9 +146,10 @@ async function fetchModeStatus() {
 
 async function switchMode(newMode) {
   try {
+    const headers = await getAuthHeaders('SYSTEM_ADMIN', { 'Content-Type': 'application/json' });
     const res = await fetch('/mode', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headers,
       body: JSON.stringify({ mode: newMode })
     });
     if (res.ok) {
@@ -619,9 +676,10 @@ async function fetchPendingApprovals() {
 
 async function approveRequest(approvalId) {
   try {
+    const headers = await getAuthHeaders('FINANCE_APPROVER');
     const res = await fetch(`/approvals/${approvalId}/approve`, {
       method: 'POST',
-      headers: { 'X-Admin-Role': 'SYSTEM_ADMIN' }
+      headers: headers
     });
     if (!res.ok) {
       console.error('Approval failed:', await res.text());
@@ -634,9 +692,10 @@ async function approveRequest(approvalId) {
 
 async function rejectRequest(approvalId) {
   try {
+    const headers = await getAuthHeaders('FINANCE_APPROVER');
     const res = await fetch(`/approvals/${approvalId}/reject`, {
       method: 'POST',
-      headers: { 'X-Admin-Role': 'SYSTEM_ADMIN' }
+      headers: headers
     });
     if (!res.ok) {
       console.error('Rejection failed:', await res.text());
@@ -702,7 +761,8 @@ async function fetchAgentsAndPolicies() {
 
 async function rotateAgentKey(agentId) {
   try {
-    await fetch(`/agents/${agentId}/rotate-key`, { method: 'POST' });
+    const headers = await getAuthHeaders('SYSTEM_ADMIN');
+    await fetch(`/agents/${agentId}/rotate-key`, { method: 'POST', headers: headers });
     refreshAllDashboardData();
   } catch (err) {
     console.error('Error rotating agent key:', err);
@@ -711,7 +771,8 @@ async function rotateAgentKey(agentId) {
 
 async function suspendAgent(agentId) {
   try {
-    await fetch(`/agents/${agentId}/suspend?reason=MANUAL_ADMIN_SUSPEND`, { method: 'POST' });
+    const headers = await getAuthHeaders('SYSTEM_ADMIN');
+    await fetch(`/agents/${agentId}/suspend?reason=MANUAL_ADMIN_SUSPEND`, { method: 'POST', headers: headers });
     refreshAllDashboardData();
   } catch (err) {
     console.error('Error suspending agent:', err);
@@ -720,7 +781,8 @@ async function suspendAgent(agentId) {
 
 async function reactivateAgent(agentId) {
   try {
-    await fetch(`/agents/${agentId}/reactivate`, { method: 'POST' });
+    const headers = await getAuthHeaders('SYSTEM_ADMIN');
+    await fetch(`/agents/${agentId}/reactivate`, { method: 'POST', headers: headers });
     refreshAllDashboardData();
   } catch (err) {
     console.error('Error reactivating agent:', err);
@@ -729,7 +791,8 @@ async function reactivateAgent(agentId) {
 
 async function revokeAgent(agentId) {
   try {
-    await fetch(`/agents/${agentId}/revoke?reason=MANUAL_REVOCATION`, { method: 'POST' });
+    const headers = await getAuthHeaders('SYSTEM_ADMIN');
+    await fetch(`/agents/${agentId}/revoke?reason=MANUAL_REVOCATION`, { method: 'POST', headers: headers });
     refreshAllDashboardData();
   } catch (err) {
     console.error('Error revoking agent:', err);
@@ -739,7 +802,8 @@ async function revokeAgent(agentId) {
 async function deleteAgent(agentId) {
   if (!confirm(`Are you sure you want to delete agent ${agentId}?`)) return;
   try {
-    await fetch(`/agents/${agentId}`, { method: 'DELETE' });
+    const headers = await getAuthHeaders('SYSTEM_ADMIN');
+    await fetch(`/agents/${agentId}`, { method: 'DELETE', headers: headers });
     refreshAllDashboardData();
   } catch (err) {
     console.error('Error deleting agent:', err);
@@ -748,9 +812,10 @@ async function deleteAgent(agentId) {
 
 async function rollbackPolicy(policyId, version) {
   try {
+    const headers = await getAuthHeaders('POLICY_ADMIN', { 'Content-Type': 'application/json' });
     await fetch('/policies/rollback', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headers,
       body: JSON.stringify({ policy_id: policyId, target_version: version })
     });
     refreshAllDashboardData();
@@ -856,9 +921,10 @@ async function triggerEvidenceTampering() {
   }
 
   try {
+    const headers = await getAuthHeaders('SYSTEM_ADMIN', { 'Content-Type': 'application/json' });
     const res = await fetch(`/evidence/${evId}/simulate-tamper`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headers,
       body: JSON.stringify({ field_name: 'amount', new_value: newAmt })
     });
     const data = await res.json();
@@ -955,9 +1021,10 @@ document.getElementById('register-agent-form')?.addEventListener('submit', async
   };
 
   try {
+    const headers = await getAuthHeaders('SYSTEM_ADMIN', { 'Content-Type': 'application/json' });
     await fetch('/agents/register', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headers,
       body: JSON.stringify(reqData)
     });
     closeRegisterModal();

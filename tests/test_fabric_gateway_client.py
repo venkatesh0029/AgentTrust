@@ -6,7 +6,6 @@ import httpx
 
 from fabric.fabric_client import FabricClient
 
-
 TEST_GATEWAY_TOKEN = "test_gateway_token_of_at_least_32_characters_12345"
 TEST_AUTH_HEADERS = {"Authorization": f"Bearer {TEST_GATEWAY_TOKEN}"}
 
@@ -138,17 +137,16 @@ class TestFabricClientGetEvent(unittest.TestCase):
         )
 
         for error in errors:
-            with self.subTest(error=type(error).__name__):
-                with (
-                    patch.dict(
-                        os.environ, {"FABRIC_GATEWAY_MODE": "live"}
-                    ),
-                    patch.object(
-                        httpx.Client, "get", side_effect=error
-                    ),
-                    self.assertRaises(RuntimeError),
-                ):
-                    self.client.get_event("EVT-1")
+            with (
+                self.subTest(error=type(error).__name__), patch.dict(
+                    os.environ, {"FABRIC_GATEWAY_MODE": "live"}
+                ),
+                patch.object(
+                    httpx.Client, "get", side_effect=error
+                ),
+                self.assertRaises(RuntimeError),
+            ):
+                self.client.get_event("EVT-1")
 
     def test_live_mode_malformed_json(self):
         response = MagicMock()

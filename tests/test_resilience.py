@@ -65,7 +65,7 @@ def test_direct_api_bypass_denial(resilience_setup):
 def test_policy_conflict_resolution_most_restrictive(resilience_setup):
     evaluator = resilience_setup["evaluator"]
     loader = resilience_setup["loader"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     p2 = PolicyRecord(
         policy_id="FIN-POLICY-002",
@@ -110,7 +110,7 @@ def test_ledger_failure_recovery_handling(resilience_setup):
     gw = resilience_setup["gateway"]
     fabric = resilience_setup["fabric"]
     priv_key = resilience_setup["private_key"]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     def mock_failing_record(*args, **kwargs):
         raise RuntimeError("Fabric Orderer Network Unavailable")

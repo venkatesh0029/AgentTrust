@@ -34,7 +34,7 @@ class AuditChainRecord:
         self.decision = decision
         self.execution_result = execution_result
         self.previous_record_hash = previous_record_hash
-        self.timestamp = timestamp or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self.timestamp = timestamp or datetime.datetime.now(datetime.UTC).isoformat()
         self.record_hash = self.calculate_record_hash()
 
     def calculate_record_hash(self) -> str:
