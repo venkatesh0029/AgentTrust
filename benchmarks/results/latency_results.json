@@ -1,0 +1,123 @@
+{
+  "title": "AgentTrust Gateway Latency & Concurrency Evaluation",
+  "timestamp": "2026-10-26T18:54:37.182871+00:00",
+  "machine_specs": {
+    "platform": "Windows-11-10.0.26300-SP0",
+    "system": "Windows",
+    "release": "11",
+    "architecture": "AMD64",
+    "processor": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel",
+    "logical_cpu_cores": 16,
+    "physical_cpu_cores": 12,
+    "total_ram_gb": 15.69,
+    "python_version": "3.14.2",
+    "python_implementation": "CPython"
+  },
+  "warm_up_requests": 15,
+  "tier_results": [
+    {
+      "concurrency": 1,
+      "requests_per_worker": 5,
+      "total_requests": 5,
+      "successful_requests": 5,
+      "errors": 0,
+      "timeouts": 0,
+      "error_rate_pct": 0.0,
+      "timeout_rate_pct": 0.0,
+      "wall_time_seconds": 0.679,
+      "throughput_rps": 7.36,
+      "memory_start_mb": 60.43,
+      "memory_end_mb": 60.49,
+      "memory_delta_mb": 0.05,
+      "latency_ms": {
+        "count": 5.0,
+        "mean": 124.133,
+        "stddev": 41.15,
+        "min": 81.843,
+        "max": 173.184,
+        "p50": 115.727,
+        "p90": 168.054,
+        "p95": 170.619,
+        "p99": 172.671
+      }
+    },
+    {
+      "concurrency": 10,
+      "requests_per_worker": 5,
+      "total_requests": 50,
+      "successful_requests": 50,
+      "errors": 0,
+      "timeouts": 0,
+      "error_rate_pct": 0.0,
+      "timeout_rate_pct": 0.0,
+      "wall_time_seconds": 10.711,
+      "throughput_rps": 4.67,
+      "memory_start_mb": 60.53,
+      "memory_end_mb": 61.89,
+      "memory_delta_mb": 1.36,
+      "latency_ms": {
+        "count": 50.0,
+        "mean": 1861.112,
+        "stddev": 216.674,
+        "min": 1331.316,
+        "max": 2287.263,
+        "p50": 1828.393,
+        "p90": 2203.733,
+        "p95": 2241.649,
+        "p99": 2286.29
+      }
+    },
+    {
+      "concurrency": 25,
+      "requests_per_worker": 5,
+      "total_requests": 125,
+      "successful_requests": 125,
+      "errors": 0,
+      "timeouts": 0,
+      "error_rate_pct": 0.0,
+      "timeout_rate_pct": 0.0,
+      "wall_time_seconds": 27.404,
+      "throughput_rps": 4.56,
+      "memory_start_mb": 61.95,
+      "memory_end_mb": 64.61,
+      "memory_delta_mb": 2.67,
+      "latency_ms": {
+        "count": 125.0,
+        "mean": 4698.976,
+        "stddev": 818.738,
+        "min": 2848.286,
+        "max": 6095.748,
+        "p50": 4741.486,
+        "p90": 5764.225,
+        "p95": 5895.894,
+        "p99": 6025.282
+      }
+    },
+    {
+      "concurrency": 50,
+      "requests_per_worker": 5,
+      "total_requests": 250,
+      "successful_requests": 250,
+      "errors": 0,
+      "timeouts": 0,
+      "error_rate_pct": 0.0,
+      "timeout_rate_pct": 0.0,
+      "wall_time_seconds": 59.747,
+      "throughput_rps": 4.18,
+      "memory_start_mb": 64.71,
+      "memory_end_mb": 70.11,
+      "memory_delta_mb": 5.4,
+      "latency_ms": {
+        "count": 250.0,
+        "mean": 10014.753,
+        "stddev": 1567.173,
+        "min": 6299.883,
+        "max": 11776.849,
+        "p50": 10565.74,
+        "p90": 11578.97,
+        "p95": 11674.282,
+        "p99": 11730.21
+      }
+    }
+  ]
+}
