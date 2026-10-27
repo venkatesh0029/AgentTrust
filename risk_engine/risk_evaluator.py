@@ -27,7 +27,8 @@ class RiskEvaluator:
         agent_record: dict[str, Any] | None = None,
         request_timestamp_iso: str = "",
         recent_failed_attempts: int = 0,
-        recent_request_count: int = 0
+        recent_request_count: int = 0,
+        parameters: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         risk_score: float = 0.0
         factors: list[str] = []
@@ -93,9 +94,14 @@ class RiskEvaluator:
         # 8. Prompt Injection Risk Factor
         try:
             from risk_engine.prompt_injection_guard import PromptInjectionGuard
+            scan_params = dict(parameters) if parameters and isinstance(parameters, dict) else {}
+            if "resource" not in scan_params:
+                scan_params["resource"] = resource
+            if "amount" not in scan_params:
+                scan_params["amount"] = str(amount)
             payload_to_scan = {
                 "action": action,
-                "parameters": {"resource": resource, "amount": str(amount)}
+                "parameters": scan_params
             }
             detected, penalty, matched_patterns = PromptInjectionGuard.evaluate_payload(payload_to_scan)
             if detected:
@@ -103,6 +109,7 @@ class RiskEvaluator:
                 factors.append(f"prompt_injection_detected:{','.join(matched_patterns[:2])}")
         except Exception:
             pass
+
 
         # Cap score between 0 and 100
         risk_score = min(max(risk_score, 0), 100)

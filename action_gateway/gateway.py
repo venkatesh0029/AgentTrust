@@ -560,7 +560,8 @@ class ActionGateway:
             resource=resource,
             amount=amount,
             agent_record=agent_record,
-            request_timestamp_iso=timestamp
+            request_timestamp_iso=timestamp,
+            parameters=parameters
         )
 
         # Step 7.5: Capability Delegation Token Chain Check (Normalize top-level delegation token)
@@ -602,6 +603,16 @@ class ActionGateway:
 
         # Step 8: Versioned Policy Engine Evaluation
         policy_id = agent_record.get("policy_id", "NONE")
+        cumulative_amount = 0.0
+        tx_count_in_window = 0
+        if self.persistent_db and hasattr(self.persistent_db, "get_cumulative_volume"):
+            try:
+                p_record = self.policy_evaluator.loader.get_policy(policy_id)
+                win_sec = getattr(p_record, "velocity_window_seconds", 86400) if p_record else 86400
+                cumulative_amount, tx_count_in_window = self.persistent_db.get_cumulative_volume(agent_id, window_seconds=win_sec)
+            except Exception:
+                pass
+
         decision, reason, policy_version, matched_rules = self.policy_evaluator.evaluate(
             policy_id=policy_id,
             action=action,
@@ -609,7 +620,9 @@ class ActionGateway:
             amount=amount,
             request_timestamp_iso=timestamp,
             risk_score=risk_result["risk_score"],
-            risk_level=risk_result["risk_level"]
+            risk_level=risk_result["risk_level"],
+            cumulative_amount=cumulative_amount,
+            transaction_count_in_window=tx_count_in_window
         )
 
         # Step 9: Decision Execution / Branching
@@ -803,11 +816,23 @@ class ActionGateway:
                 resource=resource,
                 amount=amount,
                 agent_record=ag_rec,
-                request_timestamp_iso=now_iso
+                request_timestamp_iso=now_iso,
+                parameters=parameters
             )
             validation_context["risk_result"] = risk_res
 
+
             # 4. Re-evaluate Policy against active policy rules & risk
+            c_amt = 0.0
+            c_cnt = 0
+            if self.persistent_db and hasattr(self.persistent_db, "get_cumulative_volume"):
+                try:
+                    p_rec = self.policy_evaluator.loader.get_policy(policy_id)
+                    w_sec = getattr(p_rec, "velocity_window_seconds", 86400) if p_rec else 86400
+                    c_amt, c_cnt = self.persistent_db.get_cumulative_volume(agent_id, window_seconds=w_sec)
+                except Exception:
+                    pass
+
             dec, rsn, pver, rules = self.policy_evaluator.evaluate(
                 policy_id=policy_id,
                 action=action,
@@ -815,10 +840,13 @@ class ActionGateway:
                 amount=amount,
                 request_timestamp_iso=now_iso,
                 risk_score=risk_res.get("risk_score", 0.0),
-                risk_level=risk_res.get("risk_level", "LOW")
+                risk_level=risk_res.get("risk_level", "LOW"),
+                cumulative_amount=c_amt,
+                transaction_count_in_window=c_cnt
             )
             validation_context["policy_version"] = pver
             validation_context["matched_rules"] = rules
+
 
             if dec == PolicyDecision.BLOCKED:
                 return False, f"POLICY_RECHECK_FAILED: {rsn.value}"

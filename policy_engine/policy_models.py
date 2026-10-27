@@ -28,6 +28,10 @@ class DecisionReason(str, Enum):
     EVIDENCE_INTEGRITY_FAILED = "EVIDENCE_INTEGRITY_FAILED"
     DIRECT_ACCESS_DENIED = "DIRECT_ACCESS_DENIED"
     POLICY_CONFLICT_DENIAL = "POLICY_CONFLICT_DENIAL"
+    CUMULATIVE_LIMIT_EXCEEDED = "CUMULATIVE_LIMIT_EXCEEDED"
+    CUMULATIVE_APPROVAL_REQUIRED = "CUMULATIVE_APPROVAL_REQUIRED"
+    VELOCITY_LIMIT_EXCEEDED = "VELOCITY_LIMIT_EXCEEDED"
+    STRUCTURING_EVASION_SUSPECTED = "STRUCTURING_EVASION_SUSPECTED"
 
 class WorkingHours(BaseModel):
     start: str = "09:00"  # HH:MM 24h format
@@ -42,6 +46,10 @@ class PolicyHistoryEntry(BaseModel):
     changed_at: str
     change_author: str = "POLICY_ADMIN"
     change_reason: str = "Policy Creation / Update"
+    cumulative_maximum_amount: float | None = None
+    cumulative_approval_above: float | None = None
+    velocity_window_seconds: int = 86400
+    max_transactions_per_window: int | None = None
 
 class PolicyRecord(BaseModel):
     policy_id: str
@@ -58,3 +66,8 @@ class PolicyRecord(BaseModel):
     change_author: str = "POLICY_ADMIN"
     change_reason: str = "Initial Policy Setup"
     version_history: list[PolicyHistoryEntry] = Field(default_factory=list)
+    cumulative_maximum_amount: float | None = None
+    cumulative_approval_above: float | None = None
+    velocity_window_seconds: int = 86400
+    max_transactions_per_window: int | None = None
+
