@@ -85,10 +85,14 @@ class PersistentStorageEngine:
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA busy_timeout=15000")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("PRAGMA cache_size=-64000")
+            conn.execute("PRAGMA temp_store=MEMORY")
         except Exception:
             pass
         return conn
+
 
     def _init_db(self) -> None:
         with self._lock:
@@ -242,6 +246,11 @@ class PersistentStorageEngine:
             intent_cols = [row["name"] for row in cursor.fetchall()]
             if "request_fingerprint" not in intent_cols:
                 cursor.execute("ALTER TABLE transaction_intents ADD COLUMN request_fingerprint TEXT")
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_intents_agent_created
+                ON transaction_intents (agent_id, created_at, state)
+            """)
 
             # 11. Cross-Process In-Flight Distributed Locks Table with Leases and Fencing Tokens
             cursor.execute("""
@@ -1227,6 +1236,40 @@ class PersistentStorageEngine:
                         pass
                 return d
             return None
+
+    def get_cumulative_volume(
+        self,
+        agent_id: str,
+        window_seconds: int = 86400,
+        action: str | None = None
+    ) -> tuple[float, int]:
+        """
+        Calculates cumulative amount and count of authorized/committed/completed
+        transactions for an agent within the specified rolling window (default 24h).
+        Excludes REJECTED or FAILED states.
+        """
+        cutoff = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=window_seconds)).isoformat()
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            query = """
+                SELECT COALESCE(SUM(amount), 0.0) as total_amount, COUNT(*) as tx_count
+                FROM transaction_intents
+                WHERE agent_id = ?
+                  AND created_at >= ?
+                  AND state IN ('AUTHORIZED_PENDING_EXECUTION', 'EXECUTED_PENDING_LEDGER', 'COMMITTED', 'COMPLETED')
+            """
+            params: list[Any] = [agent_id, cutoff]
+            if action:
+                query += " AND action = ?"
+                params.append(action)
+            cursor.execute(query, tuple(params))
+            row = cursor.fetchone()
+            if row:
+                return float(row["total_amount"]), int(row["tx_count"])
+            return 0.0, 0
+        finally:
+            conn.close()
 
     def close(self) -> None:
         """Closes resources and checkpoints WAL mode safely."""

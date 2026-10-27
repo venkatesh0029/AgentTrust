@@ -21,10 +21,12 @@ class PolicyEvaluator:
         amount: float,
         request_timestamp_iso: str = "",
         risk_score: float = 0.0,
-        risk_level: str = "LOW"
+        risk_level: str = "LOW",
+        cumulative_amount: float = 0.0,
+        transaction_count_in_window: int = 0
     ) -> tuple[PolicyDecision, DecisionReason, str, list[str]]:
         """
-        Evaluates policy rules with Deny-by-Default, Risk Integration, and Most-Restrictive Enforcement.
+        Evaluates policy rules with Deny-by-Default, Risk Integration, Velocity Caps, Cumulative Limits, and Most-Restrictive Enforcement.
         Returns: (PolicyDecision, DecisionReason, policy_version, matched_rules)
         """
         matched_rules = []
@@ -59,23 +61,42 @@ class PolicyEvaluator:
             matched_rules.append("working_hours_violation")
             return PolicyDecision.BLOCKED, DecisionReason.TIME_WINDOW_VIOLATION, policy.version, matched_rules
 
-        # 4. Maximum Amount Authority Limit Check (Most Restrictive)
+        # 4. Velocity Check: Maximum transactions per rolling window
+        if policy.max_transactions_per_window is not None:
+            if transaction_count_in_window >= policy.max_transactions_per_window:
+                matched_rules.append("velocity_transaction_count_exceeded")
+                return PolicyDecision.BLOCKED, DecisionReason.VELOCITY_LIMIT_EXCEEDED, policy.version, matched_rules
+
+        # 5. Maximum Amount Authority Limit Check (Most Restrictive)
         if amount > policy.maximum_amount:
             matched_rules.append("amount_exceeds_maximum_authority_limit")
             return PolicyDecision.BLOCKED, DecisionReason.AUTHORITY_LIMIT_EXCEEDED, policy.version, matched_rules
 
-        # 5. Risk Score Threshold Escalation (Risk Score > 70 requires human approval)
+        # 6. Cumulative Maximum Amount Check across rolling window
+        if policy.cumulative_maximum_amount is not None:
+            if (cumulative_amount + amount) > policy.cumulative_maximum_amount:
+                matched_rules.append("cumulative_amount_exceeds_maximum_authority_limit")
+                return PolicyDecision.BLOCKED, DecisionReason.CUMULATIVE_LIMIT_EXCEEDED, policy.version, matched_rules
+
+        # 7. Risk Score Threshold Escalation (Risk Score > 70 requires human approval)
         if risk_score > 70 or risk_level == "HIGH":
             matched_rules.append("high_risk_score_escalation_rule")
             return PolicyDecision.PENDING_HUMAN_APPROVAL, DecisionReason.HIGH_VALUE_TRANSACTION, policy.version, matched_rules
 
-        # 6. Human Approval Threshold Check
+        # 8. Single-Transaction Human Approval Threshold Check
         if amount > policy.human_approval_above:
             matched_rules.append("amount_above_human_approval_threshold")
             return PolicyDecision.PENDING_HUMAN_APPROVAL, DecisionReason.HIGH_VALUE_TRANSACTION, policy.version, matched_rules
 
+        # 9. Cumulative Human Approval Threshold Check across rolling window
+        if policy.cumulative_approval_above is not None:
+            if (cumulative_amount + amount) > policy.cumulative_approval_above:
+                matched_rules.append("cumulative_amount_above_human_approval_threshold")
+                return PolicyDecision.PENDING_HUMAN_APPROVAL, DecisionReason.CUMULATIVE_APPROVAL_REQUIRED, policy.version, matched_rules
+
         matched_rules.append("within_authorized_policy_limits")
         return PolicyDecision.ALLOWED, DecisionReason.WITHIN_AUTHORITY_LIMIT, policy.version, matched_rules
+
 
     def resolve_conflicting_policies(
         self, policy_ids: list[str], action: str, resource: str, amount: float, timestamp_iso: str
