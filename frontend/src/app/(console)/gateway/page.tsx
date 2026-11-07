@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { PipelineStrip, DecisionPill, HashText } from "@/components/domain/components";
 import { Card, Button } from "@/components/ui/primitives";
-import { Cpu, Play, RefreshCw, ShieldCheck, AlertTriangle, XCircle, CheckCircle2, Lock, Filter } from "lucide-react";
+import { Cpu, Play, RefreshCw, ShieldCheck, AlertTriangle, XCircle, CheckCircle2, Lock, Filter, Network, ShieldAlert } from "lucide-react";
 import { api, PolicyRecord, GatewaySubmitResponse } from "@/lib/api";
 
 interface ExtendedAgent {
@@ -14,6 +14,7 @@ interface ExtendedAgent {
   role: string;
   status: string;
   policy_id: string;
+  key_version?: number;
   capabilities: string[];
   max_limit: number;
   approval_above: number;
@@ -98,6 +99,7 @@ export default function GatewayPage() {
             role: a.role || "autonomous_agent",
             status: status,
             policy_id: a.policy_id,
+            key_version: a.key_version ?? 1,
             capabilities: caps,
             max_limit: maxLimit,
             approval_above: approvalAbove,
@@ -111,10 +113,14 @@ export default function GatewayPage() {
         setAgents(extendedList);
 
         if (extendedList.length > 0) {
-          const first = extendedList[0];
-          setAgentId(first.agent_id);
-          setAction(first.recommended_action);
-          setAmount(first.recommended_amount);
+          setAgentId((current) => {
+            const exists = extendedList.find(a => a.agent_id === current);
+            if (exists) return current;
+            const first = extendedList[0];
+            setAction(first.recommended_action);
+            setAmount(first.recommended_amount);
+            return first.agent_id;
+          });
         }
       } catch (err) {
         console.error("Failed loading agents:", err);
@@ -124,6 +130,8 @@ export default function GatewayPage() {
     }
 
     loadData();
+    window.addEventListener("focus", loadData);
+    return () => window.removeEventListener("focus", loadData);
   }, []);
 
   // Filter agents by category button
@@ -180,7 +188,7 @@ export default function GatewayPage() {
       },
       nonce: nonce,
       timestamp: timestamp,
-      key_version: 1,
+      key_version: selectedAgent?.key_version ?? 1,
       signature: "AUTO_SIGN", // Backend auto-signs with RSA Private Key for demo agents
     };
 
@@ -204,9 +212,9 @@ export default function GatewayPage() {
       } else if (reason.includes("REVOKED") || reason.includes("CERTIFICATE")) {
         setStoppedStage(2);
         setReasonCode(rawReason || "CERTIFICATE_REVOKED");
-      } else if (reason.includes("SIGNATURE")) {
+      } else if (reason.includes("SIGNATURE") || reason.includes("KEY_VERSION")) {
         setStoppedStage(3);
-        setReasonCode(rawReason || "INVALID_SIGNATURE");
+        setReasonCode(rawReason || (reason.includes("KEY_VERSION") ? "INVALID_KEY_VERSION" : "INVALID_SIGNATURE"));
       } else if (reason.includes("SUSPEND")) {
         setStoppedStage(4);
         setReasonCode(rawReason || "AGENT_SUSPENDED");
@@ -490,6 +498,90 @@ export default function GatewayPage() {
                   </div>
                 )}
               </div>
+
+              {/* On-the-Spot Delegation Authority Context (Step 7.5) */}
+              {(result as any).delegation_context && (
+                <div className="p-3 rounded-lg bg-purple-950/20 border border-purple-500/40 space-y-1.5 text-[11px]">
+                  <div className="flex items-center justify-between pb-1 border-b border-purple-500/20">
+                    <span className="font-bold text-purple-300 flex items-center gap-1.5">
+                      <Network className="w-3.5 h-3.5 text-purple-400" />
+                      Delegation Authority Context (Stage 7.5)
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono">
+                      Depth {(result as any).delegation_context.depth ?? 1}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[10px] pt-1">
+                    <div>
+                      <span className="text-[var(--muted)] block">Delegation Token:</span>
+                      <span className="text-purple-300 font-bold truncate block">{(result as any).delegation_context.token_id}</span>
+                    </div>
+                    <div>
+                      <span className="text-[var(--muted)] block">Remaining Budget:</span>
+                      <span className="text-emerald-400 font-bold">
+                        ₹{Number((result as any).delegation_context.remaining_budget || 0).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="col-span-2 flex items-center gap-1 text-[10px] text-[var(--muted)]">
+                      <span>Lineage:</span>
+                      <span className="text-[var(--fg)] font-bold">{(result as any).delegation_context.issuer_agent_id}</span>
+                      <span>&rarr;</span>
+                      <span className="text-purple-300 font-bold">{(result as any).delegation_context.delegate_agent_id}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* On-the-Spot Behavioral UEBA Evaluation (Step 8.5) */}
+              {(result as any).behavioral_intelligence && (
+                <div className={`p-3 rounded-lg border space-y-1.5 text-[11px] ${
+                  (result as any).behavioral_intelligence.anomaly_score >= 70
+                    ? "bg-rose-950/20 border-rose-500/40"
+                    : (result as any).behavioral_intelligence.anomaly_score >= 35
+                    ? "bg-amber-950/20 border-amber-500/40"
+                    : "bg-cyan-950/20 border-cyan-500/40"
+                }`}>
+                  <div className="flex items-center justify-between pb-1 border-b border-cyan-500/20">
+                    <span className="font-bold text-cyan-300 flex items-center gap-1.5">
+                      <ShieldAlert className="w-3.5 h-3.5 text-cyan-400" />
+                      Behavioral Intelligence UEBA (Stage 8.5)
+                    </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                      (result as any).behavioral_intelligence.anomaly_score >= 70
+                        ? "bg-rose-500 text-white"
+                        : (result as any).behavioral_intelligence.anomaly_score >= 35
+                        ? "bg-amber-500 text-black"
+                        : "bg-cyan-500 text-black"
+                    }`}>
+                      Score: {(result as any).behavioral_intelligence.anomaly_score}/100
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] pt-1">
+                    <span className="text-[var(--muted)]">Enforcement Recommendation:</span>
+                    <span className="font-bold text-[var(--fg)]">{(result as any).behavioral_intelligence.enforcement}</span>
+                  </div>
+
+                  {/* Binary Behavior Flags (0/1) */}
+                  {(result as any).behavioral_intelligence.flags && (
+                    <div className="flex items-center gap-1.5 text-[9px] pt-1">
+                      <span className="text-[var(--muted)]">Flags:</span>
+                      <span className={`px-1 py-0.2 rounded border ${(result as any).behavioral_intelligence.flags.unusual_amount ? "bg-rose-500/20 text-rose-400 border-rose-500/30 font-bold" : "text-[var(--subtle)] border-transparent"}`}>Amt:{(result as any).behavioral_intelligence.flags.unusual_amount ? "1":"0"}</span>
+                      <span className={`px-1 py-0.2 rounded border ${(result as any).behavioral_intelligence.flags.unfamiliar_recipient ? "bg-rose-500/20 text-rose-400 border-rose-500/30 font-bold" : "text-[var(--subtle)] border-transparent"}`}>Dest:{(result as any).behavioral_intelligence.flags.unfamiliar_recipient ? "1":"0"}</span>
+                      <span className={`px-1 py-0.2 rounded border ${(result as any).behavioral_intelligence.flags.unusual_schedule ? "bg-amber-500/20 text-amber-400 border-amber-500/30 font-bold" : "text-[var(--subtle)] border-transparent"}`}>Time:{(result as any).behavioral_intelligence.flags.unusual_schedule ? "1":"0"}</span>
+                      <span className={`px-1 py-0.2 rounded border ${(result as any).behavioral_intelligence.flags.burst_velocity ? "bg-purple-500/20 text-purple-400 border-purple-500/30 font-bold" : "text-[var(--subtle)] border-transparent"}`}>Burst:{(result as any).behavioral_intelligence.flags.burst_velocity ? "1":"0"}</span>
+                      <span className={`px-1 py-0.2 rounded border ${(result as any).behavioral_intelligence.flags.sequence_anomaly ? "bg-rose-500/20 text-rose-400 border-rose-500/30 font-bold" : "text-[var(--subtle)] border-transparent"}`}>Seq:{(result as any).behavioral_intelligence.flags.sequence_anomaly ? "1":"0"}</span>
+                    </div>
+                  )}
+
+                  {/* Explainable reasons */}
+                  {Array.isArray((result as any).behavioral_intelligence.explainable_reasons) && (
+                    <p className="text-[10px] text-[var(--muted)] pt-1 italic border-t border-[var(--border)]/40">
+                      &bull; {(result as any).behavioral_intelligence.explainable_reasons[0]}
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div>
                 <span className="text-[var(--muted)] block mb-1">Raw Gateway Response Payload:</span>

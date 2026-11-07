@@ -17,7 +17,8 @@ class RBACManager:
             "register_agent", "revoke_agent", "suspend_agent", "reactivate_agent",
             "rotate_agent_key", "delete_agent", "view_agents", "view_policies",
             "view_audit", "view_evidence", "verify_evidence", "view_blockchain",
-            "switch_mode", "simulate_tamper", "issue_delegation"
+            "switch_mode", "simulate_tamper", "issue_delegation", "manage_secrets",
+            "view_secret_metadata"
         ],
         AdminRole.POLICY_ADMIN: [
             "create_policy", "update_policy", "rollback_policy", "view_policy",
@@ -29,7 +30,7 @@ class RBACManager:
         ],
         AdminRole.AUDITOR: [
             "view_audit", "view_evidence", "verify_evidence", "view_blockchain",
-            "view_agents", "view_policies"
+            "view_agents", "view_policies", "view_secret_metadata"
         ]
     }
 

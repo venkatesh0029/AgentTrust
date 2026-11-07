@@ -58,7 +58,7 @@ class TestLiveMultiprocessAndBoundaryAssurance(unittest.TestCase):
         self.evidence_store = EvidenceStore(db_path=self.db_path)
         self.approval_manager = HumanApprovalManager(db_path=self.db_path)
         self.fabric_client = FabricClient()
-        self.finance_api = ProtectedFinanceAPI()
+        self.finance_api = ProtectedFinanceAPI(persistent_db_path=self.db_path)
         self.replay_tracker = RequestTracker(300, persistent_db=self.persistent_db)
         self.retry_queue = RetryQueueManager(persistent_db=self.persistent_db)
 

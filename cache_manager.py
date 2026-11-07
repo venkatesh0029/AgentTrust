@@ -32,7 +32,7 @@ class CacheManager:
         redis_db: int = 0,
         default_ttl: int = 300
     ):
-        self.host = redis_host or os.environ.get("REDIS_HOST", "localhost")
+        self.host = str(redis_host or os.environ.get("REDIS_HOST") or "127.0.0.1")
         self.port = redis_port or int(os.environ.get("REDIS_PORT", 6379))
         self.db = redis_db
         self.default_ttl = default_ttl
@@ -53,8 +53,10 @@ class CacheManager:
                 host=self.host,
                 port=self.port,
                 db=self.db,
-                socket_connect_timeout=0.5,
-                socket_timeout=0.5,
+                socket_connect_timeout=0.1,
+                socket_timeout=0.1,
+                retry_on_timeout=False,
+                retry=None,
                 decode_responses=True
             )
             # Test ping

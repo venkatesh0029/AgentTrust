@@ -85,6 +85,104 @@ class CertificateManager:
         """Alias for is_revoked."""
         return self.is_revoked(fingerprint)
 
+    def validate_agent_csr(
+        self, csr_pem: str, expected_agent_id: str, expected_organization: str | None = None
+    ) -> x509.CertificateSigningRequest:
+        """
+        Validates PKCS#10 Certificate Signing Request (CSR):
+        1. Validates PEM structure.
+        2. Validates cryptographic proof-of-possession signature.
+        3. Validates Subject Common Name (CN) matches requested agent_id.
+        4. Validates Subject Alternative Name (SAN) identity claims.
+        """
+        try:
+            csr = x509.load_pem_x509_csr(csr_pem.encode('utf-8'))
+        except Exception as e:
+            raise ValueError(f"INVALID_CSR_FORMAT: Unable to parse PEM-encoded CSR: {e!s}")
+
+        if not csr.is_signature_valid:
+            raise ValueError("INVALID_CSR_SIGNATURE: CSR proof-of-possession signature verification failed.")
+
+        cn_attrs = csr.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+        if not cn_attrs:
+            raise ValueError("INVALID_CSR_SUBJECT: CSR subject does not contain Common Name (CN).")
+
+        cn_value = str(cn_attrs[0].value)
+        if cn_value != expected_agent_id:
+            raise ValueError(
+                f"CSR_IDENTITY_MISMATCH: CSR Common Name '{cn_value}' does not match requested agent_id '{expected_agent_id}'."
+            )
+
+        try:
+            san_ext = csr.extensions.get_extension_for_oid(x509.ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+            expected_urn = f"urn:agenttrust:agent:{expected_agent_id}"
+            for uri in (san_ext.value if isinstance(san_ext.value, x509.SubjectAlternativeName) else []):
+                if isinstance(uri, x509.UniformResourceIdentifier):
+                    if uri.value.startswith("urn:agenttrust:agent:") and uri.value != expected_urn:
+                        raise ValueError(
+                            f"CSR_IDENTITY_MISMATCH: CSR SAN URI '{uri.value}' does not match requested agent_id '{expected_agent_id}'."
+                        )
+        except x509.ExtensionNotFound:
+            pass
+
+        return csr
+
+    def issue_agent_certificate_from_csr(
+        self,
+        csr_pem: str,
+        agent_id: str,
+        agent_name: str | None = None,
+        validity_days: int = 365,
+        organization: str | None = None
+    ) -> tuple[str, str]:
+        """
+        Issues an X.509 certificate for an AI agent directly from a validated PKCS#10 CSR.
+        The agent client retains exclusive ownership of its private key.
+        Returns: (cert_pem, cert_fingerprint)
+        """
+        csr = self.validate_agent_csr(
+            csr_pem=csr_pem,
+            expected_agent_id=agent_id,
+            expected_organization=organization
+        )
+
+        agent_public_key = csr.public_key()
+        org_name = organization or "AgentTrust Managed Agent"
+        given_name = agent_name or agent_id
+
+        subject = x509.Name([
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, org_name),
+            x509.NameAttribute(NameOID.COMMON_NAME, agent_id),
+            x509.NameAttribute(NameOID.GIVEN_NAME, given_name)
+        ])
+
+        start_time = datetime.datetime.now(datetime.UTC)
+        end_time = start_time + datetime.timedelta(days=validity_days)
+
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(self.ca_certificate.subject)
+            .public_key(agent_public_key)
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(start_time)
+            .not_valid_after(end_time)
+            .add_extension(
+                x509.BasicConstraints(ca=False, path_length=None), critical=True
+            )
+            .add_extension(
+                x509.SubjectAlternativeName([
+                    x509.UniformResourceIdentifier(f"urn:agenttrust:agent:{agent_id}")
+                ]),
+                critical=False
+            )
+            .sign(self.ca_private_key, hashes.SHA256())
+        )
+
+        cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode('utf-8')
+        fingerprint = self.calculate_fingerprint(cert_pem)
+        return cert_pem, fingerprint
+
     def issue_agent_certificate_from_pubkey(
         self, agent_id: str, agent_name: str, public_key_pem: str, validity_days: int = 365
     ) -> tuple[str, str]:

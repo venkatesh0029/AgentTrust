@@ -237,12 +237,13 @@ export interface AuthSession {
 export const isDemoAuthMode = (): boolean => {
   if (
     process.env.NODE_ENV === "production" ||
-    process.env.NEXT_PUBLIC_ENV === "production"
+    process.env.NEXT_PUBLIC_ENV === "production" ||
+    process.env.NEXT_PUBLIC_DEMO_MODE === "false"
   ) {
     return false;
   }
 
-  return process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+  return true;
 };
 
 export const DEMO_CREDENTIALS: Record<string, { username: string; password: string }> = {
@@ -252,7 +253,42 @@ export const DEMO_CREDENTIALS: Record<string, { username: string; password: stri
   AUDITOR: { username: "auditor", password: "AuditorTrust#2026!Secured" },
 };
 
-// OWASP anti-XSS Hardening: In-memory session store; tokens are NEVER stored in localStorage or sessionStorage
+// Scoped sessionStorage key for persisting JWT session across tab refreshes
+const SESSION_STORAGE_KEY = "agenttrust_auth_session";
+
+function saveSessionToStorage(session: AuthSession | null, csrfToken: string | null) {
+  if (typeof window !== "undefined") {
+    try {
+      if (session) {
+        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+        if (csrfToken) sessionStorage.setItem("agenttrust_csrf_token", csrfToken);
+      } else {
+        sessionStorage.removeItem(SESSION_STORAGE_KEY);
+        sessionStorage.removeItem("agenttrust_csrf_token");
+      }
+    } catch {}
+  }
+}
+
+function restoreSessionFromStorage(): AuthSession | null {
+  if (typeof window !== "undefined") {
+    try {
+      const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as AuthSession;
+        if (parsed && parsed.token && Date.now() < parsed.expiresAt) {
+          const csrf = sessionStorage.getItem("agenttrust_csrf_token");
+          if (csrf) inMemoryCsrfToken = csrf;
+          inMemoryRoleTokens[parsed.role] = { token: parsed.token, expiresAt: parsed.expiresAt };
+          return parsed;
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
+// In-memory session store; tokens are scoped in memory and session storage
 let inMemorySession: AuthSession | null = null;
 let inMemoryCsrfToken: string | null = null;
 const inMemoryRoleTokens: Record<string, { token: string; expiresAt: number }> = {};
@@ -298,7 +334,7 @@ export const api = {
     const data = LoginResponseSchema.parse(await res.json());
     const expiresAt = Date.now() + (data.expires_in || 28800) * 1000;
 
-    // Maintain token strictly in-memory
+    // Maintain token strictly in-memory and scoped session storage
     inMemorySession = {
       token: data.access_token,
       role: data.role,
@@ -307,6 +343,7 @@ export const api = {
     };
     inMemoryCsrfToken = (data as { csrf_token?: string }).csrf_token || null;
     inMemoryRoleTokens[data.role] = { token: data.access_token, expiresAt };
+    saveSessionToStorage(inMemorySession, inMemoryCsrfToken);
 
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("agenttrust-auth-changed", { detail: data }));
@@ -328,6 +365,7 @@ export const api = {
     inMemorySession = null;
     inMemoryCsrfToken = null;
     Object.keys(inMemoryRoleTokens).forEach((k) => delete inMemoryRoleTokens[k]);
+    saveSessionToStorage(null, null);
     if (typeof window !== "undefined") {
       try {
         [
@@ -349,13 +387,17 @@ export const api = {
       });
       if (res.ok) {
         const data = await res.json();
+        const existingToken = inMemorySession?.token || restoreSessionFromStorage()?.token || "";
         inMemorySession = {
-          token: inMemorySession?.token || "",
+          token: existingToken,
           role: data.role,
           username: data.username,
           expiresAt: (data.expires_at || 0) * 1000,
         };
         inMemoryCsrfToken = data.csrf_token || inMemoryCsrfToken;
+        if (existingToken) {
+          saveSessionToStorage(inMemorySession, inMemoryCsrfToken);
+        }
         return inMemorySession;
       }
     } catch {
@@ -365,6 +407,9 @@ export const api = {
   },
 
   getStoredAuth(): AuthSession | null {
+    if (!inMemorySession) {
+      inMemorySession = restoreSessionFromStorage();
+    }
     if (inMemorySession) {
       if (Date.now() > inMemorySession.expiresAt) {
         this.logout();
@@ -380,9 +425,9 @@ export const api = {
       return roleOrToken;
     }
 
-    // 1. Check existing in-memory session
+    // 1. Check existing in-memory / session storage session
     const currentSession = this.getStoredAuth();
-    if (currentSession?.token) {
+    if (currentSession?.token && currentSession.token.startsWith("eyJ")) {
       if (!roleOrToken || currentSession.role === roleOrToken) {
         return currentSession.token;
       }
@@ -392,29 +437,23 @@ export const api = {
     const targetRole = roleOrToken && DEMO_CREDENTIALS[roleOrToken] ? roleOrToken : null;
     if (targetRole && inMemoryRoleTokens[targetRole]) {
       const entry = inMemoryRoleTokens[targetRole];
-      if (Date.now() < entry.expiresAt) {
+      if (Date.now() < entry.expiresAt && entry.token.startsWith("eyJ")) {
         return entry.token;
       }
     }
 
-    // 3. In production, check if active HttpOnly session cookie exists
-    if (!isDemoAuthMode()) {
+    // 3. Fallback: Authenticate as the target role or default admin
+    const creds = targetRole ? DEMO_CREDENTIALS[targetRole] : DEMO_CREDENTIALS.SYSTEM_ADMIN;
+    try {
+      const loginRes = await this.login(creds.username, creds.password);
+      return loginRes.access_token;
+    } catch {
       const serverSession = await this.checkServerSession();
-      if (serverSession) {
-        return serverSession.token || "COOKIE_AUTHENTICATED";
+      if (serverSession?.token && serverSession.token.startsWith("eyJ")) {
+        return serverSession.token;
       }
       return "";
     }
-
-    // 4. Demo mode only (development)
-    if (targetRole) {
-      const creds = DEMO_CREDENTIALS[targetRole];
-      const loginRes = await this.login(creds.username, creds.password);
-      return loginRes.access_token;
-    }
-
-    const adminLogin = await this.login("admin", "AdminTrust#2026!Secured");
-    return adminLogin.access_token;
   },
 
   getAuthHeaders(roleOrToken?: string): Record<string, string> {
@@ -428,13 +467,13 @@ export const api = {
     }
     if (roleOrToken && inMemoryRoleTokens[roleOrToken]) {
       const entry = inMemoryRoleTokens[roleOrToken];
-      if (Date.now() < entry.expiresAt) {
+      if (Date.now() < entry.expiresAt && entry.token.startsWith("eyJ")) {
         headers["Authorization"] = `Bearer ${entry.token}`;
         return headers;
       }
     }
     const session = this.getStoredAuth();
-    if (session?.token) {
+    if (session?.token && session.token.startsWith("eyJ")) {
       headers["Authorization"] = `Bearer ${session.token}`;
       return headers;
     }
@@ -457,9 +496,10 @@ export const api = {
 
   async setMode(mode: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/mode`, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...authHeaders,
@@ -474,7 +514,7 @@ export const api = {
   },
 
   async fetchAgents(): Promise<AgentRecord[]> {
-    const res = await fetch(`${API_BASE}/agents`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/agents`, { cache: "no-store", credentials: "include" });
     if (!res.ok) throw new Error(`Fetch agents failed (${res.status})`);
     const data = await res.json();
     const parsed = AgentsListSchema.parse(data);
@@ -483,9 +523,10 @@ export const api = {
 
   async updateAgentStatus(agentId: string, status: string, reason: string = "", roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/agents/${agentId}/status`, {
       method: "PATCH",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...authHeaders,
@@ -501,57 +542,73 @@ export const api = {
 
   async suspendAgent(agentId: string, reason: string = "ADMIN_SUSPENSION", roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/agents/${agentId}/suspend?reason=${encodeURIComponent(reason)}`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders },
     });
-    if (!res.ok) throw new Error(`Suspend agent failed (${res.status})`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Suspend agent failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Suspend agent failed (${res.status})`);
+    }
     return res.json();
   },
 
   async reactivateAgent(agentId: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/agents/${agentId}/reactivate`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders },
     });
-    if (!res.ok) throw new Error(`Reactivate agent failed (${res.status})`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Reactivate agent failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Reactivate agent failed (${res.status})`);
+    }
     return res.json();
   },
 
   async revokeAgent(agentId: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/agents/${agentId}/revoke`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders },
     });
-    if (!res.ok) throw new Error(`Revoke agent failed (${res.status})`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Revoke agent failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Revoke agent failed (${res.status})`);
+    }
     return res.json();
   },
 
   async rotateAgentKey(agentId: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/agents/${agentId}/rotate-key`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders },
     });
-    if (!res.ok) throw new Error(`Rotate key failed (${res.status})`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Rotate key failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Rotate key failed (${res.status})`);
+    }
     return res.json();
   },
 
   async fetchAuditEvents(): Promise<AuditRecord[]> {
-    const res = await fetch(`${API_BASE}/audit/events`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/audit/events`, { cache: "no-store", credentials: "include" });
     if (!res.ok) throw new Error(`Fetch audit events failed (${res.status})`);
     const data = await res.json();
     return data.events || [];
   },
 
   async fetchPolicies(): Promise<PolicyRecord[]> {
-    const res = await fetch(`${API_BASE}/policies`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/policies`, { cache: "no-store", credentials: "include" });
     if (!res.ok) throw new Error(`Fetch policies failed (${res.status})`);
     const data = await res.json();
     const parsed = PoliciesListSchema.parse(data);
@@ -560,9 +617,10 @@ export const api = {
 
   async rollbackPolicy(policyId: string, targetVersion: string, roleOrToken: string = "POLICY_ADMIN"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/policies/rollback`, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...authHeaders,
@@ -577,7 +635,7 @@ export const api = {
   },
 
   async fetchPendingApprovals(): Promise<ApprovalTicket[]> {
-    const res = await fetch(`${API_BASE}/approvals/pending`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/approvals/pending`, { cache: "no-store", credentials: "include" });
     if (!res.ok) throw new Error(`Fetch approvals failed (${res.status})`);
     const data = await res.json();
     const parsed = PendingApprovalsSchema.parse(data);
@@ -586,9 +644,10 @@ export const api = {
 
   async approveTicket(approvalId: string, roleOrToken: string = "FINANCE_APPROVER"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/approvals/${approvalId}/approve`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders },
     });
     if (!res.ok) {
@@ -600,12 +659,16 @@ export const api = {
 
   async rejectTicket(approvalId: string, reason: string = "REJECTED_BY_HUMAN", roleOrToken: string = "FINANCE_APPROVER"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/approvals/${approvalId}/reject?reason=${encodeURIComponent(reason)}`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders },
     });
-    if (!res.ok) throw new Error(`Reject ticket failed (${res.status})`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Reject ticket failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Reject ticket failed (${res.status})`);
+    }
     return res.json();
   },
 
@@ -690,9 +753,10 @@ export const api = {
 
   async simulateEvidenceTamper(evidenceId: string, fieldName: string, newValue: unknown, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/evidence/${evidenceId}/simulate-tamper`, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...authHeaders,
@@ -708,9 +772,10 @@ export const api = {
 
   async simulateChainTamper(sequenceNumber: number, fieldName: string, newValue: unknown, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/audit/chain/simulate-tamper`, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...authHeaders,
@@ -726,9 +791,10 @@ export const api = {
 
   async registerAgent(data: Record<string, unknown>, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/agents/register`, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...authHeaders,
@@ -763,20 +829,25 @@ export const api = {
 
   async deleteAgent(agentId: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/agents/${agentId}`, {
       method: "DELETE",
+      credentials: "include",
       headers: { ...authHeaders },
     });
-    if (!res.ok) throw new Error(`Delete agent failed (${res.status})`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Delete agent failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Delete agent failed (${res.status})`);
+    }
     return res.json();
   },
 
   async createPolicy(data: Record<string, unknown>, roleOrToken: string = "POLICY_ADMIN"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
-    const authHeaders = this.getAuthHeaders(roleOrToken || token);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/policies`, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...authHeaders,
@@ -921,5 +992,348 @@ export const api = {
     });
     if (!res.ok) throw new Error(`Fabric chaincode query failed (${res.status})`);
     return res.json();
+  },
+
+  async fetchDelegationGraph(): Promise<DelegationGraphResponse> {
+    const res = await fetch(`${API_BASE}/delegation/graph`, { cache: "no-store", credentials: "include" });
+    if (!res.ok) throw new Error(`Fetch delegation graph failed (${res.status})`);
+    return res.json();
+  },
+
+  async issueGraphDelegation(data: {
+    issuer_agent_id: string;
+    delegate_agent_id: string;
+    allowed_actions: string[];
+    delegated_budget: number;
+    ttl_seconds?: number;
+    reason?: string;
+  }, roleOrToken: string = "SYSTEM_ADMIN"): Promise<unknown> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
+    const res = await fetch(`${API_BASE}/delegation/graph/issue`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Issue delegation failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Issue delegation failed (${res.status})`);
+    }
+    return res.json();
+  },
+
+  async revokeGraphDelegation(tokenId: string, reason: string = "MANUAL_ADMIN_REVOCATION", roleOrToken: string = "SYSTEM_ADMIN"): Promise<unknown> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
+    const res = await fetch(`${API_BASE}/delegation/graph/revoke`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({ token_id: tokenId, reason }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Revoke delegation failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Revoke delegation failed (${res.status})`);
+    }
+    return res.json();
+  },
+
+  async simulateGraphAttack(scenario: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<unknown> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
+    const res = await fetch(`${API_BASE}/delegation/graph/simulate-attack`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({ scenario }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Simulate attack failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Simulate attack failed (${res.status})`);
+    }
+    return res.json();
+  },
+
+  async resetGraphDelegation(roleOrToken: string = "SYSTEM_ADMIN"): Promise<unknown> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
+    const res = await fetch(`${API_BASE}/delegation/graph/reset`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        ...authHeaders,
+      },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Reset graph failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Reset graph failed (${res.status})`);
+    }
+    return res.json();
+  },
+
+  async executeDelegatedActionOnSpot(data: {
+    agent_id: string;
+    action: string;
+    amount: number;
+    resource?: string;
+    token_id?: string;
+  }, roleOrToken: string = "SYSTEM_ADMIN"): Promise<unknown> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
+    const res = await fetch(`${API_BASE}/delegation/graph/execute-on-spot`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Execute delegated action failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Execute delegated action failed (${res.status})`);
+    }
+    return res.json();
+  },
+
+  async executeBehaviorActionOnSpot(data: {
+    agent_id: string;
+    action: string;
+    amount: number;
+    resource?: string;
+  }, roleOrToken: string = "SYSTEM_ADMIN"): Promise<unknown> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
+    const res = await fetch(`${API_BASE}/behavior/execute-on-spot`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Execute live behavior action failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Execute live behavior action failed (${res.status})`);
+    }
+    return res.json();
+  },
+
+  async fetchBehaviorSummary(): Promise<BehaviorSummaryResponse> {
+    const res = await fetch(`${API_BASE}/behavior/summary`, { cache: "no-store", credentials: "include" });
+    if (!res.ok) throw new Error(`Fetch behavior summary failed (${res.status})`);
+    return res.json();
+  },
+
+  async simulateBehaviorScenario(scenario: string, roleOrToken: string = "SYSTEM_ADMIN"): Promise<unknown> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
+    const res = await fetch(`${API_BASE}/behavior/simulate-scenario`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({ scenario }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Simulation failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Simulation failed (${res.status})`);
+    }
+    return res.json();
+  },
+
+  async analyzeBehaviorRequest(data: {
+    agent_id: string;
+    action: string;
+    resource?: string;
+    amount?: number;
+    request_timestamp_iso?: string;
+    simulate_window_burst?: number;
+  }, roleOrToken: string = "SYSTEM_ADMIN"): Promise<unknown> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
+    const res = await fetch(`${API_BASE}/behavior/analyze`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Analyze failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Analyze failed (${res.status})`);
+    }
+    return res.json();
+  },
+
+  async resetBehaviorProfiles(roleOrToken: string = "SYSTEM_ADMIN"): Promise<unknown> {
+    const token = await this.ensureAuth(roleOrToken);
+    const authHeaders = this.getAuthHeaders(token || roleOrToken);
+    const res = await fetch(`${API_BASE}/behavior/reset`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        ...authHeaders,
+      },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Reset profiles failed (${res.status})` }));
+      throw new Error((err as { detail?: string }).detail || `Reset profiles failed (${res.status})`);
+    }
+    return res.json();
   }
 };
+
+export interface DelegationNode {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  organization: string;
+  status: string;
+  base_budget: number;
+  allocated_budget: number;
+  remaining_budget: number;
+  spent_budget: number;
+  effective_actions: string[];
+  depth: number;
+  parent_agent_id: string | null;
+  incoming_token_id: string | null;
+  risk_score: number;
+  blast_radius: {
+    score: number;
+    risk_level: string;
+    mitigated_percentage: number;
+    without_policies_score: number;
+    with_policies_score: number;
+    impact_breakdown: {
+      financial_exposure: number;
+      lateral_movement: number;
+      destructive_ops: number;
+      data_exfiltration: number;
+    };
+  };
+}
+
+export interface DelegationEdge {
+  token_id: string;
+  issuer_agent_id: string;
+  delegate_agent_id: string;
+  delegated_actions: string[];
+  delegated_budget: number;
+  spent_budget: number;
+  depth: number;
+  status: string;
+  issued_at: number;
+  expires_at: number;
+  revocation_reason?: string | null;
+  parent_token_id?: string | null;
+  signature: string;
+}
+
+export interface DelegationGraphSummary {
+  total_agents: number;
+  total_delegations: number;
+  active_delegations: number;
+  revoked_delegations: number;
+  max_depth_observed: number;
+  max_depth_limit: number;
+  aggregate_delegated_budget: number;
+  aggregate_spent_budget: number;
+  overall_blast_radius_score: number;
+  risk_reduction_percentage: number;
+}
+
+export interface DelegationAuditRecord {
+  event_id: string;
+  event_type: string;
+  issuer_agent_id?: string | null;
+  delegate_agent_id?: string | null;
+  token_id?: string | null;
+  decision: string;
+  details: Record<string, unknown>;
+  timestamp: string;
+  record_hash: string;
+}
+
+export interface DelegationGraphResponse {
+  nodes: DelegationNode[];
+  edges: DelegationEdge[];
+  summary: DelegationGraphSummary;
+  audit_trail: DelegationAuditRecord[];
+}
+
+export interface BehaviorFlags {
+  unusual_amount: boolean;
+  unfamiliar_recipient: boolean;
+  unusual_schedule: boolean;
+  burst_velocity: boolean;
+  sequence_anomaly: boolean;
+}
+
+export interface BehaviorEvent {
+  event_id: string;
+  request_id: string;
+  agent_id: string;
+  action: string;
+  resource: string;
+  amount: number;
+  timestamp: string;
+  flags: BehaviorFlags;
+  anomaly_score: number;
+  risk_level: string;
+  enforcement: string;
+  explainable_reasons: string[];
+  insights: {
+    agent_insights?: Record<string, unknown>;
+    destination_insights?: Record<string, unknown>;
+    activity_insights?: Record<string, unknown>;
+  };
+}
+
+export interface AgentBehaviorProfile {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  sample_count: number;
+  amount_mean: number;
+  amount_std: number;
+  amount_min: number;
+  amount_max: number;
+  daily_frequency_mean: number;
+  daily_frequency_std: number;
+  hourly_burst_threshold: number;
+  known_destinations: string[];
+  schedule_start_hour: number;
+  schedule_end_hour: number;
+  action_transitions: Record<string, Record<string, number>>;
+  baseline_risk_score: number;
+}
+
+export interface BehaviorSummaryResponse {
+  monitored_agents: number;
+  total_events_analyzed: number;
+  anomalies_detected: number;
+  critical_deviations_count: number;
+  top_anomalous_entities: Array<{
+    agent_id: string;
+    max_anomaly_score: number;
+    profile?: AgentBehaviorProfile;
+  }>;
+  recent_events: BehaviorEvent[];
+  profiles: AgentBehaviorProfile[];
+}

@@ -21,6 +21,8 @@ class RegisterAgentRequest(BaseModel):
     agent_version: str = Field("1.0")
     public_key: str | None = None
     public_key_pem: str | None = None
+    csr: str | None = None
+    csr_pem: str | None = None
 
 
 class AgentStatusUpdateRequest(BaseModel):
@@ -32,6 +34,7 @@ class AgentStatusUpdateRequest(BaseModel):
 class KeyRotationRequest(BaseModel):
     agent_id: str
     new_public_key_pem: str | None = None
+    csr_pem: str | None = None
 
 
 def get_agent_registry():
@@ -79,19 +82,34 @@ def register_agent(
     caps = req.capabilities if req.capabilities else (req.roles if req.roles else ["finance_agent"])
     role_name = req.role if req.role else (req.roles[0] if req.roles else "finance_agent")
     pub_key = req.public_key or req.public_key_pem
+    csr_input = req.csr_pem or req.csr
 
-    result = registry.register_agent(
-        agent_id=req.agent_id,
-        agent_name=req.agent_name,
-        owner=req.owner,
-        capabilities=caps,
-        policy_id=req.policy_id,
-        agent_version=req.agent_version,
-        organization=req.organization,
-        role=role_name,
-        public_key_pem=pub_key
-    )
-    from server import cache_manager, fabric_client
+    try:
+        result = registry.register_agent(
+            agent_id=req.agent_id,
+            agent_name=req.agent_name,
+            owner=req.owner,
+            capabilities=caps,
+            policy_id=req.policy_id,
+            agent_version=req.agent_version,
+            organization=req.organization,
+            role=role_name,
+            public_key_pem=pub_key,
+            csr_pem=csr_input
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    from server import _DEMO_CLIENT_TEST_KEYS, AGENT_PRIVATE_KEYS, _save_demo_keys_to_disk, cache_manager, fabric_client
+    if result.get("private_key"):
+        _DEMO_CLIENT_TEST_KEYS[req.agent_id] = result["private_key"]
+        AGENT_PRIVATE_KEYS[req.agent_id] = result["private_key"]
+        _save_demo_keys_to_disk()
+
+    # Security invariant: Never return private key material when CSR or public key is supplied
+    if csr_input or pub_key:
+        result.pop("private_key", None)
+
     try:
         fabric_client.chaincode.RegisterAgent(req.agent_id, req.owner, result["certificate_fingerprint"])
         cache_manager.delete("agents:list")
@@ -99,6 +117,28 @@ def register_agent(
     except Exception:
         pass
     return {"status": "SUCCESS", "success": True, "agent": result, "authorized_by": role.value}
+
+
+@router.post("/register-csr", summary="Register New Agent using PKCS#10 CSR")
+def register_agent_csr_endpoint(
+    req: RegisterAgentRequest,
+    request: Request,
+    x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias="agenttrust_session"),
+    x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
+):
+    csr_input = req.csr_pem or req.csr
+    if not csr_input:
+        raise HTTPException(status_code=400, detail="MISSING_CSR: csr_pem or csr field is required.")
+    return register_agent(
+        req=req,
+        request=request,
+        x_admin_role=x_admin_role,
+        authorization=authorization,
+        cookie_token=cookie_token,
+        x_csrf_token=x_csrf_token
+    )
 
 
 @router.get("", summary="List All Registered Agents")
@@ -168,4 +208,9 @@ def rotate_key(
     )
     registry = get_agent_registry()
     res = registry.rotate_key(req.agent_id, req.new_public_key_pem)
+    if res and res.get("private_key"):
+        from server import _DEMO_CLIENT_TEST_KEYS, AGENT_PRIVATE_KEYS, _save_demo_keys_to_disk
+        _DEMO_CLIENT_TEST_KEYS[req.agent_id] = res["private_key"]
+        AGENT_PRIVATE_KEYS[req.agent_id] = res["private_key"]
+        _save_demo_keys_to_disk()
     return res

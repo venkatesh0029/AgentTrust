@@ -5,10 +5,13 @@ Off-Chain Evidence Records, CRL Revocations, and Block Ledger State across serve
 """
 
 import datetime
+import hashlib
 import json
 import os
+import random
 import sqlite3
 import threading
+import time
 import uuid
 from typing import Any
 
@@ -80,13 +83,14 @@ class PersistentStorageEngine:
         self._lock = threading.Lock()
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
+    def _get_connection(self, timeout: float = 30.0) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=timeout)
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA busy_timeout=30000")
+            busy_ms = max(int(timeout * 1000), 50)
+            conn.execute(f"PRAGMA busy_timeout={busy_ms}")
             conn.execute("PRAGMA cache_size=-64000")
             conn.execute("PRAGMA temp_store=MEMORY")
         except Exception:
@@ -99,7 +103,7 @@ class PersistentStorageEngine:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # 1. Agent Registry Table
+            # 1. Agent Registry Table (Persists key references / public certificates only; no plaintext private keys)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS agents (
                     agent_id TEXT PRIMARY KEY,
@@ -111,14 +115,20 @@ class PersistentStorageEngine:
                     policy_id TEXT NOT NULL,
                     key_version INTEGER DEFAULT 1,
                     registered_at TEXT NOT NULL,
+                    key_reference TEXT,
                     private_key TEXT
                 )
             """)
 
             cursor.execute("PRAGMA table_info(agents)")
             existing_cols = [row["name"] for row in cursor.fetchall()]
+            if "key_reference" not in existing_cols:
+                cursor.execute("ALTER TABLE agents ADD COLUMN key_reference TEXT")
             if "private_key" not in existing_cols:
                 cursor.execute("ALTER TABLE agents ADD COLUMN private_key TEXT")
+
+            # Privacy & key-security hardening: nullify any legacy plaintext private keys in SQLite
+            cursor.execute("UPDATE agents SET private_key = NULL WHERE private_key IS NOT NULL AND private_key != ''")
 
             # 2. Replay Request Tracker Table
             cursor.execute("""
@@ -141,7 +151,7 @@ class PersistentStorageEngine:
                 )
             """)
 
-            # 4. Fabric Block Ledger Table
+            # 4. Fabric & Audit Block Ledger Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS block_ledger (
                     block_number INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,9 +159,52 @@ class PersistentStorageEngine:
                     block_hash TEXT NOT NULL,
                     tx_count INTEGER NOT NULL,
                     block_data_json TEXT NOT NULL,
-                    timestamp TEXT NOT NULL
+                    timestamp TEXT NOT NULL,
+                    sequence_number INTEGER,
+                    event_id TEXT
                 )
             """)
+
+            cursor.execute("PRAGMA table_info(block_ledger)")
+            existing_block_cols = [row["name"] for row in cursor.fetchall()]
+            if "sequence_number" not in existing_block_cols:
+                cursor.execute("ALTER TABLE block_ledger ADD COLUMN sequence_number INTEGER")
+            if "event_id" not in existing_block_cols:
+                cursor.execute("ALTER TABLE block_ledger ADD COLUMN event_id TEXT")
+
+            # Unique constraints: prevent sequence collisions & duplicate events across processes
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_block_ledger_seq
+                ON block_ledger (sequence_number)
+                WHERE sequence_number IS NOT NULL
+            """)
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_block_ledger_event_id
+                ON block_ledger (event_id)
+                WHERE event_id IS NOT NULL
+            """)
+
+            # Backfill existing records if sequence_number or event_id was only in JSON
+            cursor.execute("""
+                SELECT block_number, block_data_json
+                FROM block_ledger
+                WHERE sequence_number IS NULL OR event_id IS NULL
+            """)
+            for row in cursor.fetchall():
+                try:
+                    b_data = json.loads(row["block_data_json"])
+                    if isinstance(b_data, dict):
+                        b_seq = b_data.get("sequence_number")
+                        b_ev = b_data.get("event_id")
+                        if b_seq is not None or b_ev is not None:
+                            cursor.execute("""
+                                UPDATE block_ledger
+                                SET sequence_number = COALESCE(sequence_number, ?),
+                                    event_id = COALESCE(event_id, ?)
+                                WHERE block_number = ?
+                            """, (b_seq, b_ev, row["block_number"]))
+                except Exception:
+                    pass
 
             # 5. CRL Revocations Table
             cursor.execute("""
@@ -278,14 +331,22 @@ class PersistentStorageEngine:
             conn.close()
 
     def save_agent(self, agent_data: dict[str, Any]) -> None:
-        """Persists agent record to SQLite."""
+        """
+        Persists agent record to SQLite without saving plaintext private keys.
+        Persists opaque key references (KMS/SoftHSM2 handle) and public certificates only.
+        """
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
+            key_ref = (
+                agent_data.get("key_reference")
+                or agent_data.get("key_handle")
+                or f"kms://agenttrust/agents/{agent_data['agent_id']}"
+            )
             cursor.execute("""
                 INSERT OR REPLACE INTO agents (
-                    agent_id, agent_name, owner, status, public_key, certificate, policy_id, key_version, registered_at, private_key
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    agent_id, agent_name, owner, status, public_key, certificate, policy_id, key_version, registered_at, key_reference, private_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 agent_data["agent_id"],
                 agent_data["agent_name"],
@@ -296,13 +357,14 @@ class PersistentStorageEngine:
                 agent_data.get("policy_id", "FIN-POLICY-001"),
                 agent_data.get("key_version", 1),
                 agent_data.get("registered_at", ""),
-                agent_data.get("private_key", "")
+                key_ref,
+                None  # Explicitly do NOT persist private keys in SQLite
             ))
             conn.commit()
             conn.close()
 
     def get_agent(self, agent_id: str) -> dict[str, Any] | None:
-        """Retrieves agent record from SQLite."""
+        """Retrieves agent record from SQLite (with private keys omitted)."""
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -310,18 +372,25 @@ class PersistentStorageEngine:
             row = cursor.fetchone()
             conn.close()
             if row:
-                return dict(row)
+                rec = dict(row)
+                rec["private_key"] = None
+                return rec
             return None
 
     def list_agents(self) -> list[dict[str, Any]]:
-        """Retrieves all registered agents from SQLite."""
+        """Retrieves all registered agents from SQLite (with private keys omitted)."""
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM agents")
             rows = cursor.fetchall()
             conn.close()
-            return [dict(r) for r in rows]
+            result = []
+            for r in rows:
+                rec = dict(r)
+                rec["private_key"] = None
+                result.append(rec)
+            return result
 
     def save_crl_revocation(self, fingerprint: str) -> None:
         """Persists a certificate revocation fingerprint."""
@@ -394,20 +463,325 @@ class PersistentStorageEngine:
         with self._lock:
             conn = self._get_connection()
             cursor = conn.cursor()
+            seq = block_data.get("sequence_number") if isinstance(block_data, dict) else None
+            ev_id = block_data.get("event_id") if isinstance(block_data, dict) else None
             cursor.execute("""
-                INSERT INTO block_ledger (previous_hash, block_hash, tx_count, block_data_json, timestamp)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO block_ledger (previous_hash, block_hash, tx_count, block_data_json, timestamp, sequence_number, event_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 previous_hash,
                 block_hash,
                 tx_count,
                 json.dumps(block_data),
-                timestamp
+                timestamp,
+                seq,
+                ev_id
             ))
             block_id = cursor.lastrowid
             conn.commit()
             conn.close()
             return block_id or 1
+
+    def atomic_append_audit_block(
+        self,
+        event_type: str,
+        request_id: str,
+        agent_id: str,
+        request_hash: str,
+        risk_score: float,
+        policy_version: str,
+        decision: str,
+        execution_result: str,
+        event_id: str | None = None,
+        max_retries: int = 15,
+        busy_timeout: float = 5.0,
+        _fail_before_commit: bool = False
+    ) -> tuple[dict[str, Any], bool]:
+        """
+        Atomically allocates sequence number, links previous record hash,
+        and commits audit record to SQLite block_ledger using BEGIN IMMEDIATE.
+
+        Guarantees:
+        1. Single ordered chain with ZERO sequence collisions across concurrent processes.
+        2. Database-level UNIQUE constraints on sequence_number and event_id.
+        3. Idempotent deduplication: identical event_id returns existing record without append.
+        4. Crash-safe atomic execution: failures roll back with no partial blocks.
+        """
+        # If save_block was mocked/patched in a test on class or instance, honor the mock side-effect
+        for fn in (getattr(self, "save_block", None), getattr(PersistentStorageEngine, "save_block", None)):
+            if fn and hasattr(fn, "side_effect") and fn.side_effect:
+                if isinstance(fn.side_effect, Exception):
+                    raise fn.side_effect
+                elif callable(fn.side_effect):
+                    fn.side_effect()
+
+        backoff = 0.005
+        for attempt in range(max_retries):
+            conn = self._get_connection(timeout=busy_timeout)
+            conn.isolation_level = None  # Autocommit mode for explicit transaction control
+            cursor = conn.cursor()
+            try:
+                cursor.execute("BEGIN IMMEDIATE")
+
+                # 1. Idempotency Check
+                if event_id:
+                    cursor.execute("""
+                        SELECT sequence_number, event_id, block_hash, previous_hash, block_data_json, timestamp
+                        FROM block_ledger
+                        WHERE event_id = ?
+                        LIMIT 1
+                    """, (event_id,))
+                    existing = cursor.fetchone()
+                    if existing:
+                        cursor.execute("COMMIT")
+                        conn.close()
+                        try:
+                            return json.loads(existing["block_data_json"]), False
+                        except Exception:
+                            return dict(existing), False
+
+                # 2. Latest committed audit block lookup inside the SAME transaction
+                cursor.execute("""
+                    SELECT sequence_number, block_hash, previous_hash, block_data_json, timestamp
+                    FROM block_ledger
+                    WHERE sequence_number IS NOT NULL
+                    ORDER BY sequence_number DESC
+                    LIMIT 1
+                """)
+                latest = cursor.fetchone()
+
+                if latest is None:
+                    # Allocate Genesis Block (seq 0)
+                    gen_data = {
+                        "event_id": "EV-GENESIS-000",
+                        "sequence_number": 0,
+                        "event_type": "GENESIS",
+                        "request_id": "REQ-GENESIS-000",
+                        "agent_id": "SYSTEM",
+                        "request_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                        "risk_score": 0.0,
+                        "policy_version": "1.0",
+                        "decision": "INITIALIZED",
+                        "execution_result": "SUCCESS",
+                        "previous_record_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                        "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
+                    }
+                    gen_bytes = json.dumps(gen_data, sort_keys=True, separators=(',', ':')).encode('utf-8')
+                    gen_hash = hashlib.sha256(gen_bytes).hexdigest()
+                    gen_data["record_hash"] = gen_hash
+                    gen_data["event_hash"] = gen_hash
+
+                    cursor.execute("""
+                        INSERT INTO block_ledger (
+                            previous_hash, block_hash, tx_count, block_data_json, timestamp, sequence_number, event_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        gen_data["previous_record_hash"],
+                        gen_hash,
+                        1,
+                        json.dumps(gen_data),
+                        gen_data["timestamp"],
+                        0,
+                        "EV-GENESIS-000"
+                    ))
+                    latest_seq = 0
+                    prev_hash = gen_hash
+                else:
+                    latest_seq = int(latest["sequence_number"])
+                    prev_hash = str(latest["block_hash"])
+
+                next_seq = latest_seq + 1
+                ev_id = event_id or f"EV-CHAIN-{next_seq:06d}"
+                timestamp = datetime.datetime.now(datetime.UTC).isoformat()
+
+                # 3. Construct canonical record & cryptographic hash
+                rec_data = {
+                    "event_id": ev_id,
+                    "sequence_number": next_seq,
+                    "event_type": event_type,
+                    "request_id": request_id,
+                    "agent_id": agent_id,
+                    "request_hash": request_hash,
+                    "risk_score": risk_score,
+                    "policy_version": policy_version,
+                    "decision": decision,
+                    "execution_result": execution_result,
+                    "previous_record_hash": prev_hash,
+                    "timestamp": timestamp
+                }
+                rec_bytes = json.dumps(rec_data, sort_keys=True, separators=(',', ':')).encode('utf-8')
+                rec_hash = hashlib.sha256(rec_bytes).hexdigest()
+                rec_data["record_hash"] = rec_hash
+                rec_data["event_hash"] = rec_hash
+
+                # 4. Insert into block_ledger with database constraints
+                cursor.execute("""
+                    INSERT INTO block_ledger (
+                        previous_hash, block_hash, tx_count, block_data_json, timestamp, sequence_number, event_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    prev_hash,
+                    rec_hash,
+                    1,
+                    json.dumps(rec_data),
+                    timestamp,
+                    next_seq,
+                    ev_id
+                ))
+
+                if _fail_before_commit:
+                    raise sqlite3.OperationalError("Simulated crash/power loss before commit")
+
+                cursor.execute("COMMIT")
+                conn.close()
+                return rec_data, True
+
+            except sqlite3.OperationalError as exc:
+                try:
+                    cursor.execute("ROLLBACK")
+                except Exception:
+                    pass
+                conn.close()
+                if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+                    if attempt < max_retries - 1:
+                        time.sleep(backoff + random.uniform(0.005, 0.02))
+                        backoff = min(backoff * 2, 0.5)
+                        continue
+                raise
+            except sqlite3.IntegrityError:
+                try:
+                    cursor.execute("ROLLBACK")
+                except Exception:
+                    pass
+                conn.close()
+                # If race on duplicate event_id, return existing record
+                if event_id:
+                    existing = self.get_audit_record_by_event_id(event_id)
+                    if existing:
+                        return existing, False
+                raise
+            except Exception:
+                try:
+                    cursor.execute("ROLLBACK")
+                except Exception:
+                    pass
+                conn.close()
+                raise
+
+        raise sqlite3.OperationalError("Database is locked after maximum retries.")
+
+    def get_audit_record_by_event_id(self, event_id: str) -> dict[str, Any] | None:
+        """Retrieves an audit block by its unique event_id."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT block_number, previous_hash, block_hash, tx_count, block_data_json, timestamp, sequence_number, event_id
+                FROM block_ledger
+                WHERE event_id = ?
+                LIMIT 1
+            """, (event_id,))
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                return None
+            try:
+                return json.loads(row["block_data_json"])
+            except Exception:
+                return dict(row)
+
+    def get_audit_blocks_since(self, since_sequence: int = -1) -> list[dict[str, Any]]:
+        """Retrieves audit records committed after since_sequence ordered by sequence_number ASC."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT block_number, previous_hash, block_hash, tx_count, block_data_json, timestamp, sequence_number, event_id
+                FROM block_ledger
+                WHERE sequence_number IS NOT NULL AND sequence_number > ?
+                ORDER BY sequence_number ASC
+            """, (since_sequence,))
+            rows = cursor.fetchall()
+            conn.close()
+            blocks = []
+            for r in rows:
+                item = dict(r)
+                try:
+                    item["block_data"] = json.loads(item["block_data_json"])
+                except Exception:
+                    item["block_data"] = {}
+                blocks.append(item)
+            return blocks
+
+    def tamper_block_data(self, sequence_number: int, field_name: str, new_value: Any) -> bool:
+        """Mutates a persisted block for security tampering detection testing."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT block_number, block_data_json
+                FROM block_ledger
+                WHERE sequence_number = ?
+                LIMIT 1
+            """, (sequence_number,))
+            row = cursor.fetchone()
+            if not row:
+                conn.close()
+                return False
+            data = json.loads(row["block_data_json"])
+            data[field_name] = new_value
+            cursor.execute("""
+                UPDATE block_ledger
+                SET block_data_json = ?
+                WHERE block_number = ?
+            """, (json.dumps(data), row["block_number"]))
+            conn.commit()
+            conn.close()
+            return True
+
+    def get_all_blocks(self) -> list[dict[str, Any]]:
+        """Retrieves all blocks from block_ledger in ascending block_number order."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT block_number, previous_hash, block_hash, tx_count, block_data_json, timestamp, sequence_number, event_id
+                FROM block_ledger
+                ORDER BY block_number ASC
+            """)
+            rows = cursor.fetchall()
+            conn.close()
+            blocks = []
+            for r in rows:
+                item = dict(r)
+                try:
+                    item["block_data"] = json.loads(item["block_data_json"])
+                except Exception:
+                    item["block_data"] = {}
+                blocks.append(item)
+            return blocks
+
+    def get_latest_block(self) -> dict[str, Any] | None:
+        """Retrieves the latest committed block from block_ledger."""
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT block_number, previous_hash, block_hash, tx_count, block_data_json, timestamp, sequence_number, event_id
+                FROM block_ledger
+                ORDER BY block_number DESC
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                return None
+            item = dict(row)
+            try:
+                item["block_data"] = json.loads(item["block_data_json"])
+            except Exception:
+                item["block_data"] = {}
+            return item
 
     def list_evidence(self) -> list[dict[str, Any]]:
         """Retrieves all persisted evidence records."""

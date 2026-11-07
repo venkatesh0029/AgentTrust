@@ -15,7 +15,7 @@
 <br/>
 
 [![Verification Suite](https://img.shields.io/badge/Verification_Suite-5%2F5%20Stages%20Passed-success?logo=checkmarx&logoColor=white)](verify_all.py)
-[![Regression Tests](https://img.shields.io/badge/Regression_Suite-320%20Passed%20(0%20Failures)-brightgreen?logo=pytest&logoColor=white)](tests/)
+[![Regression Tests](https://img.shields.io/badge/Regression_Suite-345%20Passed%20(0%20Failures)-brightgreen?logo=pytest&logoColor=white)](tests/)
 [![Code Hygiene](https://img.shields.io/badge/Code_Quality-Ruff%20%26%20Mypy%20Clean-success?logo=python)](verify_all.py)
 [![Production Acceptance](https://img.shields.io/badge/Production_Acceptance-9%2F9%20Checks%20Passed-blueviolet)](scripts/verify_production_acceptance.py)
 [![Security Invariants](https://img.shields.io/badge/Security-12%2F12%20Invariants%20Verified-blue)](documentation/security_model.md)

@@ -27,6 +27,46 @@ class EvidenceStore:
                 ev_id = r.get("evidence_id")
                 if ev_id:
                     self._store[ev_id] = r
+
+            if "EVIDENCE-REQ-GENESIS-000" not in self._store:
+                self._store["EVIDENCE-REQ-GENESIS-000"] = {
+                    "evidence_schema_version": "2.0",
+                    "evidence_id": "EVIDENCE-REQ-GENESIS-000",
+                    "request_id": "REQ-GENESIS-000",
+                    "agent_id": "SYSTEM",
+                    "certificate_fingerprint": "SHA256:0000000000000000000000000000000000000000000000000000000000000000",
+                    "action": "LEDGER_GENESIS_INITIALIZE",
+                    "resource": "SYSTEM_CORE",
+                    "input": {
+                        "system": "AgentTrust Framework",
+                        "channel": "agenttrust-channel",
+                        "consensus": "Fabric Permissioned Ledger Simulator",
+                        "genesis_block": 0,
+                        "status": "INITIALIZED"
+                    },
+                    "input_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                    "output_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                    "decision": "INITIALIZED",
+                    "decision_reason": "LEDGER_GENESIS_BOOTSTRAP",
+                    "policy_id": "SYSTEM-GENESIS-POL",
+                    "policy_version": "1.0",
+                    "agent_version": "1.0",
+                    "model_version": "AgentTrust-Core-v2.0",
+                    "tool_version": "AgentTrust-Gateway-v1.0",
+                    "nonce": "N-GENESIS-000",
+                    "approval_reference": None,
+                    "api_execution_result": "INITIALIZED",
+                    "error_details": None,
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "execution_trace": {"mode": "GENESIS_BOOTSTRAP"},
+                    "risk_score": 0.0,
+                    "risk_level": "LOW",
+                    "risk_factors": [],
+                    "matched_rules": ["genesis_state_initialization"],
+                    "sequence_number": 0,
+                    "previous_record_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                    "record_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+                }
         except Exception as exc:
             logger.debug(f"Could not load evidence from persistent storage: {exc}")
 
@@ -54,7 +94,24 @@ class EvidenceStore:
 
 
     def get_evidence(self, evidence_id: str) -> dict[str, Any] | None:
-        return self._store.get(evidence_id)
+        if evidence_id in self._store:
+            return self._store[evidence_id]
+        # Direct lookup by request_id
+        for ev in self._store.values():
+            if ev.get("request_id") == evidence_id:
+                return ev
+        # Prepend EVIDENCE- if missing
+        if not evidence_id.startswith("EVIDENCE-"):
+            prefixed = f"EVIDENCE-{evidence_id}"
+            if prefixed in self._store:
+                return self._store[prefixed]
+        # Strip EVIDENCE- if present
+        else:
+            stripped = evidence_id[len("EVIDENCE-"):]
+            for ev in self._store.values():
+                if ev.get("request_id") == stripped:
+                    return ev
+        return None
 
     def get_evidence_by_request_id(self, request_id: str) -> dict[str, Any] | None:
         for ev in self._store.values():

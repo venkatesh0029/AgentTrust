@@ -37,6 +37,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <button
         ref={ref}
+        type={props.type || "button"}
+        suppressHydrationWarning
         disabled={disabled}
         className={cn(baseStyle, variants[variant], sizes[size], className)}
         {...props}

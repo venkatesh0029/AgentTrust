@@ -27,7 +27,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} dark`} suppressHydrationWarning>
-      <body className="min-h-screen bg-[var(--bg)] text-[var(--fg)] font-sans antialiased tabular-nums selection:bg-[var(--emerald)] selection:text-[var(--accent-fg)]">
+      <body
+        suppressHydrationWarning
+        className="min-h-screen bg-[var(--bg)] text-[var(--fg)] font-sans antialiased tabular-nums selection:bg-[var(--emerald)] selection:text-[var(--accent-fg)]"
+      >
         <Providers>{children}</Providers>
       </body>
     </html>

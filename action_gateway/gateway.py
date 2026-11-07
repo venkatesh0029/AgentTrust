@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import os
+import time
 import uuid
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
@@ -564,13 +565,89 @@ class ActionGateway:
             parameters=parameters
         )
 
-        # Step 7.5: Capability Delegation Token Chain Check (Normalize top-level delegation token)
+        # Step 7.5: Capability Delegation Token & Delegation Authority Graph Check
+        delegation_context: dict[str, Any] | None = None
         delegation_token = request_payload.get("delegation_token") or parameters.get("delegation_token")
         if delegation_token:
             parameters["delegation_token"] = delegation_token
             request_payload["delegation_token"] = delegation_token
 
-        if delegation_token and isinstance(delegation_token, dict):
+        # Check against active Delegation Authority Graph
+        try:
+            from identity_manager.delegation_graph import delegation_graph_manager
+            target_token_id = None
+            if isinstance(delegation_token, str):
+                target_token_id = delegation_token
+            elif isinstance(delegation_token, dict) and "token_id" in delegation_token:
+                target_token_id = delegation_token["token_id"]
+            elif not delegation_token:
+                node = delegation_graph_manager.nodes.get(agent_id)
+                if node and node.get("incoming_token_id"):
+                    target_token_id = node["incoming_token_id"]
+
+            if target_token_id and target_token_id in delegation_graph_manager.edges:
+                edge = delegation_graph_manager.edges[target_token_id]
+                # 1. Check revocation
+                if edge.get("status") == "REVOKED":
+                    return self._finalize_gateway_outcome(
+                        request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                        parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                        reason=f"DELEGATION_TOKEN_REVOKED: Token '{target_token_id}' was revoked ({edge.get('revocation_reason', 'ADMIN_REVOCATION')})",
+                        policy_id=agent_record.get("policy_id", "NONE"),
+                        policy_version="1.0", agent_version=agent_record.get("agent_version", "1.0"),
+                        api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
+                    )
+
+                # 2. Check expiration
+                if int(time.time()) > edge.get("expires_at", 0) or edge.get("status") == "EXPIRED":
+                    edge["status"] = "EXPIRED"
+                    return self._finalize_gateway_outcome(
+                        request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                        parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                        reason=f"DELEGATION_TOKEN_EXPIRED: Token '{target_token_id}' expired",
+                        policy_id=agent_record.get("policy_id", "NONE"),
+                        policy_version="1.0", agent_version=agent_record.get("agent_version", "1.0"),
+                        api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
+                    )
+
+                # 3. Check action scope attenuation
+                delegated_actions = edge.get("delegated_actions", [])
+                if action not in delegated_actions:
+                    return self._finalize_gateway_outcome(
+                        request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                        parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                        reason=f"ACTION_NOT_IN_DELEGATION_SCOPE: Action '{action}' is outside delegated scope {delegated_actions}",
+                        policy_id=agent_record.get("policy_id", "NONE"),
+                        policy_version="1.0", agent_version=agent_record.get("agent_version", "1.0"),
+                        api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
+                    )
+
+                # 4. Check remaining delegation budget
+                rem_budget = float(edge.get("delegated_budget", 0)) - float(edge.get("spent_budget", 0))
+                if amount > rem_budget:
+                    return self._finalize_gateway_outcome(
+                        request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                        parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                        reason=f"DELEGATION_BUDGET_EXCEEDED: Requested ₹{amount:,.2f} exceeds remaining delegated budget ₹{rem_budget:,.2f}",
+                        policy_id=agent_record.get("policy_id", "NONE"),
+                        policy_version="1.0", agent_version=agent_record.get("agent_version", "1.0"),
+                        api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
+                    )
+
+                delegation_context = {
+                    "token_id": target_token_id,
+                    "issuer_agent_id": edge["issuer_agent_id"],
+                    "delegate_agent_id": edge["delegate_agent_id"],
+                    "delegated_budget": edge["delegated_budget"],
+                    "spent_budget": edge["spent_budget"],
+                    "remaining_budget": rem_budget,
+                    "depth": edge.get("depth", 1),
+                    "status": edge.get("status", "ACTIVE")
+                }
+        except Exception as ex:
+            print(f"[Gateway] Delegation graph check exception: {ex}")
+
+        if delegation_token and isinstance(delegation_token, dict) and "issuer_agent_id" in delegation_token and "signature" in delegation_token:
             issuer_agent_id = delegation_token.get("issuer_agent_id")
             issuer_record = self.registry.get_agent(issuer_agent_id) if issuer_agent_id else None
             issuer_pub_key = issuer_record.get("public_key") if issuer_record else None
@@ -625,10 +702,33 @@ class ActionGateway:
             transaction_count_in_window=tx_count_in_window
         )
 
+        # Step 8.5: AI Agent Behavioral Intelligence Engine (UEBA) Evaluation
+        behavior_eval: dict[str, Any] | None = None
+        try:
+            from risk_engine.behavior_engine import agent_behavior_engine
+            behavior_eval = agent_behavior_engine.analyze_request(
+                agent_id=agent_id,
+                action=action,
+                resource=resource,
+                amount=amount,
+                request_timestamp_iso=timestamp,
+                request_id=request_id
+            )
+            # Invariant: ML model recommends additional restrictions, NEVER independently grants authorization.
+            if decision == PolicyDecision.ALLOWED and behavior_eval.get("enforcement") == "REQUIRE_HUMAN_APPROVAL":
+                decision = PolicyDecision.PENDING_HUMAN_APPROVAL
+                flags_str = ", ".join(k for k, v in behavior_eval.get("flags", {}).items() if v)
+                reasons_str = "; ".join(behavior_eval.get("explainable_reasons", []))
+                reason = f"BEHAVIORAL_ANOMALY_HOLD: Score {behavior_eval['anomaly_score']}/100 [{flags_str}]. {reasons_str}"
+                risk_result["risk_score"] = max(float(risk_result.get("risk_score", 0)), float(behavior_eval["anomaly_score"]))
+        except Exception:
+            pass
+
         # Step 9: Decision Execution / Branching
         api_result = "NOT_EXECUTED"
         tx_data = None
         approval_ticket = None
+        event_id = f"EVENT-{uuid.uuid4().hex[:12].upper()}"
 
         if decision == PolicyDecision.ALLOWED:
             if self.persistent_db:
@@ -658,18 +758,44 @@ class ActionGateway:
                         api_result="NOT_EXECUTED"
                     )
 
+            # Transactional Outbox: Pre-stage audit outbox record so the financial side-effect
+            # and audit intention are committed within a single atomic SQLite transaction.
+            outbox_record = {
+                "event_id": event_id,
+                "request_id": request_id,
+                "agent_id": agent_id,
+                "action": action,
+                "amount": amount,
+                "idempotency_key": idempotency_key,
+                "request_fingerprint": request_fingerprint,
+                "payload": {
+                    "event_id": event_id,
+                    "request_id": request_id,
+                    "agent_id": agent_id,
+                    "action": action,
+                    "resource": resource,
+                    "decision": decision.value if hasattr(decision, "value") else decision,
+                    "reason": reason.value if hasattr(reason, "value") else reason,
+                    "policy_id": policy_id,
+                    "policy_version": policy_version,
+                    "parameters": parameters,
+                    "timestamp": timestamp,
+                }
+            }
+
             # Create signed service auth headers
             auth_headers = self.finance_api.create_gateway_auth_headers(request_id)
             try:
                 exec_res = self.finance_api.execute_action(
                     action=action,
                     parameters=parameters,
-                    gateway_token=ProtectedFinanceAPI.GATEWAY_SECRET,
+                    gateway_token=str(getattr(self.finance_api, "gateway_secret", "")),
                     request_id=request_id,
                     agent_id=agent_id,
                     auth_headers=auth_headers,
                     idempotency_key=idempotency_key,
-                    fencing_token=fencing_token
+                    fencing_token=fencing_token,
+                    outbox_record=outbox_record
                 )
             except Exception as e:
                 # Handle uncertain external outcome: query authoritative status by idempotency_key/request_id
@@ -695,6 +821,20 @@ class ActionGateway:
             if exec_res.get("success"):
                 api_result = "EXECUTED"
                 tx_data = exec_res.get("transaction_data")
+                # Consume delegation budget on the spot!
+                if delegation_context and delegation_context.get("token_id"):
+                    try:
+                        from identity_manager.delegation_graph import delegation_graph_manager
+                        spent_ok, spend_msg = delegation_graph_manager.spend_budget(
+                            delegation_context["token_id"], amount
+                        )
+                        if spent_ok:
+                            edge = delegation_graph_manager.edges.get(delegation_context["token_id"])
+                            if edge:
+                                delegation_context["spent_budget"] = edge["spent_budget"]
+                                delegation_context["remaining_budget"] = max(0.0, edge["delegated_budget"] - edge["spent_budget"])
+                    except Exception as e:
+                        print(f"[Gateway] Delegation budget spend warning: {e}")
                 if self.persistent_db:
                     try:
                         self.persistent_db.update_intent_state(
@@ -763,7 +903,10 @@ class ActionGateway:
             nonce=nonce,
             risk_result=risk_result,
             matched_rules=matched_rules,
-            idempotency_key=idempotency_key
+            idempotency_key=idempotency_key,
+            event_id=event_id,
+            behavior_eval=behavior_eval,
+            delegation_context=delegation_context
         )
 
     def process_human_approval_resume(self, approval_id: str, approver_id: str, provided_token: str | None = None) -> dict[str, Any]:
@@ -890,21 +1033,78 @@ class ActionGateway:
         # Execute protected business action
         auth_headers = self.finance_api.create_gateway_auth_headers(request_id)
         idemp_k = updated_record.get("idempotency_key")
+        event_id = f"EVENT-{uuid.uuid4().hex[:12].upper()}"
+        outbox_record = {
+            "event_id": event_id,
+            "request_id": request_id,
+            "agent_id": agent_id,
+            "action": action,
+            "amount": float(parameters.get("amount", 0.0)),
+            "idempotency_key": idemp_k,
+            "request_fingerprint": None,
+            "payload": {
+                "event_id": event_id,
+                "request_id": request_id,
+                "agent_id": agent_id,
+                "action": action,
+                "resource": resource,
+                "decision": PolicyDecision.ALLOWED_AFTER_APPROVAL.value,
+                "reason": "APPROVED_BY_HUMAN_SUPERVISOR",
+                "policy_id": policy_id,
+                "policy_version": validation_context.get("policy_version", "1.0"),
+                "parameters": parameters,
+            }
+        }
         exec_res = self.finance_api.execute_action(
             action=action,
             parameters=parameters,
-            gateway_token=ProtectedFinanceAPI.GATEWAY_SECRET,
+            gateway_token=str(getattr(self.finance_api, "gateway_secret", "")),
             request_id=request_id,
             agent_id=agent_id,
             approval_ref=approval_ref,
             auth_headers=auth_headers,
             idempotency_key=idemp_k,
-            fencing_token=1
+            fencing_token=1,
+            outbox_record=outbox_record
         )
 
         api_res_str = "EXECUTED" if exec_res.get("success") else f"FAILED: {exec_res.get('error', 'Execution Error')}"
         agent_ver = agent_record.get("agent_version", "1.0")
         cert_fp = agent_record.get("certificate_fingerprint", "")
+
+        del_ctx: dict[str, Any] | None = None
+        if exec_res.get("success"):
+            del_tok_id = None
+            auth_ctx = app_record.get("authorization_context", {})
+            del_tok = app_record.get("delegation_token") or parameters.get("delegation_token") or auth_ctx.get("delegation_token")
+            if isinstance(del_tok, str):
+                del_tok_id = del_tok
+            elif isinstance(del_tok, dict):
+                del_tok_id = del_tok.get("token_id")
+            if not del_tok_id:
+                try:
+                    from identity_manager.delegation_graph import delegation_graph_manager
+                    del_n = delegation_graph_manager.nodes.get(agent_id)
+                    if del_n and del_n.get("incoming_token_id"):
+                        del_tok_id = del_n["incoming_token_id"]
+                except Exception:
+                    pass
+            if del_tok_id:
+                try:
+                    from identity_manager.delegation_graph import delegation_graph_manager
+                    spent_ok, _ = delegation_graph_manager.spend_budget(del_tok_id, amount)
+                    if spent_ok:
+                        edge = delegation_graph_manager.edges.get(del_tok_id)
+                        if edge:
+                            del_ctx = {
+                                "token_id": del_tok_id,
+                                "issuer_agent_id": edge["issuer_agent_id"],
+                                "delegate_agent_id": edge["delegate_agent_id"],
+                                "remaining_budget": max(0.0, edge["delegated_budget"] - edge["spent_budget"]),
+                                "status": edge["status"]
+                            }
+                except Exception:
+                    pass
 
         return self._finalize_gateway_outcome(
             request_id=request_id,
@@ -923,7 +1123,9 @@ class ActionGateway:
             cert_fingerprint=cert_fp,
             nonce=updated_record.get("nonce", f"N-RESUME-{request_id}"),
             risk_result=validation_context.get("risk_result"),
-            matched_rules=validation_context.get("matched_rules")
+            matched_rules=validation_context.get("matched_rules"),
+            event_id=event_id,
+            delegation_context=del_ctx
         )
 
     def _finalize_gateway_outcome(
@@ -946,12 +1148,15 @@ class ActionGateway:
         nonce: str = "",
         risk_result: dict[str, Any] | None = None,
         matched_rules: list[str] | None = None,
-        idempotency_key: str | None = None
+        idempotency_key: str | None = None,
+        event_id: str | None = None,
+        behavior_eval: dict[str, Any] | None = None,
+        delegation_context: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """
         Creates off-chain evidence, records hash-chain audit log, and commits audit event to Fabric blockchain safely.
         """
-        event_id = f"EVENT-{uuid.uuid4().hex[:12].upper()}"
+        event_id = event_id or f"EVENT-{uuid.uuid4().hex[:12].upper()}"
 
         risk_eval = risk_result or {
             "risk_score": 0.0,
@@ -1023,6 +1228,20 @@ class ActionGateway:
                 evidence_reference=evidence_ref,
                 evidence_hash=evidence_hash
             )
+            # Transactional Outbox: Ledger commit succeeded
+            # Drain outbox entry and update intent to COMMITTED
+            if self.persistent_db:
+                try:
+                    self.persistent_db.delete_retry_record(event_id)
+                    if hasattr(self.retry_queue, "_pending_queue"):
+                        self.retry_queue._pending_queue.pop(event_id, None)
+                    self.persistent_db.update_intent_state(
+                        request_id=request_id,
+                        state="COMMITTED",
+                        expected_current_state="EXECUTED_PENDING_LEDGER"
+                    )
+                except Exception:
+                    pass
         except Exception as e:
             error_text = str(e)
             uncertain_markers = (
@@ -1098,6 +1317,11 @@ class ActionGateway:
             }
         }
 
+        if behavior_eval:
+            outcome["behavioral_intelligence"] = behavior_eval
+        if delegation_context:
+            outcome["delegation_context"] = delegation_context
+
         if self.persistent_db and decision == PolicyDecision.ALLOWED.value:
             try:
                 final_intent_state = "COMMITTED" if ledger_status == "COMMITTED" else "LEDGER_PENDING_RETRY"
@@ -1141,8 +1365,7 @@ class ActionGateway:
                 try:
                     self.persistent_db.update_intent_state(
                         request_id=item["request_id"],
-                        state="COMMITTED",
-                        expected_current_state="LEDGER_PENDING_RETRY"
+                        state="COMMITTED"
                     )
                 except Exception:
                     pass

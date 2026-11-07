@@ -186,13 +186,20 @@ class RequestTracker:
 
             if self.persistent_db:
                 try:
+                    bc = result.get("blockchain") or {}
+                    bc_status = bc.get("status", "")
+                    if "COMMIT_FAILED" in bc_status or bc.get("source") == "outbox_pending_retry":
+                        intent_state = "LEDGER_PENDING_RETRY"
+                    else:
+                        intent_state = "COMMITTED"
+
                     self.persistent_db.save_intent(
                         request_id=result.get("request_id", ""),
                         agent_id=agent_id,
                         action=result.get("action", ""),
                         amount=float(result.get("transaction_data", {}).get("amount", 0) if result.get("transaction_data") else 0),
                         idempotency_key=idempotency_key,
-                        state="COMMITTED",
+                        state=intent_state,
                         outcome=result,
                         request_fingerprint=request_fingerprint
                     )

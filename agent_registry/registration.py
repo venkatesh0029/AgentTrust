@@ -26,18 +26,30 @@ class AgentRegistry:
         role: str = "procurement_agent",
         agent_version: str = "1.0",
         validity_days: int = 365,
-        public_key_pem: str | None = None
+        public_key_pem: str | None = None,
+        csr_pem: str | None = None
     ) -> dict[str, Any]:
         """
         Registers a new AI Agent:
-        1. Issues X.509 cert using client public key (if provided) or server-generated key pair.
+        1. Issues X.509 cert using client CSR (preferred), public key, or legacy server key pair.
         2. Calculates cert fingerprint & serial.
-        3. Stores identity record.
-        Returns agent registration record. Private key is NEVER returned if public_key_pem is supplied.
+        3. Stores identity record (private key is NEVER persisted in SQLite).
+        Returns agent registration record.
+        When csr_pem or public_key_pem is supplied, private_key is strictly None.
         """
         capabilities = capabilities or ["CREATE_PURCHASE_ORDER", "CREATE_REIMBURSEMENT", "TRANSFER_FUNDS"]
 
-        if public_key_pem:
+        if csr_pem:
+            cert_pem, fingerprint = self.cert_manager.issue_agent_certificate_from_csr(
+                csr_pem=csr_pem,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                validity_days=validity_days,
+                organization=organization
+            )
+            priv_key_pem = None
+            key_ref = f"client-csr://agenttrust/agents/{agent_id}"
+        elif public_key_pem:
             cert_pem, fingerprint = self.cert_manager.issue_agent_certificate_from_pubkey(
                 agent_id=agent_id,
                 agent_name=agent_name,
@@ -45,12 +57,14 @@ class AgentRegistry:
                 validity_days=validity_days
             )
             priv_key_pem = None
+            key_ref = f"client-pubkey://agenttrust/agents/{agent_id}"
         else:
             cert_pem, priv_key_pem, fingerprint = self.cert_manager.issue_agent_certificate(
                 agent_id=agent_id,
                 agent_name=agent_name,
                 validity_days=validity_days
             )
+            key_ref = f"kms://agenttrust/agents/{agent_id}"
 
         serial_str = self._extract_serial_from_cert(cert_pem)
         now = datetime.datetime.now(datetime.UTC).isoformat()
@@ -65,7 +79,8 @@ class AgentRegistry:
             "certificate_serial": serial_str,
             "certificate": cert_pem,
             "public_key": self._extract_public_key_from_cert(cert_pem),
-            "private_key": priv_key_pem or "",
+            "key_reference": key_ref,
+            "private_key": None,  # Do not persist private keys in identity store
             "key_version": 1,
             "capabilities": capabilities,
             "policy_id": policy_id,
@@ -81,6 +96,38 @@ class AgentRegistry:
         if priv_key_pem is not None:
             result["private_key"] = priv_key_pem
         return result
+
+    def register_agent_csr(
+        self,
+        csr_pem: str,
+        agent_id: str,
+        agent_name: str,
+        owner: str = "Finance Dept",
+        capabilities: list[str] | None = None,
+        policy_id: str = "FIN-POLICY-001",
+        organization: str = "OrgA",
+        role: str = "procurement_agent",
+        agent_version: str = "1.0",
+        validity_days: int = 365
+    ) -> dict[str, Any]:
+        """
+        Registers an AI Agent strictly using client-generated PKCS#10 CSR.
+        Guarantees that server never receives, handles, or returns agent private keys.
+        """
+        record = self.register_agent(
+            agent_id=agent_id,
+            agent_name=agent_name,
+            owner=owner,
+            capabilities=capabilities,
+            policy_id=policy_id,
+            organization=organization,
+            role=role,
+            agent_version=agent_version,
+            validity_days=validity_days,
+            csr_pem=csr_pem
+        )
+        record.pop("private_key", None)
+        return record
 
     @staticmethod
     def _extract_public_key_from_cert(cert_pem: str) -> str:
@@ -101,15 +148,31 @@ class AgentRegistry:
         cert = x509.load_pem_x509_certificate(cert_pem.encode('utf-8'))
         return str(cert.serial_number)
 
-    def rotate_key(self, agent_id: str, validity_days: int = 365, public_key_pem: str | None = None) -> dict[str, Any] | None:
+    def rotate_key(
+        self,
+        agent_id: str,
+        validity_days: int = 365,
+        public_key_pem: str | None = None,
+        csr_pem: str | None = None
+    ) -> dict[str, Any] | None:
         """
         Rotates an agent's RSA keypair and X.509 Certificate.
+        Supports client CSR, external public key, or CA generation.
         """
         agent = self.get_agent(agent_id)
         if not agent:
             return None
 
-        if public_key_pem:
+        if csr_pem:
+            cert_pem, fingerprint = self.cert_manager.issue_agent_certificate_from_csr(
+                csr_pem=csr_pem,
+                agent_id=agent_id,
+                agent_name=agent.get("agent_name", agent_id),
+                validity_days=validity_days,
+                organization=agent.get("organization", "OrgA")
+            )
+            priv_key_pem = None
+        elif public_key_pem:
             cert_pem, fingerprint = self.cert_manager.issue_agent_certificate_from_pubkey(
                 agent_id=agent_id,
                 agent_name=agent["agent_name"],
@@ -139,6 +202,8 @@ class AgentRegistry:
         res = agent.copy()
         if priv_key_pem is not None:
             res["private_key"] = priv_key_pem
+        else:
+            res.pop("private_key", None)
         return res
 
     def get_agent(self, agent_id: str) -> dict[str, Any] | None:

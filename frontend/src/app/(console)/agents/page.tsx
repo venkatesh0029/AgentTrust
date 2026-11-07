@@ -112,7 +112,7 @@ export default function AgentsPage() {
   const rotateKeyMutation = useMutation({
     mutationFn: (agentId: string) => api.rotateAgentKey(agentId),
     onSuccess: (data) => {
-      setActionMessage({ type: "success", text: `RSA key rotated! New key version: ${data.new_key_version}` });
+      setActionMessage({ type: "success", text: `RSA key rotated! New key version: ${data.key_version ?? data.new_key_version ?? "v2"}` });
       queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
     onError: (err: Error) => {

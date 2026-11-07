@@ -4,6 +4,12 @@ from typing import Any
 
 import httpx
 
+from fabric.commit_verifier import (
+    CommitVerificationEngine,
+    IndependentPeerClient,
+    SimulatorPeerClient,
+    VerificationResult,
+)
 from fabric.ledger_service import FabricLedgerService
 
 
@@ -11,13 +17,19 @@ class FabricClient:
     """
     Client interface for interacting with Hyperledger Fabric ledger & chaincode.
     Supports dual execution modes: Production gRPC Gateway (when FABRIC_PEER_ENDPOINT is set)
-    and embedded Fabric Ledger Service.
+    and embedded Fabric Ledger Service with durable persistence.
+    Integrated with CommitVerificationEngine for independent multi-peer commit verification.
     """
 
-    def __init__(self):
+    def __init__(self, db_path: str | None = None):
         self.peer_endpoint = os.environ.get("FABRIC_PEER_ENDPOINT")
-        self.ledger_service = FabricLedgerService()
+        self.ledger_service = FabricLedgerService(db_path=db_path)
         self.chaincode = self.ledger_service.chaincode
+        self.peer_clients: list[IndependentPeerClient] = [
+            SimulatorPeerClient("peer0.org1.agenttrust.com", self.ledger_service),
+            SimulatorPeerClient("peer0.org2.agenttrust.com", self.ledger_service)
+        ]
+        self.verification_engine = CommitVerificationEngine(self.peer_clients)
 
     @staticmethod
     def _gateway_auth_headers() -> dict[str, str]:
@@ -197,8 +209,9 @@ class FabricClient:
             "mode": "live",
             "source": "hyperledger_fabric_gateway",
             "event_id": event_id,
-            "block_index": None,
-            "block_hash": None,
+            "tx_id": body.get("tx_id") or body.get("transaction_id") or f"TX-LIVE-{event_id}",
+            "block_index": body.get("block_index") or body.get("block_number"),
+            "block_hash": body.get("block_hash"),
             "chaincode_result": result,
         }
 
@@ -389,3 +402,84 @@ class FabricClient:
 
     def get_blocks(self) -> dict[str, Any]:
         return self.ledger_service.get_ledger_summary()
+
+    def register_peer(self, peer: IndependentPeerClient) -> None:
+        """Registers an independent peer client for multi-peer verification."""
+        self.peer_clients.append(peer)
+        self.verification_engine.add_peer(peer)
+
+    def verify_committed_transaction(
+        self,
+        gateway_response: dict[str, Any],
+        expected_payload: dict[str, Any] | None = None,
+        min_peers: int = 1
+    ) -> VerificationResult:
+        """
+        Executes independent verification (Path B) for a transaction received via gateway (Path A).
+        """
+        return self.verification_engine.verify_transaction(
+            gateway_response=gateway_response,
+            expected_payload=expected_payload,
+            min_peers=min_peers
+        )
+
+    def record_action_event_verified(
+        self,
+        event_id: str,
+        request_id: str,
+        agent_id: str,
+        action: str,
+        resource: str,
+        decision: str,
+        reason: str,
+        policy_id: str,
+        policy_version: str,
+        evidence_reference: str,
+        evidence_hash: str,
+        min_peers: int = 1
+    ) -> dict[str, Any]:
+        """
+        Submits action event via gateway (Path A) and independently verifies
+        commitment directly with peer network (Path B).
+        Returns combined payload with verification status:
+        VERIFIED_COMMITTED, PENDING_VERIFICATION, or REJECTED.
+        """
+        gateway_res = self.record_action_event(
+            event_id=event_id,
+            request_id=request_id,
+            agent_id=agent_id,
+            action=action,
+            resource=resource,
+            decision=decision,
+            reason=reason,
+            policy_id=policy_id,
+            policy_version=policy_version,
+            evidence_reference=evidence_reference,
+            evidence_hash=evidence_hash
+        )
+        expected_payload = {
+            "event_id": event_id,
+            "request_id": request_id,
+            "agent_id": agent_id,
+            "action": action,
+            "resource": resource,
+            "decision": decision,
+            "reason": reason,
+            "evidence_hash": evidence_hash,
+            "evidence_reference": evidence_reference
+        }
+        verification = self.verify_committed_transaction(
+            gateway_response=gateway_res,
+            expected_payload=expected_payload,
+            min_peers=min_peers
+        )
+        return {
+            "gateway_response": gateway_res,
+            "verification_status": verification.status.value,
+            "verification": verification,
+            "tx_id": verification.tx_id,
+            "block_number": verification.block_number,
+            "block_hash": verification.block_hash,
+            "validation_code": verification.validation_code
+        }
+

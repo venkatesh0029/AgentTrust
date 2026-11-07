@@ -1,3 +1,4 @@
+
 # Python
 __pycache__/
 *.py[cod]
@@ -78,3 +79,6 @@ fabric/system-genesis/
 # Generated Fabric CCAAS package archives
 /fabric/chaincode/ccaas-package/code.tar.gz
 /fabric/chaincode/ccaas-package-v3/code.tar.gz
+
+# Local documentation & guides excluded from repository
+WEBSITE_EXTERNAL_GUIDE.md

@@ -16,6 +16,8 @@ import {
   Crosshair,
   Activity,
   AlertTriangle,
+  Network,
+  Brain,
   Sun,
   Moon,
   ChevronLeft,
@@ -122,6 +124,8 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
     { label: "Attack Matrix Lab", path: "/attack-lab", icon: Crosshair },
     { label: "Benchmarks", path: "/benchmarks", icon: Activity },
     { label: "Sandbox & Testing", path: "/sandbox", icon: AlertTriangle, warning: true },
+    { label: "Delegation Graph", path: "/delegation-graph", icon: Network },
+    { label: "Behavioral Intelligence", path: "/behavioral-intelligence", icon: Brain },
   ];
 
   return (
@@ -151,6 +155,8 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             )}
           </Link>
           <button
+            type="button"
+            suppressHydrationWarning
             onClick={() => setCollapsed(!collapsed)}
             className="p-1 text-[var(--muted)] hover:text-[var(--fg)] rounded hover:bg-[var(--surface-2)]"
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -220,6 +226,8 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
           
           {/* Search Trigger */}
           <button
+            type="button"
+            suppressHydrationWarning
             onClick={() => setCmdOpen(true)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--muted)] hover:border-[var(--border-strong)] transition-colors w-64"
           >
@@ -244,6 +252,8 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
 
             {/* Theme Toggle */}
             <button
+              type="button"
+              suppressHydrationWarning
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
               className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--fg)] hover:bg-[var(--surface-2)] transition-colors"
               title="Toggle light/dark theme"
@@ -255,6 +265,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             <button
               id="auth-profile-button"
               type="button"
+              suppressHydrationWarning
               onClick={() => setAuthOpen(true)}
               className="flex items-center gap-2 pl-2 border-l border-[var(--border)] hover:opacity-80 transition-opacity text-left"
               title="Click to manage authentication & switch role"
