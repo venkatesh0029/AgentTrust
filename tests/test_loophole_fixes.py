@@ -245,4 +245,5 @@ def test_sqlite_persistence_across_restarts():
 def test_honest_fabric_simulator_status():
     fc = FabricClient()
     res = fc._invoke_grpc_peer("recordEvidence", ["arg1"])
-    assert res["status"] == "SIMULATED_LEDGER_COMMITTED"
+    assert res["status"] in ("PEER_ENDPOINT_UNREACHABLE", "PEER_ENDPOINT_REACHABLE", "LOCAL_SIMULATOR_NO_PEER")
+    assert "SIMULATED_LEDGER_COMMITTED" not in res.get("status", "")

@@ -17,7 +17,65 @@ class EvidenceStore:
     def __init__(self, db_path: str | None = None):
         self.db_path = resolve_database_path(db_path)
         self._store: dict[str, dict[str, Any]] = {}
+        self._ensure_genesis_record()
         self._load_from_storage()
+        self._ensure_genesis_record()
+
+    def _ensure_genesis_record(self) -> None:
+        if "EVIDENCE-REQ-GENESIS-000" not in self._store:
+            genesis_rec = {
+                "evidence_schema_version": "2.0",
+                "evidence_id": "EVIDENCE-REQ-GENESIS-000",
+                "request_id": "REQ-GENESIS-000",
+                "agent_id": "SYSTEM",
+                "certificate_fingerprint": "SHA256:0000000000000000000000000000000000000000000000000000000000000000",
+                "action": "LEDGER_GENESIS_INITIALIZE",
+                "resource": "SYSTEM_CORE",
+                "input": {
+                    "system": "AgentTrust Framework",
+                    "channel": "agenttrust-channel",
+                    "consensus": "Fabric Permissioned Ledger Simulator",
+                    "genesis_block": 0,
+                    "status": "INITIALIZED"
+                },
+                "input_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "output_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "decision": "INITIALIZED",
+                "decision_reason": "LEDGER_GENESIS_BOOTSTRAP",
+                "policy_id": "SYSTEM-GENESIS-POL",
+                "policy_version": "1.0",
+                "agent_version": "1.0",
+                "model_version": "AgentTrust-Core-v2.0",
+                "tool_version": "AgentTrust-Gateway-v1.0",
+                "nonce": "N-GENESIS-000",
+                "approval_reference": None,
+                "api_execution_result": "INITIALIZED",
+                "error_details": None,
+                "timestamp": "2026-01-01T00:00:00Z",
+                "execution_trace": {"mode": "GENESIS_BOOTSTRAP"},
+                "risk_score": 0.0,
+                "risk_level": "LOW",
+                "risk_factors": [],
+                "matched_rules": ["genesis_state_initialization"],
+                "sequence_number": 0,
+                "previous_record_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "record_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+            self._store["EVIDENCE-REQ-GENESIS-000"] = genesis_rec
+            try:
+                from fabric.persistent_db import PersistentStorageEngine
+                pe = PersistentStorageEngine(self.db_path)
+                if not pe.get_evidence("EVIDENCE-REQ-GENESIS-000"):
+                    ev_hash = HashManager.calculate_evidence_hash(genesis_rec)
+                    pe.save_evidence(
+                        evidence_id="EVIDENCE-REQ-GENESIS-000",
+                        request_id="REQ-GENESIS-000",
+                        agent_id="SYSTEM",
+                        evidence_hash=ev_hash,
+                        evidence_data=genesis_rec
+                    )
+            except Exception:
+                pass
 
     def _load_from_storage(self) -> None:
         try:
@@ -27,46 +85,6 @@ class EvidenceStore:
                 ev_id = r.get("evidence_id")
                 if ev_id:
                     self._store[ev_id] = r
-
-            if "EVIDENCE-REQ-GENESIS-000" not in self._store:
-                self._store["EVIDENCE-REQ-GENESIS-000"] = {
-                    "evidence_schema_version": "2.0",
-                    "evidence_id": "EVIDENCE-REQ-GENESIS-000",
-                    "request_id": "REQ-GENESIS-000",
-                    "agent_id": "SYSTEM",
-                    "certificate_fingerprint": "SHA256:0000000000000000000000000000000000000000000000000000000000000000",
-                    "action": "LEDGER_GENESIS_INITIALIZE",
-                    "resource": "SYSTEM_CORE",
-                    "input": {
-                        "system": "AgentTrust Framework",
-                        "channel": "agenttrust-channel",
-                        "consensus": "Fabric Permissioned Ledger Simulator",
-                        "genesis_block": 0,
-                        "status": "INITIALIZED"
-                    },
-                    "input_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-                    "output_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-                    "decision": "INITIALIZED",
-                    "decision_reason": "LEDGER_GENESIS_BOOTSTRAP",
-                    "policy_id": "SYSTEM-GENESIS-POL",
-                    "policy_version": "1.0",
-                    "agent_version": "1.0",
-                    "model_version": "AgentTrust-Core-v2.0",
-                    "tool_version": "AgentTrust-Gateway-v1.0",
-                    "nonce": "N-GENESIS-000",
-                    "approval_reference": None,
-                    "api_execution_result": "INITIALIZED",
-                    "error_details": None,
-                    "timestamp": "2026-01-01T00:00:00Z",
-                    "execution_trace": {"mode": "GENESIS_BOOTSTRAP"},
-                    "risk_score": 0.0,
-                    "risk_level": "LOW",
-                    "risk_factors": [],
-                    "matched_rules": ["genesis_state_initialization"],
-                    "sequence_number": 0,
-                    "previous_record_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-                    "record_hash": "0000000000000000000000000000000000000000000000000000000000000000"
-                }
         except Exception as exc:
             logger.debug(f"Could not load evidence from persistent storage: {exc}")
 
@@ -94,6 +112,10 @@ class EvidenceStore:
 
 
     def get_evidence(self, evidence_id: str) -> dict[str, Any] | None:
+        if evidence_id in ("REQ-GENESIS-000", "EVIDENCE-REQ-GENESIS-000"):
+            self._ensure_genesis_record()
+            return self._store.get("EVIDENCE-REQ-GENESIS-000")
+
         if evidence_id in self._store:
             return self._store[evidence_id]
         # Direct lookup by request_id
@@ -114,6 +136,10 @@ class EvidenceStore:
         return None
 
     def get_evidence_by_request_id(self, request_id: str) -> dict[str, Any] | None:
+        if request_id in ("REQ-GENESIS-000", "EVIDENCE-REQ-GENESIS-000"):
+            self._ensure_genesis_record()
+            return self._store.get("EVIDENCE-REQ-GENESIS-000")
+
         for ev in self._store.values():
             if ev.get("request_id") == request_id:
                 return ev

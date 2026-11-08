@@ -86,6 +86,11 @@ Orderer: &OrdererDefaults
         - orderer.agenttrust.com:7050
         - orderer2.agenttrust.com:8050
         - orderer3.agenttrust.com:9050
+    # 3-Node Raft Consensus Architecture (CFT):
+    # Provides Crash Fault Tolerance (CFT) with a majority quorum of (N/2)+1 = 2-of-3 nodes.
+    # Tolerates 1 crash/unreachable node while maintaining ledger ordering availability.
+    # Note: Raft CFT protects against fail-stop crashes and network partitions; it does NOT
+    # provide Byzantine Fault Tolerance (BFT) against actively malicious or compromised orderers.
     EtcdRaft:
         Consenters:
             - Host: orderer.agenttrust.com

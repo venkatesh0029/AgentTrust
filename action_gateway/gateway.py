@@ -688,21 +688,60 @@ class ActionGateway:
                     api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
                 )
 
-        # Step 8: Versioned Policy Engine Evaluation
+        # Step 8: Versioned Policy Engine Evaluation & Atomic Volume Reservation
         policy_id = agent_record.get("policy_id", "NONE")
         cumulative_amount = 0.0
         tx_count_in_window = 0
-        if self.persistent_db and hasattr(self.persistent_db, "get_cumulative_volume"):
+        p_record = self.policy_evaluator.loader.get_policy(policy_id) if hasattr(self.policy_evaluator, "loader") else None
+        win_sec = getattr(p_record, "velocity_window_seconds", 86400) if p_record else 86400
+        max_cum = getattr(p_record, "cumulative_maximum_amount", None) if p_record else None
+        max_tx = getattr(p_record, "max_transactions_per_window", None) if p_record else None
+
+        reservation_active = False
+        if self.persistent_db and hasattr(self.persistent_db, "check_and_reserve_cumulative_volume"):
             try:
-                p_record = self.policy_evaluator.loader.get_policy(policy_id)
-                win_sec = getattr(p_record, "velocity_window_seconds", 86400) if p_record else 86400
+                allowed, new_total, new_count, res_reason = self.persistent_db.check_and_reserve_cumulative_volume(
+                    agent_id=agent_id,
+                    action=action,
+                    amount=amount,
+                    window_seconds=win_sec,
+                    max_cumulative_limit=max_cum,
+                    max_velocity_count=max_tx,
+                    request_id=request_id,
+                    idempotency_key=idempotency_key,
+                    request_fingerprint=request_fingerprint
+                )
+                if not allowed:
+                    return self._finalize_gateway_outcome(
+                        request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                        parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                        reason=res_reason,
+                        policy_id=policy_id,
+                        policy_version=getattr(p_record, "version", "1.0") if p_record else "1.0",
+                        agent_version=agent_record.get("agent_version", "1.0"),
+                        api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
+                    )
+                reservation_active = True
+                cumulative_amount = max(0.0, new_total - amount)
+                tx_count_in_window = max(0, new_count - 1)
+            except Exception as ex:
+                return self._finalize_gateway_outcome(
+                    request_id=request_id, agent_id=agent_id, action=action, resource=resource,
+                    parameters=parameters, decision=PolicyDecision.BLOCKED.value,
+                    reason=f"PERSISTENT_VOLUME_CHECK_FAILED: {str(ex)}",
+                    policy_id=policy_id,
+                    policy_version="1.0", agent_version=agent_record.get("agent_version", "1.0"),
+                    api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
+                )
+        elif self.persistent_db and hasattr(self.persistent_db, "get_cumulative_volume"):
+            try:
                 cumulative_amount, tx_count_in_window = self.persistent_db.get_cumulative_volume(agent_id, window_seconds=win_sec)
             except Exception as ex:
                 return self._finalize_gateway_outcome(
                     request_id=request_id, agent_id=agent_id, action=action, resource=resource,
                     parameters=parameters, decision=PolicyDecision.BLOCKED.value,
                     reason=f"PERSISTENT_VOLUME_CHECK_FAILED: {str(ex)}",
-                    policy_id=agent_record.get("policy_id", "NONE"),
+                    policy_id=policy_id,
                     policy_version="1.0", agent_version=agent_record.get("agent_version", "1.0"),
                     api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
                 )
@@ -748,7 +787,7 @@ class ActionGateway:
         event_id = f"EVENT-{uuid.uuid4().hex[:12].upper()}"
 
         if decision == PolicyDecision.ALLOWED:
-            if self.persistent_db:
+            if not reservation_active and self.persistent_db:
                 try:
                     self.persistent_db.save_intent(
                         request_id=request_id,
@@ -874,6 +913,15 @@ class ActionGateway:
                         pass
 
         elif decision == PolicyDecision.PENDING_HUMAN_APPROVAL:
+            if reservation_active and self.persistent_db:
+                try:
+                    if hasattr(self.persistent_db, "release_reservation"):
+                        self.persistent_db.release_reservation(request_id, new_state="HELD_FOR_HUMAN_APPROVAL", reason=reason.value if hasattr(reason, "value") else str(reason))
+                    else:
+                        self.persistent_db.update_intent_state(request_id=request_id, state="HELD_FOR_HUMAN_APPROVAL", expected_current_state="AUTHORIZED_PENDING_EXECUTION")
+                except Exception:
+                    pass
+
             # Route to Human Approval Queue with immutable authorization context & delegation token
             raw_hash = SignatureManager.canonical_serialize(payload_to_verify).hex()
             auth_context = {
@@ -900,6 +948,16 @@ class ActionGateway:
                 delegation_token=delegation_token
             )
             api_result = "HELD_FOR_HUMAN_APPROVAL"
+
+        elif decision == PolicyDecision.BLOCKED:
+            if reservation_active and self.persistent_db:
+                try:
+                    if hasattr(self.persistent_db, "release_reservation"):
+                        self.persistent_db.release_reservation(request_id, new_state="REJECTED", reason=reason.value if hasattr(reason, "value") else str(reason))
+                    else:
+                        self.persistent_db.update_intent_state(request_id=request_id, state="REJECTED", expected_current_state="AUTHORIZED_PENDING_EXECUTION")
+                except Exception:
+                    pass
 
         # Step 10, 11, 12 & 13: Evidence Generation, Hash Chain Writer, Blockchain Commit
         return self._finalize_gateway_outcome(
@@ -1056,6 +1114,16 @@ class ActionGateway:
 
         agent_record = validation_context.get("agent_record") or self.registry.get_agent(agent_id) or {}
         approval_ref = updated_record.get("approval_reference")
+
+        if self.persistent_db:
+            try:
+                self.persistent_db.update_intent_state(
+                    request_id=request_id,
+                    state="AUTHORIZED_PENDING_EXECUTION",
+                    expected_current_state="HELD_FOR_HUMAN_APPROVAL"
+                )
+            except Exception:
+                pass
 
         # Execute protected business action
         auth_headers = self.finance_api.create_gateway_auth_headers(request_id)

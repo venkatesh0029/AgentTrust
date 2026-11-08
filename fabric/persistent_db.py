@@ -57,7 +57,8 @@ class LockAcquisitionResult:
 
 VALID_INTENT_TRANSITIONS: dict[str, set[str]] = {
     "PENDING_AUTHORIZATION": {"AUTHORIZED_PENDING_EXECUTION", "REJECTED"},
-    "AUTHORIZED_PENDING_EXECUTION": {"EXECUTED_PENDING_LEDGER", "EXECUTION_FAILED", "REJECTED"},
+    "AUTHORIZED_PENDING_EXECUTION": {"EXECUTED_PENDING_LEDGER", "EXECUTION_FAILED", "REJECTED", "HELD_FOR_HUMAN_APPROVAL"},
+    "HELD_FOR_HUMAN_APPROVAL": {"AUTHORIZED_PENDING_EXECUTION", "REJECTED"},
     "EXECUTED_PENDING_LEDGER": {"COMMITTED", "COMPLETED", "LEDGER_PENDING_RETRY", "FAILED"},
     "LEDGER_PENDING_RETRY": {"COMMITTED", "COMPLETED", "LEDGER_PENDING_RETRY", "LEDGER_RETRY_EXHAUSTED"},
     # Terminal states (no further transitions permitted)
@@ -1711,6 +1712,33 @@ class PersistentStorageEngine:
                 ))
                 conn.commit()
                 return True, total_amount + amount, tx_count + 1, "OK"
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    def release_reservation(self, request_id: str, new_state: str = "REJECTED", reason: str | None = None) -> None:
+        """
+        Transitions an atomic volume reservation to a non-counting terminal state (default REJECTED),
+        releasing the reserved capacity when a request is blocked, rejected, or cancelled.
+        """
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN IMMEDIATE")
+                cursor.execute("SELECT state FROM transaction_intents WHERE request_id = ?", (request_id,))
+                row = cursor.fetchone()
+                if row and row["state"] in ("AUTHORIZED_PENDING_EXECUTION", "HELD_FOR_HUMAN_APPROVAL"):
+                    now = datetime.datetime.now(datetime.UTC).isoformat()
+                    outcome = {"release_reason": reason} if reason else None
+                    cursor.execute("""
+                        UPDATE transaction_intents SET state = ?, outcome_json = ?, updated_at = ? WHERE request_id = ?
+                    """, (new_state, json.dumps(outcome) if outcome else None, now, request_id))
+                    conn.commit()
+                else:
+                    conn.rollback()
             except Exception:
                 conn.rollback()
                 raise

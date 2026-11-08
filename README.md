@@ -193,7 +193,9 @@ AgentTrust supports two interchangeable operational consensus topologies:
    - Implements local SHA-256 block hash-chaining, Merkle inclusion proof generation, leased lock fencing, and crash fault outbox recovery.
 2. **Enterprise Multi-Peer Hyperledger Fabric v2.5 (Production Mode)**:
    - Deploys an enterprise multi-organization Fabric topology via Docker Compose ([`fabric/docker-compose-fabric.yaml`](fabric/docker-compose-fabric.yaml)).
-   - Features **Raft-3 crash fault-tolerant ordering**, dual endorsing peers (`peer0.org1` and `peer0.org2`), CouchDB state indexes, Chaincode-as-an-External-Service (CCaaS), and a Go SDK REST Gateway Bridge.
+   - Features **3-Node Raft Crash Fault-Tolerant (CFT) ordering** (`orderer`, `orderer2`, `orderer3`) with a 2-of-3 majority quorum ($(N/2)+1$) tolerating 1 node crash failure, backed by named persistent ledger volumes (`orderer*-data`).
+   - *Security Note on Consensus*: Raft provides Crash Fault Tolerance (CFT), not Byzantine Fault Tolerance (BFT). Malicious tampering protection is enforced through RSA-PSS/ECDSA client signature envelopes, dual-organization peer endorsement policies, and immutable ledger state validation.
+   - Dual endorsing peers (`peer0.org1` and `peer0.org2`), CouchDB state indexes, Chaincode-as-an-External-Service (CCaaS), and a Go SDK REST Gateway Bridge.
    - **Guaranteed Fail-Closed Boundary**: If the live Fabric network becomes partitioned or unreachable, actions requiring immutable on-chain finality are held in the durable outbox (`reconciliation_queue`) rather than silently falling back to local simulation.
 
 ---

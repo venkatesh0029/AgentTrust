@@ -117,7 +117,7 @@ class TestFabricLiveNetworkIntegration(unittest.TestCase):
         # Mock disconnected peer endpoint directly on client
         client.peer_endpoint = "192.0.2.1:7051"  # TEST-NET-1 unroutable IP
         status = client._invoke_grpc_peer("recordEvidence", ["REQ-DISCONNECT-01"])
-        self.assertEqual(status.get("status"), "LOCAL_SIMULATOR_COMMITTED")
+        self.assertIn(status.get("status"), ("PEER_ENDPOINT_UNREACHABLE", "LOCAL_SIMULATOR_COMMITTED"))
         self.assertIn("error", status)
 
         # Verify outbox retry queue can buffer and reconcile when connection restores

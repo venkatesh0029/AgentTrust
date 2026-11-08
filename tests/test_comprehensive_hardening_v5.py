@@ -189,17 +189,36 @@ def test_finding_6_certificate_manager_ecdsa_and_unsupported_key_support():
 # Loophole 11 & 12: Gateway Fail-Closed Rejections
 # -----------------------------------------------------------------------------
 def test_loophole_11_fail_closed_on_persistent_db_volume_exception():
-    """Verify ActionGateway fails closed if get_cumulative_volume throws an unexpected exception."""
+    """Verify ActionGateway fails closed if get_cumulative_volume or reservation throws an unexpected exception."""
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         db_path = os.path.join(tmp, "test_gw.db")
         cert_mgr = CertificateManager(db_path=db_path)
         id_store = IdentityStore(db_path=db_path)
         registry = AgentRegistry(cert_mgr, id_store)
 
-        reg = registry.register_agent(agent_id="ERR-AGENT-01", agent_name="Error Test Agent")
+        from policy_engine.policy_models import PolicyRecord
+        loader = PolicyLoader()
+        loader.save_policy(PolicyRecord(
+            policy_id="FIN-POLICY-001",
+            agent_id="ERR-AGENT-01",
+            version="1.0",
+            allowed_actions=["CREATE_PURCHASE_ORDER"],
+            allowed_resource="*",
+            maximum_amount=50000.0,
+            human_approval_above=25000.0
+        ))
+
+        reg = registry.register_agent(
+            agent_id="ERR-AGENT-01",
+            agent_name="Error Test Agent",
+            policy_id="FIN-POLICY-001"
+        )
         priv_key = reg["private_key"]
 
         class BrokenDB(PersistentStorageEngine):
+            def check_and_reserve_cumulative_volume(self, *args, **kwargs):
+                raise sqlite3.OperationalError("Simulated database lock failure / I/O error")
+
             def get_cumulative_volume(self, *args, **kwargs):
                 raise sqlite3.OperationalError("Simulated database lock failure / I/O error")
 
@@ -207,7 +226,7 @@ def test_loophole_11_fail_closed_on_persistent_db_volume_exception():
         gw = ActionGateway(
             registry=registry,
             cert_manager=cert_mgr,
-            policy_evaluator=PolicyEvaluator(PolicyLoader()),
+            policy_evaluator=PolicyEvaluator(loader),
             replay_tracker=RequestTracker(300),
             finance_api=ProtectedFinanceAPI(),
             approval_manager=HumanApprovalManager(),
@@ -294,3 +313,150 @@ def test_loophole_13_delegation_and_behavior_engines_atomic_upsert():
     agent_behavior_engine._persist_all()
     summary_beh_after = agent_behavior_engine.get_summary()
     assert summary_beh_after["monitored_agents"] == initial_monitored
+
+
+# -----------------------------------------------------------------------------
+# Second-Pass Audit Remediation Verification: End-to-End Concurrent Gateway Reservation
+# -----------------------------------------------------------------------------
+def test_second_pass_audit_concurrent_smurfing_via_action_gateway():
+    """
+    Second-Pass Review Gap 1: Verify ActionGateway.process_request() enforces atomic
+    cumulative volume reservation across concurrent threads without a check-then-act race.
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = os.path.join(tmp, "test_gw_smurf.db")
+        cert_mgr = CertificateManager(db_path=db_path)
+        id_store = IdentityStore(db_path=db_path)
+        registry = AgentRegistry(cert_mgr, id_store)
+        p_db = PersistentStorageEngine(db_path=db_path)
+
+        reg = registry.register_agent(
+            agent_id="SMURF-GATEWAY-AGENT",
+            agent_name="Concurrent Smurf Agent",
+            policy_id="FIN-POLICY-001"
+        )
+        priv_key = reg["private_key"]
+
+        from policy_engine.policy_models import PolicyRecord, WorkingHours
+        loader = PolicyLoader()
+        policy = PolicyRecord(
+            policy_id="FIN-POLICY-001",
+            agent_id="SMURF-GATEWAY-AGENT",
+            version="1.0",
+            allowed_actions=["TRANSFER_FUNDS"],
+            allowed_resource="*",
+            maximum_amount=50000.0,
+            cumulative_maximum_amount=10000.0,
+            max_transactions_per_window=10,
+            velocity_window_seconds=86400,
+            human_approval_above=25000.0,
+            working_hours=WorkingHours(start="00:00", end="23:59")
+        )
+        loader.save_policy(policy)
+
+        gw = ActionGateway(
+            registry=registry,
+            cert_manager=cert_mgr,
+            policy_evaluator=PolicyEvaluator(loader),
+            replay_tracker=RequestTracker(300),
+            finance_api=ProtectedFinanceAPI(),
+            approval_manager=HumanApprovalManager(),
+            evidence_store=EvidenceStore(),
+            fabric_client=FabricClient(),
+            persistent_db=p_db
+        )
+
+        results = []
+        barrier = threading.Barrier(4)
+
+        def worker(idx):
+            payload = {
+                "request_id": f"REQ-GW-CONC-{idx}-{uuid.uuid4().hex[:6]}",
+                "agent_id": "SMURF-GATEWAY-AGENT",
+                "action": "TRANSFER_FUNDS",
+                "resource": "ACCOUNT-999",
+                "parameters": {"amount": 4000.0},
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "nonce": f"NONCE-GW-{idx}-{uuid.uuid4().hex[:8]}",
+                "idempotency_key": f"IDEMP-GW-{idx}-{uuid.uuid4().hex[:8]}"
+            }
+            payload["signature"] = SignatureManager.sign_request(payload, priv_key)
+            barrier.wait()
+            res = gw.process_request(payload)
+            results.append(res)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        allowed = [r for r in results if r["decision"] in ("ALLOWED", "COMPLETED")]
+        blocked = [r for r in results if r["decision"] == "BLOCKED"]
+
+        # Exactly 2 requests allowed (2 * 4,000 = 8,000 <= 10,000; 3rd would be 12,000 > 10,000)
+        assert len(allowed) == 2, f"Expected exactly 2 allowed requests, got {len(allowed)} (blocked: {len(blocked)})"
+        assert len(blocked) == 2, f"Expected exactly 2 blocked requests, got {len(blocked)}"
+        for b in blocked:
+            assert "CUMULATIVE_LIMIT_EXCEEDED" in b["reason"]
+        p_db.close()
+
+
+def test_second_pass_audit_crypto_specs_and_orderer_named_volumes():
+    """
+    Second-Pass Review Gap 2 & 3: Verify all 3 orderers exist in crypto-config.yaml
+    and docker-compose-fabric.yaml defines named volumes for all 3 orderers and parameterizes credentials.
+    """
+    # 1. crypto-config.yaml
+    crypto_path = os.path.join(os.path.dirname(__file__), "..", "fabric", "crypto-config.yaml")
+    with open(crypto_path, "r", encoding="utf-8") as f:
+        crypto_cfg = yaml.safe_load(f)
+
+    orderer_orgs = crypto_cfg["OrdererOrgs"][0]
+    specs = [s["Hostname"] for s in orderer_orgs["Specs"]]
+    assert "orderer" in specs
+    assert "orderer2" in specs
+    assert "orderer3" in specs
+
+    # 2. docker-compose-fabric.yaml named volumes
+    compose_path = os.path.join(os.path.dirname(__file__), "..", "fabric", "docker-compose-fabric.yaml")
+    with open(compose_path, "r", encoding="utf-8") as f:
+        compose_cfg = yaml.safe_load(f)
+
+    vols = compose_cfg.get("volumes", {})
+    assert "orderer.agenttrust.com-data" in vols
+    assert "orderer2.agenttrust.com-data" in vols
+    assert "orderer3.agenttrust.com-data" in vols
+
+    # 3. Credential parameterization consistency in peer & couchdb nodes
+    services = compose_cfg.get("services", {})
+    for p_name in ("peer0.org1.agenttrust.com", "peer0.org2.agenttrust.com"):
+        env = services[p_name]["environment"]
+        couch_user_env = [e for e in env if "CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME" in e]
+        couch_pass_env = [e for e in env if "CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD" in e]
+        assert any("${COUCHDB_USER" in e for e in couch_user_env)
+        assert any("${COUCHDB_PASSWORD" in e for e in couch_pass_env)
+
+
+def test_second_pass_audit_fabric_client_honest_peer_status():
+    """
+    Second-Pass Review Gap 4: Verify _invoke_grpc_peer returns honest PEER_ENDPOINT_REACHABLE
+    status and PROPOSAL_DISPATCH_UNCOMMITTED mode without claiming simulated commit.
+    """
+    import socket
+    fc = FabricClient()
+
+    # Create dummy local server socket to simulate open TCP port
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+
+    try:
+        fc.peer_endpoint = f"127.0.0.1:{port}"
+        res = fc._invoke_grpc_peer("record_evidence", ["REQ-1", "HASH-1"])
+        assert res["status"] == "PEER_ENDPOINT_REACHABLE"
+        assert res["mode"] == "PROPOSAL_DISPATCH_UNCOMMITTED"
+        assert "SIMULATED_LEDGER_COMMITTED" not in res["status"]
+    finally:
+        srv.close()

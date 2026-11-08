@@ -76,13 +76,13 @@ class FabricClient:
     def _invoke_grpc_peer(self, function_name: str, args: list[str]) -> dict[str, Any]:
         """
         Submits gRPC transaction proposal directly to the Hyperledger Fabric Peer node.
-        Honestly reports whether real Fabric gRPC Gateway SDK connection is established,
-        or explicitly returns SIMULATED_LEDGER_COMMITTED status when using local simulator.
-        NOTE: Network endpoint probe is isolated; actual live transactions use record_action_event().
+        Honestly reports whether real Fabric gRPC Gateway SDK connection is established.
+        A reachable TCP socket proves network connectivity only; it does NOT constitute
+        transaction endorsement, ordering consensus, or ledger commit.
         """
         if not self.peer_endpoint:
             return {
-                "status": "SIMULATED_LEDGER_COMMITTED",
+                "status": "LOCAL_SIMULATOR_NO_PEER",
                 "mode": "Fabric-Compatible Permissioned Ledger Simulator",
                 "function": function_name
             }
@@ -90,12 +90,18 @@ class FabricClient:
         probe = self.probe_peer_connectivity()
         if probe.get("reachable"):
             return {
-                "status": "SIMULATED_LEDGER_COMMITTED",
+                "status": "PEER_ENDPOINT_REACHABLE",
+                "mode": "PROPOSAL_DISPATCH_UNCOMMITTED",
                 "peer_endpoint": self.peer_endpoint,
                 "function": function_name,
-                "note": "Fabric-Compatible Permissioned Ledger Simulator Gateway Active"
+                "note": "TCP endpoint reachable; does not prove proposal endorsement, ordering consensus, or ledger commit"
             }
-        return {"status": "LOCAL_SIMULATOR_COMMITTED", "error": probe.get("error", "PEER_UNREACHABLE")}
+        return {
+            "status": "PEER_ENDPOINT_UNREACHABLE",
+            "mode": "PROPOSAL_DISPATCH_FAILED",
+            "peer_endpoint": self.peer_endpoint,
+            "error": probe.get("error", "PEER_UNREACHABLE")
+        }
 
     def record_action_event(
         self,
