@@ -276,12 +276,6 @@ In enterprise agentic workflows, autonomous agents frequently operate in multi-a
 
 However, unconstrained delegation introduces severe security hazards: privilege escalation via sub-agents, cyclic delegation loops, unauthorized lateral movement, and unmonitored budget leakage.
 
-<p align="center">
-  <img src="docs/images/delegation_authority_graph.jpg" width="95%" alt="Intelligent Multi-Agent Delegation Authority Graph" />
-  <br/>
-  <em><b>Figure 3: Intelligent Multi-Agent Delegation Authority Graph</b> — Live visualization of agent blast radius, hierarchical delegation trees, transitive permission attenuation, endpoint bindings, and dynamic cross-agent transaction budgets.</em>
-</p>
-
 ### Key Capabilities & Governance Invariants
 
 AgentTrust provides a complete, mathematically bounded **Multi-Agent Authority Graph Engine** ([`identity_manager/delegation_graph.py`](identity_manager/delegation_graph.py)):
