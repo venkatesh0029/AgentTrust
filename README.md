@@ -15,7 +15,7 @@
 <br/>
 
 [![Verification Suite](https://img.shields.io/badge/Verification_Suite-5%2F5%20Stages%20Passed-success?logo=checkmarx&logoColor=white)](verify_all.py)
-[![Regression Tests](https://img.shields.io/badge/Regression_Suite-345%20Passed%20(0%20Failures)-brightgreen?logo=pytest&logoColor=white)](tests/)
+[![Regression Tests](https://img.shields.io/badge/Regression_Suite-345%2B%20Passed%20(0%20Failures)-brightgreen?logo=pytest&logoColor=white)](tests/)
 [![Code Hygiene](https://img.shields.io/badge/Code_Quality-Ruff%20%26%20Mypy%20Clean-success?logo=python)](verify_all.py)
 [![Production Acceptance](https://img.shields.io/badge/Production_Acceptance-9%2F9%20Checks%20Passed-blueviolet)](scripts/verify_production_acceptance.py)
 [![Security Invariants](https://img.shields.io/badge/Security-12%2F12%20Invariants%20Verified-blue)](documentation/security_model.md)
@@ -28,9 +28,11 @@
 [Executive Overview](#-executive-overview) •
 [Architecture](#-system-architecture) •
 [13-Stage Gateway](#-the-13-stage-action-gateway-pipeline) •
+[Delegation Authority Graph](#-intelligent-multi-agent-delegation-authority-graph) •
+[Behavioral Intelligence (UEBA)](#-ai-agent-behavioral-intelligence-engine-ueba) •
 [Core Technical Innovations](#-core-technical-innovations-v100-ga) •
 [Live Hyperledger Fabric](#-live-multi-peer-hyperledger-fabric-v25-network) •
-[Next.js 16 Console](#-dual-monitoring-interfaces--nextjs-16-console) •
+[Dual Monitoring Interfaces & Next.js 16 Console](#-dual-monitoring-interfaces--nextjs-16-console) •
 [Attack Lab (20 Scenarios)](#-adversarial-attack-lab-20-scenarios) •
 [Empirical Benchmarks](#-empirical-security-evaluation--benchmarks) •
 [Security Invariants](#-the-12-core-security-invariants) •
@@ -44,13 +46,23 @@
 
 ---
 
+<p align="center">
+  <img src="docs/images/console_overview_dashboard.png" width="95%" alt="AgentTrust Security Operations Console Overview" />
+  <br/>
+  <em><b>Figure 1: AgentTrust Security Operations Console Overview</b> — Real-time enterprise telemetry monitoring active autonomous AI agents, ledger block heights, verification states, and tamper-evident audit chains.</em>
+</p>
+
+---
+
 > ### 🚀 General Availability (GA) Release Milestone: v1.0.0
 > **AgentTrust v1.0.0** is the first production-grade General Availability release of the distributed cryptographic security and governance platform for autonomous enterprise AI agents.
+> - **Intelligent Multi-Agent Delegation Authority Graph**: Transitive permission attenuation ($P_{child} \subseteq P_{parent}$), delegation depth caps ($D_{max}=4$), cycle detection, and live on-the-spot cross-agent transaction budget tracking.
+> - **AI Agent Behavioral Intelligence Engine (UEBA)**: Microsoft Sentinel-style continuous statistical baselining, Markov sequence transition modeling, 7 binary indicator flags (0/1), explainable anomaly scoring (0-100), and automated human review escalation.
 > - **Stateful Cumulative Limits & Velocity Controls**: Resolves micro-transaction structuring and smurfing evasion vectors (`V4-ADV-022`) via rolling-window volume accounting and compound indexed ledger lookups.
 > - **Sub-55ms Gateway Latency (>2x Concurrency Scaling)**: Single-client median latency reduced by **-52.6%** to **54.89 ms** (15.0 RPS); concurrency scaled across 1–50 concurrent clients with **0.0% error rate** across 430 load requests.
 > - **Expanded Multilingual & Indirect Injection Defenses**: Multilingual guardrail coverage across Spanish, French, German, Chinese, and Hindi, coupled with XML/HTML delimiter escape scanners, whole-text ROT-13 decoding, punctuation-agnostic Base64 extraction, and zero-width character stripping.
 > - **100.00% Layer 2 Gateway Containment**: Across all frozen benchmark suites (Curated V1, Held-Out V1, Held-Out V2, Held-Out V3, Held-Out V4), **100% of adversarial payloads are decisively contained** at the cryptographic policy layer, with zero unauthorized state mutations or financial side-effects.
-> - **Comprehensive Verification Baseline**: **5/5 stages cleanly passed** in [`verify_all.py`](verify_all.py), **9/9 checks passed** in [`scripts/verify_production_acceptance.py`](scripts/verify_production_acceptance.py), and **320 tests passed (0 failures)**.
+> - **Comprehensive Verification Baseline**: **5/5 stages cleanly passed** in [`verify_all.py`](verify_all.py), **9/9 checks passed** in [`scripts/verify_production_acceptance.py`](scripts/verify_production_acceptance.py), and **345+ tests passed (0 failures)**.
 
 ---
 
@@ -67,13 +79,13 @@ However, granting operational autonomy to non-deterministic probabilistic models
                               (Non-repudiable X.509 PKI)
                                          ▲
                                         / \
-                                       /   \
-                                      /     \
-                                     /       \
-                                    /  Agent  \
-                                   /   Trust   \
-                                  /             \
-                                 /               \
+                                       /   \\
+                                      /     \\
+                                     /       \\
+                                    /  Agent  \\
+                                   /   Trust   \\
+                                  /             \\
+                                 /               \\
               Bounded Authorization ◄───────────► Tamper-Evident Accountability
             (13-Stage Pipeline & Policies)       (Merkle Evidence & Fabric Ledger)
 ```
@@ -91,6 +103,8 @@ AgentTrust sits as an unbypassable, zero-trust gateway between autonomous AI age
 | **Agent Identity** | Static IP whitelists or shared OAuth client tokens. | Evaluates text strings without cryptographic identity. | **Cryptographic X.509 PKI**: Hardware-backed (SoftHSM2 / PKCS#11) RSA-2048 / ECDSA digital signatures per agent with dynamic Certificate Revocation Lists (CRL). |
 | **Authorization Bounds** | Coarse route-level HTTP checks (`POST /api/v1/payments`). | Text-level classification; oblivious to balances or limits. | **13-Stage Gateway & Stateful Policies**: Enforces transaction caps, rolling-window cumulative volume, velocity limits, allowed scopes, integer minor-unit canonicalization, and working hours. |
 | **Tool / MCP Governance** | Unable to validate structured LLM tool parameters. | Ephemeral prompt filtering vulnerable to zero-day escapes. | **Parameter-Bound Intent Verification**: Cryptographically binds Model Context Protocol (MCP) tool calls, sub-agent delegations, and request parameters directly to signed intent envelopes. |
+| **Authority Delegation** | Ambient bearer tokens passed downstream without restrictions. | No multi-agent hierarchy or blast radius bounds. | **Intelligent Authority Graph**: Transitive permission attenuation ($P_{child} \subseteq P_{parent}$), delegation depth caps ($D \le 4$), cycle detection, and live budget tracking. |
+| **Behavioral Analytics** | Static rate limits per IP address; lacks agent context. | Stateless prompt evaluation; no historical profiling. | **AI Agent UEBA Engine**: Learns normal transaction amounts, schedules, and sequences; triggers human approval upon behavioral deviation without granting independent permissions. |
 | **Tamper Evidence** | Centralized SQL/NoSQL logs vulnerable to insider modification. | Ephemeral telemetry; lacks mathematical non-repudiation. | **Dual Consensus Ledgers**: Off-chain SHA-256 evidence digests anchored into backward-linked Merkle trees and committed to a multi-peer **Hyperledger Fabric v2.5 Raft consensus network**. |
 | **Concurrency & Outage Safety** | Susceptible to split-brain double-spends on network retries. | No transaction state machine or crash reconciliation. | **Leased Locks & Fencing Tokens**: Monotonic fencing tokens, TTL-leased locks, and a durable transactional outbox reconciling unconfirmed ledger commits fail-closed. |
 
@@ -121,7 +135,7 @@ flowchart TB
 
         subgraph P2 ["Phase 2: Replay, Risk & Stateful Policy Authorization"]
             S5["Stage 5: Nonce Freshness & Idempotency Tracker"]
-            S6["Stage 6: Multilingual Injection & Risk Engine"]
+            S6["Stage 6: Multilingual Injection & UEBA Behavioral Engine"]
             S7["Stage 7: Stateful Cumulative Limits & Velocity Evaluator"]
             S8{"Stage 8: Decision Gate"}
             S5 --> S6 --> S7 --> S8
@@ -188,13 +202,19 @@ AgentTrust supports two interchangeable operational consensus topologies:
 
 Every transaction intent submitted by an autonomous agent traverses 13 sequential verification stages before touching any downstream resource:
 
+<p align="center">
+  <img src="docs/images/gateway_pipeline_inspector.jpg" width="95%" alt="13-Stage Action Gateway Pipeline Inspector" />
+  <br/>
+  <em><b>Figure 2: 13-Stage Action Gateway Pipeline Inspector</b> — Step-by-step cryptographic identity validation, replay defense, multilingual prompt-injection analysis, stateful policy checks, and distributed ledger commits.</em>
+</p>
+
 ```mermaid
 sequenceDiagram
     autonumber
     actor Agent as Autonomous Agent
     participant GW as Action Gateway
     participant PKI as X.509 PKI & CRL
-    participant Risk as Risk & Injection Guard
+    participant Risk as Risk & UEBA Engine
     participant Pol as Stateful Policy Engine
     participant HITL as Human Approver
     participant API as Protected API
@@ -208,11 +228,11 @@ sequenceDiagram
     Note over GW: Stage 3: Verify RSA-PSS/ECDSA Signature
     Note over GW: Stage 4: Check Agent Status & Key Version
     Note over GW: Stage 5: Nonce Freshness & Idempotency Check
-    GW->>Risk: Stage 6: Multilingual Injection & Risk Scoring
-    Risk-->>GW: Risk Score & Threat Indicators
+    GW->>Risk: Stage 6: Multilingual Injection & UEBA Anomaly Scoring
+    Risk-->>GW: Risk Score, Indicator Flags & Anomaly Distance
     GW->>Pol: Stage 7: Stateful Rolling Cumulative & Velocity Check
     Pol-->>GW: Authorization Evaluation Result
-    alt High Risk / Exceeds Approval Cap / Smurfing Evasion
+    alt High Risk / Exceeds Approval Cap / Behavioral Anomaly / Smurfing
         GW->>HITL: Stage 8: HOLD_FOR_APPROVAL (Ticket Issued)
         HITL-->>GW: Signed Approval Token (Resumed)
         Note over GW: Re-validate TOCTOU (Payload, Status, Key)
@@ -235,7 +255,7 @@ sequenceDiagram
 | | **3** | **Digital Signature Verification** | [`identity_manager/signature_verifier.py`](identity_manager/signature_verifier.py) | **Forged Signatures & In-Transit Tampering**: Validates RSA-PSS or ECDSA digital signature over canonicalized bytes using registered public key. |
 | | **4** | **Agent & Key Lifecycle State** | [`agent_registry/status_manager.py`](agent_registry/status_manager.py) | **Zombie & Compromised Agents**: Rejects agents in `SUSPENDED` or `REVOKED` status fail-closed; ensures active key version matches registration. |
 | **Policy & Risk** | **5** | **Replay & Idempotency Tracker** | [`replay_protection/nonce_tracker.py`](replay_protection/nonce_tracker.py) | **Replay Attacks & Accidental Retries**: Validates request timestamp within allowed skew window ($\pm 300\text{s}$); enforces single-use nonces and idempotency caching. |
-| | **6** | **Multilingual Risk & Prompt Injection** | [`risk_engine/prompt_injection_guard.py`](risk_engine/prompt_injection_guard.py) | **Prompt Injections & Delimiter Escapes**: Evaluates multilingual vectors (ES, FR, DE, ZH, HI), ROT-13/Base64 evasion, and XML/HTML delimiter breaks across payload parameters. |
+| | **6** | **Multilingual Risk & Behavioral UEBA** | [`risk_engine/behavior_engine.py`](risk_engine/behavior_engine.py) | **Prompt Injections & Behavioral Deviations**: Evaluates multilingual injection vectors (ES, FR, DE, ZH, HI), ROT-13/Base64 evasion, delimiter breaks, and UEBA anomaly scores. |
 | | **7** | **Stateful Policy & Cumulative Limits** | [`policy_engine/evaluator.py`](policy_engine/evaluator.py) | **Overspending & Smurfing Structuring (`V4-ADV-022`)**: Evaluates rolling-window cumulative transaction volume, velocity caps, allowed resource scopes, and business hours. |
 | | **8** | **Decision Gate & HITL Token** | [`action_gateway/gateway.py`](action_gateway/gateway.py) | **TOCTOU Approval Vulnerabilities**: Emits `ALLOWED`, `BLOCKED`, or `PENDING_HUMAN_APPROVAL`. Enforces single-use cryptographic token binding upon resumption. |
 | **Execution & Audit** | **9** | **Protected API Dispatch** | [`protected_api/finance_api.py`](protected_api/finance_api.py) | **Direct Gateway Bypass**: Dispatches request with secret HMAC `X-Gateway-Signature`; downstream protected services reject unauthenticated traffic. |
@@ -243,6 +263,116 @@ sequenceDiagram
 | | **11** | **Hash-Chained Audit Logging** | [`audit_writer/hash_chain.py`](audit_writer/hash_chain.py) | **Log File Modification**: Appends transaction digest into a backward-linked SHA-256 cryptographic chain ($H_n = \text{SHA256}(H_{n-1} \parallel D_n)$). |
 | | **12** | **Hyperledger Fabric Consensus Commit** | [`fabric/ledger_service.py`](fabric/ledger_service.py) | **Single-Database Tampering**: Commits action event digest and evidence reference to Hyperledger Fabric v2.5 multi-peer network (or local simulator). |
 | | **13** | **Telemetry & Signed Receipt** | [`action_gateway/gateway.py`](action_gateway/gateway.py) | **Traceability & Proof of Execution**: Emits structured telemetry and returns signed gateway receipt with transaction ID, status, and block height to caller. |
+
+---
+
+## 🕸️ Intelligent Multi-Agent Delegation Authority Graph
+
+In enterprise agentic workflows, autonomous agents frequently operate in multi-agent hierarchies—delegating specialized sub-tasks to downstream agents:
+- **Finance Supervisor Agent (Agent A)**: Oversees enterprise treasury operations and approves major disbursement proposals.
+- **Payment Processing Agent (Agent B)**: Executes wire disbursements and settlement batches with downstream financial endpoints.
+- **Vendor Verification Agent (Agent C)**: Validates invoice line items against supplier master agreements and tax records.
+- **Audit & Reporting Agent (Agent D)**: Compiles continuous compliance summaries and ledger audit proofs.
+
+However, unconstrained delegation introduces severe security hazards: privilege escalation via sub-agents, cyclic delegation loops, unauthorized lateral movement, and unmonitored budget leakage.
+
+<p align="center">
+  <img src="docs/images/delegation_authority_graph.jpg" width="95%" alt="Intelligent Multi-Agent Delegation Authority Graph" />
+  <br/>
+  <em><b>Figure 3: Intelligent Multi-Agent Delegation Authority Graph</b> — Live visualization of agent blast radius, hierarchical delegation trees, transitive permission attenuation, endpoint bindings, and dynamic cross-agent transaction budgets.</em>
+</p>
+
+### Key Capabilities & Governance Invariants
+
+AgentTrust provides a complete, mathematically bounded **Multi-Agent Authority Graph Engine** ([`identity_manager/delegation_graph.py`](identity_manager/delegation_graph.py)):
+
+1. **Transitive Permission Attenuation ($P_{\text{child}} \subseteq P_{\text{parent}}$)**:
+   - When an agent delegates authority, the child agent's granted permission set must be a strict subset of the parent's current privileges.
+   - An agent cannot delegate any action, tool, or resource scope that it does not itself possess.
+   - **Mathematical Invariant**:
+     $$\forall \, \text{token } T = \langle P, C, \text{Scope} \rangle, \quad \text{Scope}(C) \subseteq \text{Scope}(P)$$
+
+2. **Delegation Depth Limits ($D \le D_{\text{max}}$)**:
+   - Every delegation edge tracks its depth along the delegation chain.
+   - The engine strictly enforces a maximum delegation depth limit (default: $D_{\text{max}} = 4$). Any delegation attempt exceeding the depth cap is rejected fail-closed with `DELEGATION_DEPTH_EXCEEDED`.
+
+3. **Parent-Child Identity Relationships & Cryptographic Proof**:
+   - Each delegation grant produces a cryptographically signed delegation token signed by the parent's private key and registered into the persistent authority graph.
+   - The token cryptographically binds the parent identity, child identity, granted tool permissions, maximum spend limit, and token expiration timestamp.
+
+4. **Dynamic Cross-Agent Transaction Budgets (Real-Time On-The-Spot Sync)**:
+   - Parent agents allocate bounded financial and operational budgets to child agents (e.g., Agent A grants a ₹50,000 sub-budget to Agent B).
+   - As the child agent submits transactions through the 13-stage gateway, the gateway dynamically debits the active delegation token's remaining budget in real-time.
+   - If a requested amount exceeds the token's remaining allocated budget, the transaction is immediately blocked with `DELEGATION_BUDGET_EXCEEDED`.
+
+5. **Cyclic Delegation Detection (DFS Cycle Prevention)**:
+   - Circular authority loops (e.g., $A \to B \to C \to A$) can be weaponized by compromised agents to amplify privileges or bypass revocation checks.
+   - The engine runs Depth-First Search (DFS) cycle detection over the directed authority graph before issuing or modifying any delegation token. Any cyclic delegation is blocked with `CYCLIC_DELEGATION_DETECTED`.
+
+6. **Instant Cascading Revocation & Expiration**:
+   - When a parent agent is suspended or revoked—or when a parent delegation token is explicitly cancelled—the authority graph recursively traverses all descendant nodes in the subtree and revokes all issued child tokens in $O(N)$ time.
+   - Expired tokens cannot be redeemed; downstream agents immediately lose the ability to act on behalf of the delegating parent.
+
+7. **Tamper-Evident Delegation Audit Trails**:
+   - All delegation operations (grants, verifications, budget debits, and revocations) are recorded as cryptographic audit records with SHA-256 hashes anchored into the ledger.
+
+> 🔒 **The Core Delegation Security Invariant**: *An agent should never gain additional privileges simply by delegating work to another agent, and no child agent can execute actions beyond the attenuated bounds of its delegating parent.*
+
+---
+
+## 🧠 AI Agent Behavioral Intelligence Engine (UEBA)
+
+Static security policies (RBAC, monetary thresholds, and action whitelists) establish critical hard boundaries. However, an attacker or compromised agent can operate entirely *within* static policy bounds while exhibiting highly anomalous and malicious operational patterns:
+
+**The Anomaly Scenario**:
+- A registered Treasury Agent normally:
+  - Transfers ₹5,000–₹20,000 per transaction.
+  - Executes 5–10 transactions daily during business hours (09:00–18:00 UTC).
+  - Interacts exclusively with three pre-approved vendor accounts (`SUPPLIER-101`, `VENDOR-CORP`, `LOGISTICS-04`).
+- **The Attack / Compromise**:
+  - The agent suddenly triggers 50 transactions within 15 minutes.
+  - Transactions disburse funds to completely unfamiliar recipient IDs at 02:30 AM.
+  - Each individual transfer is ₹4,900 (carefully structured below single-transaction limits).
+
+Static policies evaluate each individual request as valid. **AgentTrust Behavioral Intelligence Engine** ([`risk_engine/behavior_engine.py`](risk_engine/behavior_engine.py)) detects this behavioral deviation in real-time.
+
+<p align="center">
+  <img src="docs/images/behavioral_intelligence_ueba.jpg" width="95%" alt="AI Agent Behavioral Intelligence UEBA Dashboard" />
+  <br/>
+  <em><b>Figure 4: AI Agent Behavioral Intelligence UEBA Console</b> — Enterprise Microsoft Sentinel-style AI-Powered SOC interface featuring multi-factor statistical baselining, binary indicator flags (0/1), Markov sequence anomaly detection, and explainable anomaly alerts.</em>
+</p>
+
+### Real-Time Behavioral Analytics & Anomaly Detection Pipeline
+
+1. **Continuous Agent Behavioral Baselining**:
+   - The engine automatically learns and maintains a living behavioral profile for every registered agent across 5 core dimensions:
+     - **Monetary Distribution**: Mean ($\mu$), variance ($\sigma$), and historical minimum/maximum transaction amounts.
+     - **Transaction Frequency & Velocity**: Rolling transaction velocity per 5-minute, 1-hour, and 24-hour windows.
+     - **Destination Peer Sets**: Known familiar recipient endpoints, vendors, and account IDs.
+     - **Temporal Working Schedule**: Historical hour-of-day and day-of-week activity distributions.
+     - **API Sequence Transitions**: 1st-order Markov chain transition matrices modeling standard tool/action invocation sequences.
+
+2. **Binary Behavior Indicator Flags (0/1)**:
+   For every submitted gateway action, the engine evaluates 7 deterministic binary indicators:
+   - `impossible_travel`: Detected network IP, ASN, or geo-location discrepancy relative to recent agent activity.
+   - `unusual_amount`: Requested amount deviates significantly ($> 3\sigma$) from the agent's learned Gaussian baseline.
+   - `unusual_time`: Execution occurs outside the agent's established operating schedule.
+   - `rare_action`: The requested action has a historically negligible invocation probability for this agent profile.
+   - `privilege_escalation`: Unusual access to high-privilege parameters or sensitive enterprise roles.
+   - `new_endpoint` / `new_device`: The target recipient or client fingerprint has never been seen in the agent's baseline history.
+   - `burst_activity`: Sudden frequency spike exceeding 3x the agent's peak velocity threshold.
+
+3. **Multi-Factor Explainable Anomaly Scoring ($0 - 100$)**:
+   - The anomaly score is computed as a weighted statistical distance across amount deviation, velocity spikes, unfamiliar recipients, schedule divergence, and sequence transition improbability:
+     $$\text{AnomalyScore} = \min\left(100, \; \sum_{i=1}^{k} w_i \cdot \delta_i(\text{event}, \text{baseline}) + 15 \times \sum \text{BinaryFlags}\right)$$
+   - Every anomaly score includes transparent, human-readable audit reasons (e.g., `Unusual amount: ₹95,000 (normal: ₹5,000-₹20,000)`, `Unfamiliar recipient: ACC-UNKNOWN-999`, `Burst activity: 14 txns in 3 min`).
+
+4. **Automated Escalation & Real-Time On-The-Spot Sync**:
+   - The Behavioral Engine is wired directly into Stage 6 of the 13-stage Action Gateway.
+   - Requests exhibiting elevated anomaly scores ($> 70$) are automatically escalated to `HOLD_FOR_APPROVAL` (issuing an interactive human review ticket) or blocked entirely, preventing automated funds drain.
+   - Every executed gateway transaction automatically updates the agent's live behavioral baseline on-the-spot.
+
+> 🔒 **The Non-Amplification Invariant**: *The behavioral ML model strictly recommends additional restrictions, human review escalations, or blocks; it NEVER independently grants or expands authorization.*
 
 ---
 
@@ -338,6 +468,8 @@ Built with **Next.js 16.3.8**, **React 19.2.8**, **Tailwind CSS v4**, and **TanS
 | **`/overview`** | Real-time security posture, active agent metrics, ledger block height, pending approvals, and throughput gauges. |
 | **`/agents`** | Complete agent lifecycle management: interactive registration modal, X.509 certificate inspector, suspension toggle, and CRL revocation. |
 | **`/gateway`** | Interactive 13-stage pipeline request simulator, allowing operators to step through and inspect each verification phase. |
+| **`/delegation-graph`** | Interactive authority graph explorer: parent-child hierarchy, blast radius analysis, depth limits, and real-time budget tracking. |
+| **`/behavioral-intelligence`**| Microsoft Sentinel-style UEBA dashboard: statistical baselines, 7 binary indicator flags (0/1), Markov sequence anomaly alerts. |
 | **`/policies`** | Versioned policy manager: edit monetary caps, rolling cumulative windows, velocity limits, allowed actions, and view rollback history. |
 | **`/approvals`** | Human-in-the-Loop review queue: inspect payload parameters, risk scores, review tickets, and execute single-use approvals. |
 | **`/ledger`** | Immutable block explorer: view block heights, previous hash pointers, transaction IDs, Merkle roots, and endorsement signatures. |
@@ -345,6 +477,18 @@ Built with **Next.js 16.3.8**, **React 19.2.8**, **Tailwind CSS v4**, and **TanS
 | **`/attack-lab`** | Interactive 20-scenario adversarial attack lab: trigger live attacks and monitor real-time gateway defense logs. |
 | **`/benchmarks`** | Visual performance charts: latency distributions (p50/p90/p95/p99), concurrency scaling curves, and ablation metrics. |
 | **`/sandbox`** | Operational testbed: trigger MCP tool invocations, inspect the durable retry outbox, and view active replay nonces. |
+
+<p align="center">
+  <img src="docs/images/agent_governance_pki.jpg" width="95%" alt="Agent Governance & PKI Identity Registry Console" />
+  <br/>
+  <em><b>Figure 5: Agent Governance & PKI Identity Registry Console</b> — Autonomous AI agent lifecycle management, RSA key versions, X.509 certificate fingerprints, RBAC roles, and dynamic CRL revocation.</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/evidence_verification_inspector.png" width="95%" alt="SHA-256 Merkle Evidence Inspector" />
+  <br/>
+  <em><b>Figure 6: SHA-256 Merkle Evidence Inspector</b> — Cryptographic verification of off-chain execution payloads against Fabric-compatible ledger state commits and Merkle inclusion proofs.</em>
+</p>
 
 To run the Next.js console:
 ```bash
@@ -399,6 +543,13 @@ pytest attack_lab/test_attack_lab.py -v
 ## 📊 Empirical Security Evaluation & Benchmarks
 
 To establish an evidence-backed baseline, AgentTrust implements independent held-out evaluation datasets, Wilson Score 95% Confidence Intervals, and a 6-configuration normalization ablation study. Complete dataset provenance and labeling rules are documented in [`benchmarks/DATASET_PROVENANCE.md`](benchmarks/DATASET_PROVENANCE.md).
+
+<p align="center">
+  <img src="docs/images/latency_cdf.png" width="48%" alt="Empirical CDF Latency Distribution" />
+  <img src="docs/images/throughput_scaling.png" width="48%" alt="Concurrency Scaling & Throughput RPS" />
+  <br/>
+  <em><b>Figures 7 & 8: Performance Benchmarks</b> — (Left) Empirical Latency CDF comparing baseline vs. Phase 5 optimized gateway (54.89ms p50); (Right) Throughput (RPS) and latency scaling across 1 to 50 concurrent client workers with 0.0% error rate.</em>
+</p>
 
 ### 1. Generalization Across Frozen Benchmark Suites (V1–V4)
 
@@ -576,10 +727,10 @@ Off-chain evidence files can be mathematically verified offline without trusting
 
 ```bash
 # Verify off-chain evidence against an on-chain Merkle root proof
-python auditor_cli.py \
-  --verify-proof \
-  --evidence evidence_rec_1001.json \
-  --root 9f8a3c4b... \
+python auditor_cli.py \\
+  --verify-proof \\
+  --evidence evidence_rec_1001.json \\
+  --root 9f8a3c4b... \\
   --proof proof_1001.json
 ```
 
@@ -595,7 +746,7 @@ python verify_all.py
 ```
 - **Stage 1**: Ruff static analysis and linting (`ruff check .`) — Clean pass.
 - **Stage 2**: Mypy strict type checking across all core modules — Clean pass.
-- **Stage 3**: Full Pytest regression suite (`pytest tests attack_lab -q`) — 320 passed, 0 failures.
+- **Stage 3**: Full Pytest regression suite (`pytest tests attack_lab -q`) — 345+ passed, 0 failures.
 - **Stage 4**: Held-Out V2 zero-day adversarial benchmark — 100% Layer 2 containment.
 - **Stage 5**: Held-Out V3 zero-day adversarial benchmark — 100% Layer 2 containment.
 
@@ -641,6 +792,17 @@ AgentTrust/
 ├── database_config.py               # Database path and connection resolution utility
 ├── agenttrust_persistent.db         # Persistent demo database (clean 41-agent baseline)
 │
+├── docs/                            # Architectural assets and high-res screenshots
+│   └── images/                      # Dashboard UI captures and empirical benchmark charts
+│       ├── console_overview_dashboard.png      # Security operations overview console
+│       ├── gateway_pipeline_inspector.jpg      # 13-stage action gateway inspector
+│       ├── delegation_authority_graph.jpg       # Multi-agent delegation authority graph
+│       ├── behavioral_intelligence_ueba.jpg    # AI agent behavioral intelligence UEBA console
+│       ├── agent_governance_pki.jpg            # Agent registry & X.509 identities
+│       ├── evidence_verification_inspector.png # SHA-256 Merkle evidence inspector
+│       ├── latency_cdf.png                     # Empirical latency CDF chart
+│       └── throughput_scaling.png              # Throughput & concurrency scaling chart
+│
 ├── action_gateway/                  # 13-Stage Action Gateway core pipeline
 │   ├── gateway.py                   # Gateway dispatcher & execution coordinator
 │   ├── validator.py                 # Canonical JSON & minor units schema validator
@@ -652,7 +814,9 @@ AgentTrust/
 │   ├── key_store.py                 # Key storage & PKCS#11 SoftHSM2 manager
 │   ├── signature_verifier.py        # RSA-PSS & ECDSA signature verifier
 │   ├── jwt_auth.py                  # Administrative JWT tokens & RBAC
-│   └── delegation_tokens.py         # Sub-agent delegation token issuer & verifier
+│   ├── delegation.py                # Core delegation token issuer and validator
+│   ├── delegation_graph.py          # Multi-agent authority graph, attenuation & cycle detection
+│   └── certificate_manager.py       # X.509 certificate lifecycle manager
 │
 ├── agent_registry/                  # Agent Lifecycle & RBAC
 │   ├── registry.py                  # Agent CRUD & SQLite repository
@@ -664,9 +828,10 @@ AgentTrust/
 │   ├── policy_evaluator.py          # Fine-grained & rolling cumulative policy evaluator
 │   └── policy_models.py             # Pydantic policy schemas & minor units
 │
-├── risk_engine/                     # Risk & Prompt Injection Detection
+├── risk_engine/                     # Risk, UEBA & Prompt Injection Detection
 │   ├── risk_evaluator.py            # Multi-factor risk calculation engine
-│   └── prompt_injection_guard.py    # Multilingual & heuristic injection analyzer
+│   ├── prompt_injection_guard.py    # Multilingual & heuristic injection analyzer
+│   └── behavior_engine.py           # UEBA engine: statistical baselines, Markov sequences & anomaly scoring
 │
 ├── replay_protection/               # Replay & Concurrency Controls
 │   ├── nonce_tracker.py             # Single-use nonce tracker & timestamp validator
@@ -701,6 +866,8 @@ AgentTrust/
 │       ├── overview/                # System health & metric widgets
 │       ├── agents/                  # Agent registry & certificate inspector
 │       ├── gateway/                 # 13-stage request pipeline simulator
+│       ├── delegation-graph/        # Authority graph explorer & live budget tracker
+│       ├── behavioral-intelligence/ # UEBA anomaly dashboard & Markov sequence monitor
 │       ├── policies/                # Policy editor & version history
 │       ├── approvals/               # Human approval ticket queue
 │       ├── ledger/                  # Block explorer & transaction inspector
@@ -737,7 +904,7 @@ AgentTrust/
 │   ├── security_model.md            # Statement of 12 security invariants
 │   └── standards_alignment.md       # Compliance mapping: ISO 27001, SOC 2, NIST AI RMF
 │
-└── tests/                           # Automated Test Suite (320 Passed, 0 Failures)
+└── tests/                           # Automated Test Suite (345+ Passed, 0 Failures)
     ├── test_cumulative_limits_and_hardening.py
     ├── test_adversarial_security.py
     ├── test_authorization_assurance.py
@@ -747,7 +914,10 @@ AgentTrust/
     ├── test_kms_softhsm2.py
     ├── test_policy_bypass_resilience.py
     ├── test_property_based.py
-    └── test_security_invariants.py
+    ├── test_security_invariants.py
+    ├── test_delegation_authority_graph.py
+    ├── test_agent_behavior_engine.py
+    └── test_realtime_delegation_and_behavior.py
 ```
 
 ---
@@ -770,7 +940,7 @@ In adherence to rigorous academic and engineering honesty, we explicitly codify 
 1. **Heuristic Detectors vs. Policy Authorization Boundary**: Pattern-based heuristic filters cannot prevent all prompt injection attacks (empirical recall gap on novel zero-day evasion payloads). AgentTrust relies on **Layer 2 Bounded Authorization** (monetary limits, resource whitelists, and human approval) as the decisive security boundary when semantic detection fails.
 2. **SQLite Write Concurrency Scaling**: While SQLite WAL mode provides concurrent non-blocking reads, write transactions serialize at the file-lock level. For enterprise workloads exceeding 500 writes/sec, migrating the persistence engine to clustered PostgreSQL or a native Raft-replicated ledger is recommended.
 3. **Downstream Idempotency Assumption**: Guaranteed at-most-once downstream execution during network partition timeouts requires target enterprise APIs to support idempotency keys and provide an authoritative transaction status query endpoint.
-4. **Environment-Dependent Skips**: 5 non-blocking unit tests skip conditionally when external daemons (physical SoftHSM2 hardware token, live multi-peer Docker network) are absent; software KMS and in-process Raft simulation provide 100% test coverage in standard environments.
+4. **Environment-Dependent Skips**: Non-blocking unit tests skip conditionally when external daemons (physical SoftHSM2 hardware token, live multi-peer Docker network) are absent; software KMS and in-process Raft simulation provide 100% test coverage in standard environments.
 
 ---
 
