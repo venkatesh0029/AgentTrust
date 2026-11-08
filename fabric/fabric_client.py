@@ -41,11 +41,44 @@ class FabricClient:
             )
         return {"Authorization": f"Bearer {token}"}
 
+    def probe_peer_connectivity(self) -> dict[str, Any]:
+        """
+        Explicitly isolates TCP network connectivity probes from ledger transaction submissions.
+        Verifying TCP reachability to a peer endpoint does NOT prove transaction endorsement,
+        orderer consensus, or ledger commit (Finding 3 remediation).
+        """
+        if not self.peer_endpoint:
+            return {
+                "reachable": False,
+                "status": "PEER_ENDPOINT_NOT_CONFIGURED",
+                "message": "No peer endpoint configured; operating in local simulated mode"
+            }
+        host, port = self.peer_endpoint.split(":") if ":" in self.peer_endpoint else (self.peer_endpoint, "7051")
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2.0)
+            s.connect((host, int(port)))
+            s.close()
+            return {
+                "reachable": True,
+                "status": "PEER_ENDPOINT_REACHABLE",
+                "peer_endpoint": self.peer_endpoint,
+                "note": "TCP connection succeeded; does not constitute ledger transaction commit"
+            }
+        except Exception as e:
+            return {
+                "reachable": False,
+                "status": "PEER_ENDPOINT_UNREACHABLE",
+                "peer_endpoint": self.peer_endpoint,
+                "error": str(e)
+            }
+
     def _invoke_grpc_peer(self, function_name: str, args: list[str]) -> dict[str, Any]:
         """
         Submits gRPC transaction proposal directly to the Hyperledger Fabric Peer node.
         Honestly reports whether real Fabric gRPC Gateway SDK connection is established,
         or explicitly returns SIMULATED_LEDGER_COMMITTED status when using local simulator.
+        NOTE: Network endpoint probe is isolated; actual live transactions use record_action_event().
         """
         if not self.peer_endpoint:
             return {
@@ -54,20 +87,15 @@ class FabricClient:
                 "function": function_name
             }
 
-        host, port = self.peer_endpoint.split(":") if ":" in self.peer_endpoint else (self.peer_endpoint, "7051")
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(2.0)
-            s.connect((host, int(port)))
-            s.close()
+        probe = self.probe_peer_connectivity()
+        if probe.get("reachable"):
             return {
                 "status": "SIMULATED_LEDGER_COMMITTED",
                 "peer_endpoint": self.peer_endpoint,
                 "function": function_name,
                 "note": "Fabric-Compatible Permissioned Ledger Simulator Gateway Active"
             }
-        except Exception as e:
-            return {"status": "LOCAL_SIMULATOR_COMMITTED", "error": str(e)}
+        return {"status": "LOCAL_SIMULATOR_COMMITTED", "error": probe.get("error", "PEER_UNREACHABLE")}
 
     def record_action_event(
         self,

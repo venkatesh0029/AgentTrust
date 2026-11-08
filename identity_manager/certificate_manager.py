@@ -282,7 +282,7 @@ class CertificateManager:
                 return {"valid": False, "reason": "CERTIFICATE_EXPIRED"}
 
             # Verify Root CA Signature
-            from cryptography.hazmat.primitives.asymmetric import padding, rsa
+            from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
             ca_pub_key = self.ca_public_key
             if isinstance(ca_pub_key, rsa.RSAPublicKey):
                 ca_pub_key.verify(
@@ -291,6 +291,17 @@ class CertificateManager:
                     padding.PKCS1v15(),
                     cert.signature_hash_algorithm  # type: ignore[arg-type]
                 )
+            elif isinstance(ca_pub_key, ec.EllipticCurvePublicKey):
+                ca_pub_key.verify(
+                    cert.signature,
+                    cert.tbs_certificate_bytes,
+                    ec.ECDSA(cert.signature_hash_algorithm)  # type: ignore[arg-type]
+                )
+            else:
+                return {
+                    "valid": False,
+                    "reason": f"UNSUPPORTED_CA_KEY_ALGORITHM: Root CA public key type '{type(ca_pub_key).__name__}' is not supported"
+                }
 
             # Extract Subject CN (Agent ID)
             common_name = None

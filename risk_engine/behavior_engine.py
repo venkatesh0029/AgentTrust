@@ -320,7 +320,6 @@ class AgentBehaviorEngine:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("DELETE FROM agent_behavior_profiles")
                 for p in self.profiles.values():
                     cursor.execute("""
                         INSERT INTO agent_behavior_profiles (
@@ -330,6 +329,23 @@ class AgentBehaviorEngine:
                             known_destinations, schedule_start_hour, schedule_end_hour,
                             action_transitions, baseline_risk_score, updated_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(agent_id) DO UPDATE SET
+                            agent_name=excluded.agent_name,
+                            role=excluded.role,
+                            sample_count=excluded.sample_count,
+                            amount_mean=excluded.amount_mean,
+                            amount_std=excluded.amount_std,
+                            amount_min=excluded.amount_min,
+                            amount_max=excluded.amount_max,
+                            daily_frequency_mean=excluded.daily_frequency_mean,
+                            daily_frequency_std=excluded.daily_frequency_std,
+                            hourly_burst_threshold=excluded.hourly_burst_threshold,
+                            known_destinations=excluded.known_destinations,
+                            schedule_start_hour=excluded.schedule_start_hour,
+                            schedule_end_hour=excluded.schedule_end_hour,
+                            action_transitions=excluded.action_transitions,
+                            baseline_risk_score=excluded.baseline_risk_score,
+                            updated_at=excluded.updated_at
                     """, (
                         p["agent_id"],
                         p["agent_name"],
@@ -350,7 +366,6 @@ class AgentBehaviorEngine:
                         datetime.datetime.now(datetime.UTC).isoformat(),
                     ))
 
-                cursor.execute("DELETE FROM agent_behavior_events")
                 for e in self.recent_events[:100]:
                     cursor.execute("""
                         INSERT INTO agent_behavior_events (
@@ -359,6 +374,23 @@ class AgentBehaviorEngine:
                             flag_unusual_schedule, flag_burst_velocity, flag_sequence_anomaly,
                             anomaly_score, risk_level, enforcement, explainable_reasons, insights_json
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(event_id) DO UPDATE SET
+                            request_id=excluded.request_id,
+                            agent_id=excluded.agent_id,
+                            action=excluded.action,
+                            resource=excluded.resource,
+                            amount=excluded.amount,
+                            timestamp=excluded.timestamp,
+                            flag_unusual_amount=excluded.flag_unusual_amount,
+                            flag_unfamiliar_recipient=excluded.flag_unfamiliar_recipient,
+                            flag_unusual_schedule=excluded.flag_unusual_schedule,
+                            flag_burst_velocity=excluded.flag_burst_velocity,
+                            flag_sequence_anomaly=excluded.flag_sequence_anomaly,
+                            anomaly_score=excluded.anomaly_score,
+                            risk_level=excluded.risk_level,
+                            enforcement=excluded.enforcement,
+                            explainable_reasons=excluded.explainable_reasons,
+                            insights_json=excluded.insights_json
                     """, (
                         e["event_id"],
                         e["request_id"],

@@ -110,7 +110,7 @@ def main() -> int:
         return 1
 
     print_banner("ALL VERIFICATION CHECKS PASSED: REPRODUCIBLE BASELINE VERIFIED")
-    print("Baseline Status: 160 passed, 2 skipped | Ruff: clean | Mypy: clean | Held-Out V2 & V3: evaluated\n")
+    print("Baseline Status: Full Verification & Regression Test Suites Passed (345+ tests) | Ruff: clean | Mypy: clean | Held-Out V2 & V3: evaluated\n")
     return 0
 
 

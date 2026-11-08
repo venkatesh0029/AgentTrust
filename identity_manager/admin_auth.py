@@ -9,12 +9,18 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
+import sys
 from dataclasses import dataclass
 from typing import Any
 
 from agent_registry.admin_rbac import AdminRole
 
-PBKDF2_ITERATIONS = 600_000
+PBKDF2_ITERATIONS = int(
+    os.environ.get(
+        "PBKDF2_ITERATIONS",
+        "600000" if os.environ.get("AGENTTRUST_ENV", "").lower() in ("production", "prod") else "1000"
+    )
+)
 PBKDF2_ALGORITHM = "sha256"
 
 INSECURE_PASSWORDS = {

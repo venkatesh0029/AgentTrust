@@ -254,7 +254,7 @@ sequenceDiagram
 | | **2** | **X.509 Certificate & CRL Check** | [`identity_manager/pki.py`](identity_manager/pki.py) | **Rogue & Impersonated Keys**: Validates X.509 certificate chain against Root CA; verifies agent has not been revoked on the Certificate Revocation List (CRL). |
 | | **3** | **Digital Signature Verification** | [`identity_manager/signature_verifier.py`](identity_manager/signature_verifier.py) | **Forged Signatures & In-Transit Tampering**: Validates RSA-PSS or ECDSA digital signature over canonicalized bytes using registered public key. |
 | | **4** | **Agent & Key Lifecycle State** | [`agent_registry/status_manager.py`](agent_registry/status_manager.py) | **Zombie & Compromised Agents**: Rejects agents in `SUSPENDED` or `REVOKED` status fail-closed; ensures active key version matches registration. |
-| **Policy & Risk** | **5** | **Replay & Idempotency Tracker** | [`replay_protection/nonce_tracker.py`](replay_protection/nonce_tracker.py) | **Replay Attacks & Accidental Retries**: Validates request timestamp within allowed skew window ($\pm 300\text{s}$); enforces single-use nonces and idempotency caching. |
+| **Policy & Risk** | **5** | **Replay & Idempotency Tracker** | [`replay_protection/request_tracker.py`](replay_protection/request_tracker.py) | **Replay Attacks & Accidental Retries**: Validates request timestamp within allowed skew window ($\pm 300\text{s}$); enforces single-use nonces and idempotency caching. |
 | | **6** | **Multilingual Risk & Behavioral UEBA** | [`risk_engine/behavior_engine.py`](risk_engine/behavior_engine.py) | **Prompt Injections & Behavioral Deviations**: Evaluates multilingual injection vectors (ES, FR, DE, ZH, HI), ROT-13/Base64 evasion, delimiter breaks, and UEBA anomaly scores. |
 | | **7** | **Stateful Policy & Cumulative Limits** | [`policy_engine/evaluator.py`](policy_engine/evaluator.py) | **Overspending & Smurfing Structuring (`V4-ADV-022`)**: Evaluates rolling-window cumulative transaction volume, velocity caps, allowed resource scopes, and business hours. |
 | | **8** | **Decision Gate & HITL Token** | [`action_gateway/gateway.py`](action_gateway/gateway.py) | **TOCTOU Approval Vulnerabilities**: Emits `ALLOWED`, `BLOCKED`, or `PENDING_HUMAN_APPROVAL`. Enforces single-use cryptographic token binding upon resumption. |
@@ -822,9 +822,9 @@ AgentTrust/
 │   └── behavior_engine.py           # UEBA engine: statistical baselines, Markov sequences & anomaly scoring
 │
 ├── replay_protection/               # Replay & Concurrency Controls
-│   ├── nonce_tracker.py             # Single-use nonce tracker & timestamp validator
-│   ├── idempotency.py               # Payload-fingerprinted idempotency cache
-│   └── distributed_lock.py          # Leased locks with monotonic fencing tokens
+│   ├── nonce_manager.py             # Single-use cryptographically bound nonce manager
+│   ├── timestamp_validator.py       # Clock skew & replay window validation ($\pm 300\text{s}$)
+│   └── request_tracker.py           # Deduplication, idempotency cache & durable replay tracker
 │
 ├── human_approval/                  # Human-in-the-Loop Governance
 │   └── approval_manager.py          # Approval ticket issuance & TOCTOU re-validator

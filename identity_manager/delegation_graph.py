@@ -368,7 +368,6 @@ class DelegationGraphManager:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("DELETE FROM delegation_nodes")
                 for node in self.nodes.values():
                     cursor.execute("""
                         INSERT INTO delegation_nodes (
@@ -377,6 +376,21 @@ class DelegationGraphManager:
                             effective_actions, depth, parent_agent_id, incoming_token_id,
                             risk_score, updated_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(agent_id) DO UPDATE SET
+                            agent_name=excluded.agent_name,
+                            role=excluded.role,
+                            organization=excluded.organization,
+                            status=excluded.status,
+                            base_budget=excluded.base_budget,
+                            allocated_budget=excluded.allocated_budget,
+                            remaining_budget=excluded.remaining_budget,
+                            spent_budget=excluded.spent_budget,
+                            effective_actions=excluded.effective_actions,
+                            depth=excluded.depth,
+                            parent_agent_id=excluded.parent_agent_id,
+                            incoming_token_id=excluded.incoming_token_id,
+                            risk_score=excluded.risk_score,
+                            updated_at=excluded.updated_at
                     """, (
                         node["agent_id"],
                         node["agent_name"],
@@ -395,7 +409,6 @@ class DelegationGraphManager:
                         datetime.datetime.now(datetime.UTC).isoformat(),
                     ))
 
-                cursor.execute("DELETE FROM delegation_edges")
                 for edge in self.edges.values():
                     cursor.execute("""
                         INSERT INTO delegation_edges (
@@ -404,6 +417,19 @@ class DelegationGraphManager:
                             depth, status, issued_at, expires_at, revocation_reason,
                             parent_token_id, signature
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(token_id) DO UPDATE SET
+                            issuer_agent_id=excluded.issuer_agent_id,
+                            delegate_agent_id=excluded.delegate_agent_id,
+                            delegated_actions=excluded.delegated_actions,
+                            delegated_budget=excluded.delegated_budget,
+                            spent_budget=excluded.spent_budget,
+                            depth=excluded.depth,
+                            status=excluded.status,
+                            issued_at=excluded.issued_at,
+                            expires_at=excluded.expires_at,
+                            revocation_reason=excluded.revocation_reason,
+                            parent_token_id=excluded.parent_token_id,
+                            signature=excluded.signature
                     """, (
                         edge["token_id"],
                         edge["issuer_agent_id"],

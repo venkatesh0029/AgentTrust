@@ -1383,7 +1383,9 @@ def submit_action(payload: dict[str, Any] = Body(...)):
     agent_id = req_dict.get("agent_id")
 
     # Auto-sign for UI console testing if signature is placeholder or AUTO_SIGN
-    if not sig or sig == "AUTO_SIGN" or sig.startswith("SIMULATED") or sig == "MEYCIQC...SIMULATED_RSA_PSS_SIGNATURE...":
+    # Strict Production Security Boundary: Auto-signing is strictly prohibited in production mode.
+    # It is ONLY permitted when AGENTTRUST_DEMO_MODE=true is explicitly configured.
+    if DEMO_MODE and (not sig or sig == "AUTO_SIGN" or sig.startswith("SIMULATED") or sig == "MEYCIQC...SIMULATED_RSA_PSS_SIGNATURE..."):
         priv_key = None
         if agent_id:
             priv_key = _DEMO_CLIENT_TEST_KEYS.get(str(agent_id)) or AGENT_PRIVATE_KEYS.get(str(agent_id))
@@ -1440,7 +1442,7 @@ def approve_request(approval_id: str, role: AdminRole = Depends(check_admin_perm
 
 @app.post("/approvals/grant")
 def grant_approval(req: GrantApprovalRequest, role: AdminRole = Depends(check_admin_permission_dep("approve_transaction"))):
-    res = action_gateway.process_human_approval_resume(req.approval_id, approver_id=req.approver_id or role.value)
+    res = action_gateway.process_human_approval_resume(req.approval_id, approver_id=req.approver_id or role.value, provided_token=req.token)
     return res
 
 @app.post("/approvals/{approval_id}/reject")

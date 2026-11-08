@@ -1645,6 +1645,78 @@ class PersistentStorageEngine:
         finally:
             conn.close()
 
+    def check_and_reserve_cumulative_volume(
+        self,
+        agent_id: str,
+        action: str,
+        amount: float,
+        window_seconds: int = 86400,
+        max_cumulative_limit: float | None = None,
+        max_velocity_count: int | None = None,
+        request_id: str | None = None,
+        idempotency_key: str | None = None,
+        request_fingerprint: str | None = None
+    ) -> tuple[bool, float, int, str]:
+        """
+        Atomically inspects rolling cumulative transaction volume/velocity and reserves
+        capacity under an exclusive SQLite immediate transaction.
+        Eliminates TOCTOU race conditions under concurrent smurfing attempts.
+        Returns: (is_allowed: bool, new_cumulative_amount: float, new_tx_count: int, reason: str)
+        """
+        now_dt = datetime.datetime.now(datetime.UTC)
+        cutoff = (now_dt - datetime.timedelta(seconds=window_seconds)).isoformat()
+        now_str = now_dt.isoformat()
+        req_id = request_id or f"REQ-RES-{uuid.uuid4().hex[:12].upper()}"
+
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN IMMEDIATE")
+                query = """
+                    SELECT COALESCE(SUM(amount), 0.0) as total_amount, COUNT(*) as tx_count
+                    FROM transaction_intents
+                    WHERE agent_id = ?
+                      AND created_at >= ?
+                      AND state IN ('AUTHORIZED_PENDING_EXECUTION', 'EXECUTED_PENDING_LEDGER', 'COMMITTED', 'COMPLETED')
+                """
+                cursor.execute(query, (agent_id, cutoff))
+                row = cursor.fetchone()
+                total_amount = float(row["total_amount"]) if row else 0.0
+                tx_count = int(row["tx_count"]) if row else 0
+
+                if max_cumulative_limit is not None and (total_amount + amount) > max_cumulative_limit:
+                    conn.rollback()
+                    return False, total_amount, tx_count, f"CUMULATIVE_LIMIT_EXCEEDED: rolling {window_seconds}s total ₹{total_amount + amount:,.2f} exceeds cap ₹{max_cumulative_limit:,.2f}"
+
+                if max_velocity_count is not None and (tx_count + 1) > max_velocity_count:
+                    conn.rollback()
+                    return False, total_amount, tx_count, f"VELOCITY_LIMIT_EXCEEDED: {tx_count + 1} transactions exceeds limit of {max_velocity_count} per window"
+
+                cursor.execute("""
+                    INSERT OR REPLACE INTO transaction_intents (
+                        request_id, agent_id, action, amount, idempotency_key, state, outcome_json, request_fingerprint, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    req_id,
+                    agent_id,
+                    action,
+                    amount,
+                    idempotency_key,
+                    "AUTHORIZED_PENDING_EXECUTION",
+                    None,
+                    request_fingerprint,
+                    now_str,
+                    now_str
+                ))
+                conn.commit()
+                return True, total_amount + amount, tx_count + 1, "OK"
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
     def close(self) -> None:
         """Closes resources and checkpoints WAL mode safely."""
         with self._lock:

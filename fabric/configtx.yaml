@@ -84,12 +84,22 @@ Orderer: &OrdererDefaults
     OrdererType: etcdraft
     Addresses:
         - orderer.agenttrust.com:7050
+        - orderer2.agenttrust.com:8050
+        - orderer3.agenttrust.com:9050
     EtcdRaft:
         Consenters:
             - Host: orderer.agenttrust.com
               Port: 7050
               ClientTLSCert: crypto-config/ordererOrganizations/agenttrust.com/orderers/orderer.agenttrust.com/tls/server.crt
               ServerTLSCert: crypto-config/ordererOrganizations/agenttrust.com/orderers/orderer.agenttrust.com/tls/server.crt
+            - Host: orderer2.agenttrust.com
+              Port: 8050
+              ClientTLSCert: crypto-config/ordererOrganizations/agenttrust.com/orderers/orderer2.agenttrust.com/tls/server.crt
+              ServerTLSCert: crypto-config/ordererOrganizations/agenttrust.com/orderers/orderer2.agenttrust.com/tls/server.crt
+            - Host: orderer3.agenttrust.com
+              Port: 9050
+              ClientTLSCert: crypto-config/ordererOrganizations/agenttrust.com/orderers/orderer3.agenttrust.com/tls/server.crt
+              ServerTLSCert: crypto-config/ordererOrganizations/agenttrust.com/orderers/orderer3.agenttrust.com/tls/server.crt
     BatchTimeout: 2s
     BatchSize:
         MaxMessageCount: 100

@@ -235,8 +235,11 @@ def test_sqlite_persistence_across_restarts():
         assert retrieved["agent_name"] == "PersistAgent"
 
     finally:
-        if os.path.exists(db_path):
-            os.remove(db_path)
+        try:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+        except Exception:
+            pass
 
 # 7. Honest Fabric Simulator Status Test
 def test_honest_fabric_simulator_status():
