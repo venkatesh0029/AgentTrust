@@ -79,13 +79,13 @@ However, granting operational autonomy to non-deterministic probabilistic models
                               (Non-repudiable X.509 PKI)
                                          ▲
                                         / \
-                                       /   \\
-                                      /     \\
-                                     /       \\
-                                    /  Agent  \\
-                                   /   Trust   \\
-                                  /             \\
-                                 /               \\
+                                       /   \
+                                      /     \
+                                     /       \
+                                    /  Agent  \
+                                   /   Trust   \
+                                  /             \
+                                 /               \
               Bounded Authorization ◄───────────► Tamper-Evident Accountability
             (13-Stage Pipeline & Policies)       (Merkle Evidence & Fabric Ledger)
 ```
@@ -335,12 +335,6 @@ Static security policies (RBAC, monetary thresholds, and action whitelists) esta
   - Each individual transfer is ₹4,900 (carefully structured below single-transaction limits).
 
 Static policies evaluate each individual request as valid. **AgentTrust Behavioral Intelligence Engine** ([`risk_engine/behavior_engine.py`](risk_engine/behavior_engine.py)) detects this behavioral deviation in real-time.
-
-<p align="center">
-  <img src="docs/images/behavioral_intelligence_ueba.jpg" width="95%" alt="AI Agent Behavioral Intelligence UEBA Dashboard" />
-  <br/>
-  <em><b>Figure 4: AI Agent Behavioral Intelligence UEBA Console</b> — Enterprise Microsoft Sentinel-style AI-Powered SOC interface featuring multi-factor statistical baselining, binary indicator flags (0/1), Markov sequence anomaly detection, and explainable anomaly alerts.</em>
-</p>
 
 ### Real-Time Behavioral Analytics & Anomaly Detection Pipeline
 
