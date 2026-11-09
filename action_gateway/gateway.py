@@ -940,7 +940,7 @@ class ActionGateway:
                 action=action,
                 resource=resource,
                 parameters=parameters,
-                reason=reason.value,
+                reason=reason.value if hasattr(reason, "value") else str(reason),
                 policy_id=policy_id,
                 request_hash=raw_hash,
                 policy_version=policy_version,
@@ -966,8 +966,8 @@ class ActionGateway:
             action=action,
             resource=resource,
             parameters=parameters,
-            decision=decision.value,
-            reason=reason.value,
+            decision=decision.value if hasattr(decision, "value") else str(decision),
+            reason=reason.value if hasattr(reason, "value") else str(reason),
             policy_id=policy_id,
             policy_version=policy_version,
             agent_version=agent_record.get("agent_version", "1.0"),
@@ -1050,16 +1050,36 @@ class ActionGateway:
             validation_context["risk_result"] = risk_res
 
 
-            # 4. Re-evaluate Policy against active policy rules & risk
-            c_amt = 0.0
-            c_cnt = 0
-            if self.persistent_db and hasattr(self.persistent_db, "get_cumulative_volume"):
+            # 4. Re-evaluate Policy against active policy rules & risk and ATOMICALLY re-reserve capacity
+            p_rec = self.policy_evaluator.loader.get_policy(policy_id) if hasattr(self.policy_evaluator, "loader") else None
+            w_sec = getattr(p_rec, "velocity_window_seconds", 86400) if p_rec else 86400
+            max_cum = getattr(p_rec, "cumulative_maximum_amount", None) if p_rec else None
+            max_vel = getattr(p_rec, "max_transactions_per_window", None) if p_rec else None
+
+            # Enforce atomic re-reservation on approval resume (eliminates TOCTOU race where intermediate txs consume budget)
+            if self.persistent_db and hasattr(self.persistent_db, "revalidate_and_reserve_approved_intent"):
                 try:
-                    p_rec = self.policy_evaluator.loader.get_policy(policy_id)
-                    w_sec = getattr(p_rec, "velocity_window_seconds", 86400) if p_rec else 86400
+                    res_ok, new_total, new_cnt, res_msg = self.persistent_db.revalidate_and_reserve_approved_intent(
+                        request_id=request_id,
+                        agent_id=agent_id,
+                        action=action,
+                        amount=amount,
+                        window_seconds=w_sec,
+                        max_cumulative_limit=max_cum,
+                        max_velocity_count=max_vel
+                    )
+                    if not res_ok:
+                        return False, res_msg
+                    validation_context["reservation_held"] = True
+                except Exception as ex:
+                    return False, f"PERSISTENT_VOLUME_RECHECK_FAILED: {str(ex)}"
+            elif self.persistent_db and hasattr(self.persistent_db, "get_cumulative_volume"):
+                try:
                     c_amt, c_cnt = self.persistent_db.get_cumulative_volume(agent_id, window_seconds=w_sec)
-                except Exception:
-                    pass
+                    if max_cum is not None and (c_amt + amount) > max_cum:
+                        return False, f"CUMULATIVE_LIMIT_EXCEEDED_ON_RESUME: rolling total ₹{c_amt + amount:,.2f} exceeds cap ₹{max_cum:,.2f}"
+                except Exception as ex:
+                    return False, f"PERSISTENT_VOLUME_RECHECK_FAILED: {str(ex)}"
 
             dec, rsn, pver, rules = self.policy_evaluator.evaluate(
                 policy_id=policy_id,
@@ -1069,12 +1089,11 @@ class ActionGateway:
                 request_timestamp_iso=now_iso,
                 risk_score=risk_res.get("risk_score", 0.0),
                 risk_level=risk_res.get("risk_level", "LOW"),
-                cumulative_amount=c_amt,
-                transaction_count_in_window=c_cnt
+                cumulative_amount=0.0,
+                transaction_count_in_window=0
             )
             validation_context["policy_version"] = pver
             validation_context["matched_rules"] = rules
-
 
             if dec == PolicyDecision.BLOCKED:
                 return False, f"POLICY_RECHECK_FAILED: {rsn.value}"
@@ -1097,6 +1116,11 @@ class ActionGateway:
             approval_id, approver_id, provided_token=token_to_pass, validator_fn=_atomic_validator
         )
         if not ok or not updated_record:
+            if self.persistent_db and hasattr(self.persistent_db, "release_reservation"):
+                try:
+                    self.persistent_db.release_reservation(request_id, new_state="REJECTED", reason=f"RESUME_VALIDATION_FAILED: {msg}")
+                except Exception:
+                    pass
             # Ticket was not consumed; finalize rejection outcome safely
             return self._finalize_gateway_outcome(
                 request_id=request_id,
@@ -1115,7 +1139,7 @@ class ActionGateway:
         agent_record = validation_context.get("agent_record") or self.registry.get_agent(agent_id) or {}
         approval_ref = updated_record.get("approval_reference")
 
-        if self.persistent_db:
+        if self.persistent_db and not validation_context.get("reservation_held"):
             try:
                 self.persistent_db.update_intent_state(
                     request_id=request_id,
@@ -1162,6 +1186,27 @@ class ActionGateway:
             fencing_token=1,
             outbox_record=outbox_record
         )
+
+        if exec_res.get("success"):
+            if self.persistent_db:
+                try:
+                    self.persistent_db.update_intent_state(
+                        request_id=request_id,
+                        state="EXECUTED_PENDING_LEDGER",
+                        expected_current_state="AUTHORIZED_PENDING_EXECUTION"
+                    )
+                except Exception:
+                    pass
+        else:
+            if self.persistent_db:
+                try:
+                    self.persistent_db.update_intent_state(
+                        request_id=request_id,
+                        state="EXECUTION_FAILED",
+                        expected_current_state="AUTHORIZED_PENDING_EXECUTION"
+                    )
+                except Exception:
+                    pass
 
         api_res_str = "EXECUTED" if exec_res.get("success") else f"FAILED: {exec_res.get('error', 'Execution Error')}"
         agent_ver = agent_record.get("agent_version", "1.0")

@@ -374,7 +374,7 @@ def test_second_pass_audit_concurrent_smurfing_via_action_gateway():
                 "request_id": f"REQ-GW-CONC-{idx}-{uuid.uuid4().hex[:6]}",
                 "agent_id": "SMURF-GATEWAY-AGENT",
                 "action": "TRANSFER_FUNDS",
-                "resource": "ACCOUNT-999",
+                "resource": "SUPPLIER-101",
                 "parameters": {"amount": 4000.0},
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "nonce": f"NONCE-GW-{idx}-{uuid.uuid4().hex[:8]}",
@@ -460,3 +460,153 @@ def test_second_pass_audit_fabric_client_honest_peer_status():
         assert "SIMULATED_LEDGER_COMMITTED" not in res["status"]
     finally:
         srv.close()
+
+
+# -----------------------------------------------------------------------------
+# Third-Pass Audit Remediation Verification: Approval-Resume Revalidation & Genesis Integrity
+# -----------------------------------------------------------------------------
+def test_third_pass_audit_approval_resume_capacity_exhaustion_blocks():
+    """
+    Third-Pass Review Task 1: Verify that if available cumulative volume is consumed by
+    an intermediate transaction while a request awaits human approval, resuming approval
+    fails closed and refuses to execute the request.
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = os.path.join(tmp, "test_resume_race.db")
+        cert_mgr = CertificateManager(db_path=db_path)
+        id_store = IdentityStore(db_path=db_path)
+        registry = AgentRegistry(cert_mgr, id_store)
+        p_db = PersistentStorageEngine(db_path=db_path)
+        approval_mgr = HumanApprovalManager()
+
+        reg = registry.register_agent(
+            agent_id="RESUME-RACE-AGENT",
+            agent_name="Approval Resume Race Agent",
+            policy_id="APPROVAL-RACE-POL"
+        )
+        priv_key = reg["private_key"]
+
+        from policy_engine.policy_models import PolicyRecord, WorkingHours
+        loader = PolicyLoader()
+        # Cumulative limit 30,000; require approval for anything above 25,000
+        policy = PolicyRecord(
+            policy_id="APPROVAL-RACE-POL",
+            agent_id="RESUME-RACE-AGENT",
+            version="1.0",
+            allowed_actions=["TRANSFER_FUNDS"],
+            allowed_resource="*",
+            maximum_amount=50000.0,
+            cumulative_maximum_amount=30000.0,
+            max_transactions_per_window=10,
+            velocity_window_seconds=86400,
+            human_approval_above=25000.0,
+            working_hours=WorkingHours(start="00:00", end="23:59")
+        )
+        loader.save_policy(policy)
+
+        gw = ActionGateway(
+            registry=registry,
+            cert_manager=cert_mgr,
+            policy_evaluator=PolicyEvaluator(loader),
+            replay_tracker=RequestTracker(300),
+            finance_api=ProtectedFinanceAPI(),
+            approval_manager=approval_mgr,
+            evidence_store=EvidenceStore(db_path=db_path),
+            fabric_client=FabricClient(),
+            persistent_db=p_db
+        )
+
+        # 1. Submit Request 1 (₹26,000) -> Held for Human Approval
+        req1_id = f"REQ-HOLD-{uuid.uuid4().hex[:6]}"
+        payload1 = {
+            "request_id": req1_id,
+            "agent_id": "RESUME-RACE-AGENT",
+            "action": "TRANSFER_FUNDS",
+            "resource": "SUPPLIER-101",
+            "parameters": {"amount": 26000.0},
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "nonce": uuid.uuid4().hex,
+            "idempotency_key": uuid.uuid4().hex
+        }
+        payload1["signature"] = SignatureManager.sign_request(payload1, priv_key)
+        res1 = gw.process_request(payload1)
+        assert res1["decision"] == "PENDING_HUMAN_APPROVAL"
+        app_ticket = approval_mgr.get_approval_by_request_id(req1_id)
+        assert app_ticket is not None
+        approval_id = app_ticket["approval_id"]
+        approval_token = app_ticket["approval_token"]
+
+        # 2. Intermediate Request 2 (₹10,000) arrives while Request 1 is waiting for human
+        req2_id = f"REQ-INTER-{uuid.uuid4().hex[:6]}"
+        payload2 = {
+            "request_id": req2_id,
+            "agent_id": "RESUME-RACE-AGENT",
+            "action": "TRANSFER_FUNDS",
+            "resource": "SUPPLIER-101",
+            "parameters": {"amount": 10000.0},
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "nonce": uuid.uuid4().hex,
+            "idempotency_key": uuid.uuid4().hex
+        }
+        payload2["signature"] = SignatureManager.sign_request(payload2, priv_key)
+        res2 = gw.process_request(payload2)
+        assert res2["decision"] in ("ALLOWED", "COMPLETED")
+
+        # 3. Supervisor attempts to approve Request 1 (₹26,000)
+        # Total would be 10,000 + 26,000 = 36,000 > 30,000 cap!
+        resume_res = gw.process_human_approval_resume(
+            approval_id=approval_id,
+            approver_id="SUPERVISOR-01",
+            provided_token=approval_token
+        )
+
+        # Must fail closed: execution blocked due to capacity exhaustion during approval wait
+        assert resume_res["decision"] == "BLOCKED"
+        assert "CUMULATIVE_LIMIT_EXCEEDED_ON_RESUME" in resume_res["reason"]
+        assert resume_res.get("execution_result") in ("NOT_EXECUTED", "BLOCKED", None)
+        p_db.close()
+
+
+def test_third_pass_audit_genesis_evidence_restart_and_cryptographic_verification():
+    """
+    Third-Pass Review Task 2: Verify genesis evidence record persistence across application restart
+    and verify its computed SHA-256 digest against on-chain ledger commitment.
+    """
+    from evidence_manager.hash_manager import HashManager
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = os.path.join(tmp, "test_genesis_restart.db")
+
+        # 1. Start application: initialize EvidenceStore
+        store_v1 = EvidenceStore(db_path=db_path)
+        genesis_rec = store_v1.get_evidence("REQ-GENESIS-000")
+        assert genesis_rec is not None
+        assert genesis_rec["evidence_id"] == "EVIDENCE-REQ-GENESIS-000"
+        assert genesis_rec["input_hash"] != "0" * 64
+        assert genesis_rec["record_hash"] != "0" * 64
+        assert len(genesis_rec["input_hash"]) == 64
+        assert len(genesis_rec["record_hash"]) == 64
+
+        first_computed_hash = HashManager.calculate_evidence_hash(genesis_rec)
+
+        # 2. Simulate complete restart: teardown in-memory store
+        del store_v1
+
+        # 3. Reopen application from SQLite disk persistence
+        store_v2 = EvidenceStore(db_path=db_path)
+        p_db = PersistentStorageEngine(db_path=db_path)
+
+        # Verify disk persistence directly via PersistentStorageEngine
+        db_record = p_db.get_evidence("EVIDENCE-REQ-GENESIS-000")
+        assert db_record is not None
+        assert db_record["evidence_id"] == "EVIDENCE-REQ-GENESIS-000"
+
+        # Verify retrieved record through EvidenceStore
+        reloaded_genesis = store_v2.get_evidence("REQ-GENESIS-000")
+        assert reloaded_genesis is not None
+
+        # Verify cryptographic integrity
+        verify_result = HashManager.verify_integrity(reloaded_genesis, first_computed_hash)
+        assert verify_result["verified"] is True
+        assert verify_result["status"] == "VERIFIED"
+        p_db.close()

@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Any
 
 from database_config import resolve_database_path
@@ -21,8 +22,17 @@ class EvidenceStore:
         self._load_from_storage()
         self._ensure_genesis_record()
 
-    def _ensure_genesis_record(self) -> None:
+    def _ensure_genesis_record(self, fail_closed: bool = False) -> None:
         if "EVIDENCE-REQ-GENESIS-000" not in self._store:
+            genesis_input = {
+                "system": "AgentTrust Framework",
+                "channel": "agenttrust-channel",
+                "consensus": "Fabric Permissioned Ledger Simulator",
+                "genesis_block": 0,
+                "status": "INITIALIZED"
+            }
+            input_digest = HashManager.calculate_evidence_hash(genesis_input)
+
             genesis_rec = {
                 "evidence_schema_version": "2.0",
                 "evidence_id": "EVIDENCE-REQ-GENESIS-000",
@@ -31,15 +41,9 @@ class EvidenceStore:
                 "certificate_fingerprint": "SHA256:0000000000000000000000000000000000000000000000000000000000000000",
                 "action": "LEDGER_GENESIS_INITIALIZE",
                 "resource": "SYSTEM_CORE",
-                "input": {
-                    "system": "AgentTrust Framework",
-                    "channel": "agenttrust-channel",
-                    "consensus": "Fabric Permissioned Ledger Simulator",
-                    "genesis_block": 0,
-                    "status": "INITIALIZED"
-                },
-                "input_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-                "output_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "input": genesis_input,
+                "input_hash": input_digest,
+                "output_hash": input_digest,
                 "decision": "INITIALIZED",
                 "decision_reason": "LEDGER_GENESIS_BOOTSTRAP",
                 "policy_id": "SYSTEM-GENESIS-POL",
@@ -52,16 +56,20 @@ class EvidenceStore:
                 "api_execution_result": "INITIALIZED",
                 "error_details": None,
                 "timestamp": "2026-01-01T00:00:00Z",
-                "execution_trace": {"mode": "GENESIS_BOOTSTRAP"},
+                "execution_trace": {"mode": "GENESIS_BOOTSTRAP", "record_type": "GENESIS_SENTINEL"},
                 "risk_score": 0.0,
                 "risk_level": "LOW",
                 "risk_factors": [],
                 "matched_rules": ["genesis_state_initialization"],
                 "sequence_number": 0,
                 "previous_record_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-                "record_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+                "record_hash": ""
             }
+            # Compute canonical SHA-256 digest of genesis record
+            rec_hash = HashManager.calculate_evidence_hash(genesis_rec)
+            genesis_rec["record_hash"] = rec_hash
             self._store["EVIDENCE-REQ-GENESIS-000"] = genesis_rec
+
             try:
                 from fabric.persistent_db import PersistentStorageEngine
                 pe = PersistentStorageEngine(self.db_path)
@@ -74,8 +82,10 @@ class EvidenceStore:
                         evidence_hash=ev_hash,
                         evidence_data=genesis_rec
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.error(f"Failed to persist genesis evidence record to persistent store ({self.db_path}): {exc}")
+                if fail_closed or os.environ.get("STRICT_PERSISTENCE", "false").lower() in ("true", "1"):
+                    raise EvidencePersistenceError(f"Genesis evidence persistence failed: {exc}") from exc
 
     def _load_from_storage(self) -> None:
         try:

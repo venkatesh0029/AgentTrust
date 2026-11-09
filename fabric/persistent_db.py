@@ -459,6 +459,26 @@ class PersistentStorageEngine:
             conn.commit()
             conn.close()
 
+    def get_evidence(self, evidence_id: str) -> dict[str, Any] | None:
+        """Retrieves a single off-chain evidence record by evidence_id or request_id."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT evidence_json, evidence_hash
+                    FROM evidence_store
+                    WHERE evidence_id = ? OR request_id = ?
+                """, (evidence_id, evidence_id))
+                row = cursor.fetchone()
+                if row:
+                    data = json.loads(row["evidence_json"])
+                    data["_stored_hash"] = row["evidence_hash"]
+                    return data
+                return None
+            finally:
+                conn.close()
+
     def save_block(self, previous_hash: str, block_hash: str, tx_count: int, block_data: dict[str, Any], timestamp: str) -> int:
         """Persists committed block to SQLite block ledger."""
         with self._lock:
@@ -1739,6 +1759,86 @@ class PersistentStorageEngine:
                     conn.commit()
                 else:
                     conn.rollback()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    def revalidate_and_reserve_approved_intent(
+        self,
+        request_id: str,
+        agent_id: str,
+        action: str,
+        amount: float,
+        window_seconds: int = 86400,
+        max_cumulative_limit: float | None = None,
+        max_velocity_count: int | None = None
+    ) -> tuple[bool, float, int, str]:
+        """
+        Atomically re-evaluates cumulative volume and velocity limits when resuming a human-approved
+        request, transitioning the intent from HELD_FOR_HUMAN_APPROVAL to AUTHORIZED_PENDING_EXECUTION
+        under an exclusive SQLite immediate write lock.
+        Eliminates the TOCTOU race where intermediate transactions consume budget while awaiting approval.
+        Returns: (is_allowed: bool, new_cumulative_amount: float, new_tx_count: int, reason: str)
+        """
+        now_dt = datetime.datetime.now(datetime.UTC)
+        cutoff = (now_dt - datetime.timedelta(seconds=window_seconds)).isoformat()
+        now_str = now_dt.isoformat()
+
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN IMMEDIATE")
+
+                # Check current intent state
+                cursor.execute("SELECT state FROM transaction_intents WHERE request_id = ?", (request_id,))
+                row_intent = cursor.fetchone()
+                if not row_intent:
+                    conn.rollback()
+                    return False, 0.0, 0, f"INTENT_NOT_FOUND: request {request_id} not found in persistent store"
+
+                curr_state = row_intent["state"]
+                if curr_state != "HELD_FOR_HUMAN_APPROVAL":
+                    conn.rollback()
+                    return False, 0.0, 0, f"INVALID_INTENT_STATE_FOR_RESUME: current state is {curr_state}, expected HELD_FOR_HUMAN_APPROVAL"
+
+                # Sum all other active/committed intents within the rolling window
+                query = """
+                    SELECT COALESCE(SUM(amount), 0.0) as total_amount, COUNT(*) as tx_count
+                    FROM transaction_intents
+                    WHERE agent_id = ?
+                      AND created_at >= ?
+                      AND state IN ('AUTHORIZED_PENDING_EXECUTION', 'EXECUTED_PENDING_LEDGER', 'COMMITTED', 'COMPLETED')
+                      AND request_id != ?
+                """
+                cursor.execute(query, (agent_id, cutoff, request_id))
+                row = cursor.fetchone()
+                total_amount = float(row["total_amount"]) if row else 0.0
+                tx_count = int(row["tx_count"]) if row else 0
+
+                if max_cumulative_limit is not None and (total_amount + amount) > max_cumulative_limit:
+                    conn.rollback()
+                    return False, total_amount, tx_count, (
+                        f"CUMULATIVE_LIMIT_EXCEEDED_ON_RESUME: rolling {window_seconds}s total ₹{total_amount + amount:,.2f} "
+                        f"exceeds cap ₹{max_cumulative_limit:,.2f} (capacity consumed while awaiting approval)"
+                    )
+
+                if max_velocity_count is not None and (tx_count + 1) > max_velocity_count:
+                    conn.rollback()
+                    return False, total_amount, tx_count, (
+                        f"VELOCITY_LIMIT_EXCEEDED_ON_RESUME: {tx_count + 1} transactions exceeds limit "
+                        f"of {max_velocity_count} per window (capacity consumed while awaiting approval)"
+                    )
+
+                cursor.execute("""
+                    UPDATE transaction_intents
+                    SET state = 'AUTHORIZED_PENDING_EXECUTION', updated_at = ?
+                    WHERE request_id = ?
+                """, (now_str, request_id))
+                conn.commit()
+                return True, total_amount + amount, tx_count + 1, "OK"
             except Exception:
                 conn.rollback()
                 raise
