@@ -15,14 +15,22 @@ class EvidencePersistenceError(Exception):
 class EvidenceStore:
     """Off-Chain Storage engine for detailed sensitive evidence records."""
 
-    def __init__(self, db_path: str | None = None):
+    def __init__(self, db_path: str | None = None, fail_closed: bool = False):
         self.db_path = resolve_database_path(db_path)
+        self.fail_closed = fail_closed
         self._store: dict[str, dict[str, Any]] = {}
-        self._ensure_genesis_record()
+        self._ensure_genesis_record(fail_closed=fail_closed)
         self._load_from_storage()
-        self._ensure_genesis_record()
+        self._ensure_genesis_record(fail_closed=fail_closed)
 
     def _ensure_genesis_record(self, fail_closed: bool = False) -> None:
+        is_strict = (
+            fail_closed
+            or self.fail_closed
+            or os.environ.get("STRICT_PERSISTENCE", "false").lower() in ("true", "1")
+            or os.environ.get("AGENTTRUST_PRODUCTION", "false").lower() in ("true", "1")
+        )
+
         if "EVIDENCE-REQ-GENESIS-000" not in self._store:
             genesis_input = {
                 "system": "AgentTrust Framework",
@@ -68,24 +76,38 @@ class EvidenceStore:
             # Compute canonical SHA-256 digest of genesis record
             rec_hash = HashManager.calculate_evidence_hash(genesis_rec)
             genesis_rec["record_hash"] = rec_hash
+            genesis_rec["ledger_anchor_hash"] = rec_hash
+            full_digest = HashManager.calculate_evidence_hash(genesis_rec)
             self._store["EVIDENCE-REQ-GENESIS-000"] = genesis_rec
 
             try:
                 from fabric.persistent_db import PersistentStorageEngine
                 pe = PersistentStorageEngine(self.db_path)
-                if not pe.get_evidence("EVIDENCE-REQ-GENESIS-000"):
-                    ev_hash = HashManager.calculate_evidence_hash(genesis_rec)
+                existing = pe.get_evidence("EVIDENCE-REQ-GENESIS-000")
+                if not existing:
                     pe.save_evidence(
                         evidence_id="EVIDENCE-REQ-GENESIS-000",
                         request_id="REQ-GENESIS-000",
                         agent_id="SYSTEM",
-                        evidence_hash=ev_hash,
+                        evidence_hash=full_digest,
                         evidence_data=genesis_rec
                     )
+                else:
+                    existing_clean = {k: v for k, v in existing.items() if k != "_stored_hash"}
+                    expected_hash = existing.get("_stored_hash") or existing.get("record_hash") or ""
+                    check = HashManager.verify_integrity(existing_clean, expected_hash)
+                    if not check.get("verified"):
+                        logger.error(
+                            f"CORRUPTED_OR_TAMPERED_GENESIS_EVIDENCE: Stored {expected_hash} != Recalculated {check.get('recalculated_hash')}"
+                        )
+                        if is_strict:
+                            raise EvidencePersistenceError("CORRUPTED_OR_TAMPERED_GENESIS_EVIDENCE: Stored genesis record does not match trusted digest")
+                    else:
+                        self._store["EVIDENCE-REQ-GENESIS-000"] = existing_clean
             except Exception as exc:
-                logger.error(f"Failed to persist genesis evidence record to persistent store ({self.db_path}): {exc}")
-                if fail_closed or os.environ.get("STRICT_PERSISTENCE", "false").lower() in ("true", "1"):
-                    raise EvidencePersistenceError(f"Genesis evidence persistence failed: {exc}") from exc
+                logger.error(f"Failed to persist or verify genesis evidence record in store ({self.db_path}): {exc}")
+                if is_strict:
+                    raise EvidencePersistenceError(f"Genesis evidence persistence or verification failed: {exc}") from exc
 
     def _load_from_storage(self) -> None:
         try:

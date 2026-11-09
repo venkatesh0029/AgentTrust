@@ -2,12 +2,15 @@ import copy
 import datetime
 import hashlib
 import json
+import logging
 import math
 import os
 import time
 import uuid
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from action_gateway.request_validator import RequestValidator
 from action_gateway.retry_queue import RetryQueueManager
@@ -988,7 +991,13 @@ class ActionGateway:
         """Resumes processing after human supervisor approves a pending request with complete atomic re-validation (#11, #1)."""
         app_record = self.approval_manager.get_approval_by_id(approval_id)
         if not app_record or app_record.get("status") != "PENDING":
-            return {"success": False, "message": f"Approval ticket '{approval_id}' not found or not pending."}
+            st = app_record.get("status", "UNKNOWN") if app_record else "NOT_FOUND"
+            return {
+                "success": False,
+                "decision": "BLOCKED",
+                "reason": f"REQUEST_ALREADY_APPROVED ({st})" if st == "APPROVED" else f"APPROVAL_TICKET_NOT_PENDING ({st})",
+                "message": f"Approval ticket '{approval_id}' not found or not pending (status: {st})."
+            }
 
         token_to_pass = provided_token
         if not token_to_pass:
@@ -1096,7 +1105,12 @@ class ActionGateway:
             validation_context["matched_rules"] = rules
 
             if dec == PolicyDecision.BLOCKED:
-                return False, f"POLICY_RECHECK_FAILED: {rsn.value}"
+                if validation_context.get("reservation_held") and self.persistent_db and hasattr(self.persistent_db, "release_reservation"):
+                    try:
+                        self.persistent_db.release_reservation(request_id, new_state="REJECTED", reason=f"POLICY_RECHECK_FAILED: {rsn.value if hasattr(rsn, 'value') else str(rsn)}")
+                    except Exception:
+                        pass
+                return False, f"POLICY_RECHECK_FAILED: {rsn.value if hasattr(rsn, 'value') else str(rsn)}"
 
             # 5. Re-check Delegation Token (using stored delegation token or parameters)
             del_token = record.get("delegation_token") or parameters.get("delegation_token") or auth_ctx.get("delegation_token")
@@ -1106,6 +1120,11 @@ class ActionGateway:
                     del_token, action, amount, issuer_pub, requesting_agent_id=agent_id
                 )
                 if not del_res.get("valid"):
+                    if validation_context.get("reservation_held") and self.persistent_db and hasattr(self.persistent_db, "release_reservation"):
+                        try:
+                            self.persistent_db.release_reservation(request_id, new_state="REJECTED", reason=f"DELEGATION_RECHECK_FAILED: {del_res.get('reason')}")
+                        except Exception:
+                            pass
                     return False, f"DELEGATION_RECHECK_FAILED: {del_res.get('reason')}"
 
             validation_context["agent_record"] = ag_rec
@@ -1187,6 +1206,7 @@ class ActionGateway:
             outbox_record=outbox_record
         )
 
+        reconciliation_warning = None
         if exec_res.get("success"):
             if self.persistent_db:
                 try:
@@ -1195,8 +1215,25 @@ class ActionGateway:
                         state="EXECUTED_PENDING_LEDGER",
                         expected_current_state="AUTHORIZED_PENDING_EXECUTION"
                     )
-                except Exception:
-                    pass
+                except Exception as ex:
+                    logger.critical(f"Database error updating intent {request_id} to EXECUTED_PENDING_LEDGER: {ex}")
+                    reconciliation_warning = f"INTENT_STATE_UPDATE_FAILED: {str(ex)}"
+                    if hasattr(self.persistent_db, "save_retry_record"):
+                        try:
+                            self.persistent_db.save_retry_record(
+                                event_id=event_id,
+                                request_id=request_id,
+                                payload={
+                                    "request_id": request_id,
+                                    "status": "RECONCILIATION_REQUIRED",
+                                    "actual_execution": "SUCCESS",
+                                    "error": str(ex)
+                                },
+                                error_msg=f"INTENT_STATE_UPDATE_FAILED: {str(ex)}",
+                                status="RECONCILIATION_REQUIRED"
+                            )
+                        except Exception:
+                            pass
         else:
             if self.persistent_db:
                 try:
@@ -1205,8 +1242,9 @@ class ActionGateway:
                         state="EXECUTION_FAILED",
                         expected_current_state="AUTHORIZED_PENDING_EXECUTION"
                     )
-                except Exception:
-                    pass
+                except Exception as ex:
+                    logger.error(f"Database error updating intent {request_id} to EXECUTION_FAILED: {ex}")
+                    reconciliation_warning = f"INTENT_STATE_UPDATE_FAILED: {str(ex)}"
 
         api_res_str = "EXECUTED" if exec_res.get("success") else f"FAILED: {exec_res.get('error', 'Execution Error')}"
         agent_ver = agent_record.get("agent_version", "1.0")
@@ -1265,7 +1303,8 @@ class ActionGateway:
             risk_result=validation_context.get("risk_result"),
             matched_rules=validation_context.get("matched_rules"),
             event_id=event_id,
-            delegation_context=del_ctx
+            delegation_context=del_ctx,
+            reconciliation_status=reconciliation_warning
         )
 
     def _finalize_gateway_outcome(
@@ -1291,7 +1330,8 @@ class ActionGateway:
         idempotency_key: str | None = None,
         event_id: str | None = None,
         behavior_eval: dict[str, Any] | None = None,
-        delegation_context: dict[str, Any] | None = None
+        delegation_context: dict[str, Any] | None = None,
+        reconciliation_status: str | None = None
     ) -> dict[str, Any]:
         """
         Creates off-chain evidence, records hash-chain audit log, and commits audit event to Fabric blockchain safely.
@@ -1372,9 +1412,10 @@ class ActionGateway:
             # Drain outbox entry and update intent to COMMITTED
             if self.persistent_db:
                 try:
-                    self.persistent_db.delete_retry_record(event_id)
-                    if hasattr(self.retry_queue, "_pending_queue"):
-                        self.retry_queue._pending_queue.pop(event_id, None)
+                    if not reconciliation_status:
+                        self.persistent_db.delete_retry_record(event_id)
+                        if hasattr(self.retry_queue, "_pending_queue"):
+                            self.retry_queue._pending_queue.pop(event_id, None)
                     self.persistent_db.update_intent_state(
                         request_id=request_id,
                         state="COMMITTED",
@@ -1461,6 +1502,8 @@ class ActionGateway:
             outcome["behavioral_intelligence"] = behavior_eval
         if delegation_context:
             outcome["delegation_context"] = delegation_context
+        if reconciliation_status:
+            outcome["reconciliation_status"] = reconciliation_status
 
         if self.persistent_db and decision == PolicyDecision.ALLOWED.value:
             try:

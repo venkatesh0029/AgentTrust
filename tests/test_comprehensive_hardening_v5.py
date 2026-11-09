@@ -19,14 +19,12 @@ import os
 import sqlite3
 import tempfile
 import threading
-import time
 import uuid
 
-import pytest
 import yaml
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 from action_gateway.gateway import ActionGateway
@@ -52,7 +50,7 @@ from risk_engine.behavior_engine import agent_behavior_engine
 def test_finding_1_raft_three_consenters_configured():
     """Verify that configtx.yaml specifies at least 3 Raft orderer consenters."""
     config_path = os.path.join(os.path.dirname(__file__), "..", "fabric", "configtx.yaml")
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(config_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     consen = cfg["Orderer"]["EtcdRaft"]["Consenters"]
     assert len(consen) >= 3, f"Expected at least 3 Raft consenters for quorum, found {len(consen)}"
@@ -65,7 +63,7 @@ def test_finding_1_raft_three_consenters_configured():
 def test_finding_2_parameterized_infrastructure_credentials_and_env_example():
     """Verify that docker-compose-fabric.yaml parameterizes passwords and .env.example exists."""
     compose_path = os.path.join(os.path.dirname(__file__), "..", "fabric", "docker-compose-fabric.yaml")
-    with open(compose_path, "r", encoding="utf-8") as f:
+    with open(compose_path, encoding="utf-8") as f:
         content = f.read()
 
     assert "${COUCHDB_PASSWORD" in content, "CouchDB password must be parameterized"
@@ -147,7 +145,7 @@ def test_finding_6_certificate_manager_ecdsa_and_unsupported_key_support():
             x509.NameAttribute(NameOID.COMMON_NAME, "AgentTrust ECDSA Root CA"),
             x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AgentTrust Framework"),
         ])
-        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        now_utc = datetime.datetime.now(datetime.UTC)
         ecdsa_ca_cert = (
             x509.CertificateBuilder()
             .subject_name(ca_subject)
@@ -241,7 +239,7 @@ def test_loophole_11_fail_closed_on_persistent_db_volume_exception():
             "action": "CREATE_PURCHASE_ORDER",
             "resource": "SUPPLIER-101",
             "parameters": {"amount": 500.0},
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "nonce": uuid.uuid4().hex,
             "idempotency_key": uuid.uuid4().hex
         }
@@ -281,7 +279,7 @@ def test_loophole_12_unknown_string_delegation_token_fails_closed():
             "resource": "SUPPLIER-101",
             "parameters": {"amount": 500.0},
             "delegation_token": "DEL-UNREGISTERED-TOKEN-FORGED",
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "nonce": uuid.uuid4().hex,
             "idempotency_key": uuid.uuid4().hex
         }
@@ -376,7 +374,7 @@ def test_second_pass_audit_concurrent_smurfing_via_action_gateway():
                 "action": "TRANSFER_FUNDS",
                 "resource": "SUPPLIER-101",
                 "parameters": {"amount": 4000.0},
-                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                 "nonce": f"NONCE-GW-{idx}-{uuid.uuid4().hex[:8]}",
                 "idempotency_key": f"IDEMP-GW-{idx}-{uuid.uuid4().hex[:8]}"
             }
@@ -409,7 +407,7 @@ def test_second_pass_audit_crypto_specs_and_orderer_named_volumes():
     """
     # 1. crypto-config.yaml
     crypto_path = os.path.join(os.path.dirname(__file__), "..", "fabric", "crypto-config.yaml")
-    with open(crypto_path, "r", encoding="utf-8") as f:
+    with open(crypto_path, encoding="utf-8") as f:
         crypto_cfg = yaml.safe_load(f)
 
     orderer_orgs = crypto_cfg["OrdererOrgs"][0]
@@ -420,7 +418,7 @@ def test_second_pass_audit_crypto_specs_and_orderer_named_volumes():
 
     # 2. docker-compose-fabric.yaml named volumes
     compose_path = os.path.join(os.path.dirname(__file__), "..", "fabric", "docker-compose-fabric.yaml")
-    with open(compose_path, "r", encoding="utf-8") as f:
+    with open(compose_path, encoding="utf-8") as f:
         compose_cfg = yaml.safe_load(f)
 
     vols = compose_cfg.get("volumes", {})
@@ -524,7 +522,7 @@ def test_third_pass_audit_approval_resume_capacity_exhaustion_blocks():
             "action": "TRANSFER_FUNDS",
             "resource": "SUPPLIER-101",
             "parameters": {"amount": 26000.0},
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "nonce": uuid.uuid4().hex,
             "idempotency_key": uuid.uuid4().hex
         }
@@ -544,7 +542,7 @@ def test_third_pass_audit_approval_resume_capacity_exhaustion_blocks():
             "action": "TRANSFER_FUNDS",
             "resource": "SUPPLIER-101",
             "parameters": {"amount": 10000.0},
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "nonce": uuid.uuid4().hex,
             "idempotency_key": uuid.uuid4().hex
         }
@@ -610,3 +608,454 @@ def test_third_pass_audit_genesis_evidence_restart_and_cryptographic_verificatio
         assert verify_result["verified"] is True
         assert verify_result["status"] == "VERIFIED"
         p_db.close()
+
+
+def test_fourth_pass_audit_approval_resume_policy_rejection_releases_reservation():
+    """
+    Fourth-Pass Review Finding 1.a:
+    Verify that if policy recheck fails in _atomic_validator during approval resume,
+    the reserved cumulative capacity is immediately released to state REJECTED,
+    preventing any dangling reservation leak.
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = os.path.join(tmp, "test_policy_recheck_release.db")
+        p_db = PersistentStorageEngine(db_path=db_path)
+        cert_mgr = CertificateManager(db_path=db_path)
+        registry = AgentRegistry(cert_manager=cert_mgr, store=IdentityStore(db_path=db_path))
+        approval_mgr = HumanApprovalManager()
+
+        reg = registry.register_agent(
+            agent_id="POLICY-RECHECK-AGENT",
+            agent_name="Policy Recheck Agent",
+            policy_id="POLICY-RECHECK-POL"
+        )
+        priv_key = reg["private_key"]
+
+        from policy_engine.policy_models import PolicyRecord, WorkingHours
+        loader = PolicyLoader()
+        policy = PolicyRecord(
+            policy_id="POLICY-RECHECK-POL",
+            agent_id="POLICY-RECHECK-AGENT",
+            version="1.0",
+            allowed_actions=["TRANSFER_FUNDS"],
+            allowed_resource="*",
+            maximum_amount=50000.0,
+            cumulative_maximum_amount=50000.0,
+            max_transactions_per_window=10,
+            velocity_window_seconds=86400,
+            human_approval_above=20000.0,
+            working_hours=WorkingHours(start="00:00", end="23:59")
+        )
+        loader.save_policy(policy)
+
+        gw = ActionGateway(
+            registry=registry,
+            cert_manager=cert_mgr,
+            policy_evaluator=PolicyEvaluator(loader),
+            replay_tracker=RequestTracker(300),
+            finance_api=ProtectedFinanceAPI(),
+            approval_manager=approval_mgr,
+            evidence_store=EvidenceStore(db_path=db_path),
+            fabric_client=FabricClient(),
+            persistent_db=p_db
+        )
+
+        req_id = f"REQ-POL-REL-{uuid.uuid4().hex[:6]}"
+        payload = {
+            "request_id": req_id,
+            "agent_id": "POLICY-RECHECK-AGENT",
+            "action": "TRANSFER_FUNDS",
+            "resource": "SUPPLIER-101",
+            "parameters": {"amount": 25000.0},
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+            "nonce": uuid.uuid4().hex,
+            "idempotency_key": uuid.uuid4().hex
+        }
+        payload["signature"] = SignatureManager.sign_request(payload, priv_key)
+        res = gw.process_request(payload)
+        assert res["decision"] == "PENDING_HUMAN_APPROVAL"
+
+        app_ticket = approval_mgr.get_approval_by_request_id(req_id)
+        assert app_ticket is not None
+        approval_id = app_ticket["approval_id"]
+        approval_token = app_ticket["approval_token"]
+
+        # Modify policy to disallow TRANSFER_FUNDS before approval is resumed
+        revised_policy = PolicyRecord(
+            policy_id="POLICY-RECHECK-POL",
+            agent_id="POLICY-RECHECK-AGENT",
+            version="2.0",
+            allowed_actions=["VIEW_BALANCE"],  # TRANSFER_FUNDS removed
+            allowed_resource="*",
+            maximum_amount=50000.0,
+            cumulative_maximum_amount=50000.0,
+            max_transactions_per_window=10,
+            velocity_window_seconds=86400,
+            human_approval_above=20000.0,
+            working_hours=WorkingHours(start="00:00", end="23:59")
+        )
+        loader.save_policy(revised_policy)
+
+        # Resume approval
+        resume_res = gw.process_human_approval_resume(
+            approval_id=approval_id,
+            approver_id="SUPERVISOR-01",
+            provided_token=approval_token
+        )
+
+        # Must fail closed: execution blocked due to policy change
+        assert resume_res["decision"] == "BLOCKED"
+        assert "POLICY_RECHECK_FAILED" in resume_res["reason"]
+
+        # Intent must have been released from reservation and transitioned to REJECTED
+        intent = p_db.get_intent(req_id)
+        assert intent is not None
+        assert intent["state"] == "REJECTED"
+        assert "POLICY_RECHECK_FAILED" in str(intent.get("outcome") or intent.get("outcome_json") or "")
+        p_db.close()
+
+
+def test_fourth_pass_audit_approval_resume_delegation_rejection_releases_reservation():
+    """
+    Fourth-Pass Review Finding 1.b:
+    Verify that if delegation recheck fails in _atomic_validator during approval resume,
+    the reserved cumulative capacity is immediately released to state REJECTED.
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = os.path.join(tmp, "test_delegation_recheck_release.db")
+        p_db = PersistentStorageEngine(db_path=db_path)
+        cert_mgr = CertificateManager(db_path=db_path)
+        registry = AgentRegistry(cert_manager=cert_mgr, store=IdentityStore(db_path=db_path))
+        approval_mgr = HumanApprovalManager()
+
+        issuer_reg = registry.register_agent(agent_id="FIN-SUPERVISOR-DEL", agent_name="Supervisor", policy_id="SUPERVISOR-POL")
+        delegate_reg = registry.register_agent(agent_id="FIN-WORKER-DEL", agent_name="Worker", policy_id="WORKER-POL")
+        delegate_priv = delegate_reg["private_key"]
+
+        from identity_manager.delegation import DelegationTokenManager
+        from policy_engine.policy_models import PolicyRecord, WorkingHours
+
+        del_token = DelegationTokenManager.create_delegated_token(
+            issuer_agent_id="FIN-SUPERVISOR-DEL",
+            delegate_agent_id="FIN-WORKER-DEL",
+            allowed_actions=["TRANSFER_FUNDS"],
+            maximum_amount=50000.0,
+            issuer_private_key=issuer_reg["private_key"],
+            ttl_seconds=3600
+        )
+
+        loader = PolicyLoader()
+        worker_pol = PolicyRecord(
+            policy_id="WORKER-POL",
+            agent_id="FIN-WORKER-DEL",
+            version="1.0",
+            allowed_actions=["TRANSFER_FUNDS"],
+            allowed_resource="*",
+            maximum_amount=50000.0,
+            cumulative_maximum_amount=50000.0,
+            max_transactions_per_window=10,
+            velocity_window_seconds=86400,
+            human_approval_above=20000.0,
+            working_hours=WorkingHours(start="00:00", end="23:59")
+        )
+        loader.save_policy(worker_pol)
+
+        gw = ActionGateway(
+            registry=registry,
+            cert_manager=cert_mgr,
+            policy_evaluator=PolicyEvaluator(loader),
+            replay_tracker=RequestTracker(300),
+            finance_api=ProtectedFinanceAPI(),
+            approval_manager=approval_mgr,
+            evidence_store=EvidenceStore(db_path=db_path),
+            fabric_client=FabricClient(),
+            persistent_db=p_db
+        )
+
+        req_id = f"REQ-DEL-REL-{uuid.uuid4().hex[:6]}"
+        payload = {
+            "request_id": req_id,
+            "agent_id": "FIN-WORKER-DEL",
+            "action": "TRANSFER_FUNDS",
+            "resource": "SUPPLIER-101",
+            "parameters": {"amount": 28000.0},
+            "delegation_token": del_token,
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+            "nonce": uuid.uuid4().hex,
+            "idempotency_key": uuid.uuid4().hex
+        }
+        payload["signature"] = SignatureManager.sign_request(payload, delegate_priv)
+        res = gw.process_request(payload)
+        assert res["decision"] == "PENDING_HUMAN_APPROVAL"
+
+        app_ticket = approval_mgr.get_approval_by_request_id(req_id)
+        assert app_ticket is not None
+        approval_id = app_ticket["approval_id"]
+        approval_token = app_ticket["approval_token"]
+
+        # Revoke the delegation token while request is awaiting approval
+        DelegationTokenManager.revoke_token(del_token.get("token_id"))
+
+        # Resume approval
+        resume_res = gw.process_human_approval_resume(
+            approval_id=approval_id,
+            approver_id="SUPERVISOR-01",
+            provided_token=approval_token
+        )
+
+        # Must fail closed: execution blocked due to revoked delegation token
+        assert resume_res["decision"] == "BLOCKED"
+        assert "DELEGATION_RECHECK_FAILED" in resume_res["reason"]
+
+        # Intent must have been released from reservation and transitioned to REJECTED
+        intent = p_db.get_intent(req_id)
+        assert intent is not None
+        assert intent["state"] == "REJECTED"
+        assert "DELEGATION_RECHECK_FAILED" in str(intent.get("outcome") or intent.get("outcome_json") or "")
+        p_db.close()
+
+
+def test_fourth_pass_audit_approval_resume_db_failure_enqueues_reconciliation():
+    """
+    Fourth-Pass Review Finding 1.c:
+    Verify that if the persistent database fails during post-execution intent state transition,
+    the gateway logs a CRITICAL error, enqueues an emergency outbox record with
+    status RECONCILIATION_REQUIRED, and returns reconciliation_status in outcome.
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = os.path.join(tmp, "test_db_failure_reconciliation.db")
+        p_db = PersistentStorageEngine(db_path=db_path)
+        cert_mgr = CertificateManager(db_path=db_path)
+        registry = AgentRegistry(cert_manager=cert_mgr, store=IdentityStore(db_path=db_path))
+        approval_mgr = HumanApprovalManager()
+
+        reg = registry.register_agent(agent_id="DB-FAIL-AGENT", agent_name="DB Fail Agent", policy_id="DB-FAIL-POL")
+        priv_key = reg["private_key"]
+
+        from policy_engine.policy_models import PolicyRecord, WorkingHours
+        loader = PolicyLoader()
+        pol = PolicyRecord(
+            policy_id="DB-FAIL-POL",
+            agent_id="DB-FAIL-AGENT",
+            version="1.0",
+            allowed_actions=["TRANSFER_FUNDS"],
+            allowed_resource="*",
+            maximum_amount=50000.0,
+            cumulative_maximum_amount=50000.0,
+            max_transactions_per_window=10,
+            velocity_window_seconds=86400,
+            human_approval_above=20000.0,
+            working_hours=WorkingHours(start="00:00", end="23:59")
+        )
+        loader.save_policy(pol)
+
+        gw = ActionGateway(
+            registry=registry,
+            cert_manager=cert_mgr,
+            policy_evaluator=PolicyEvaluator(loader),
+            replay_tracker=RequestTracker(300),
+            finance_api=ProtectedFinanceAPI(),
+            approval_manager=approval_mgr,
+            evidence_store=EvidenceStore(db_path=db_path),
+            fabric_client=FabricClient(),
+            persistent_db=p_db
+        )
+
+        req_id = f"REQ-DB-FAIL-{uuid.uuid4().hex[:6]}"
+        payload = {
+            "request_id": req_id,
+            "agent_id": "DB-FAIL-AGENT",
+            "action": "TRANSFER_FUNDS",
+            "resource": "SUPPLIER-101",
+            "parameters": {"amount": 25000.0},
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+            "nonce": uuid.uuid4().hex,
+            "idempotency_key": uuid.uuid4().hex
+        }
+        payload["signature"] = SignatureManager.sign_request(payload, priv_key)
+        res = gw.process_request(payload)
+        assert res["decision"] == "PENDING_HUMAN_APPROVAL"
+
+        app_ticket = approval_mgr.get_approval_by_request_id(req_id)
+        assert app_ticket is not None
+        approval_id = app_ticket["approval_id"]
+        approval_token = app_ticket["approval_token"]
+
+        # Monkeypatch update_intent_state on p_db to simulate SQLite lock error
+        real_update = p_db.update_intent_state
+
+        def failing_update_intent_state(request_id, state, **kwargs):
+            if state == "EXECUTED_PENDING_LEDGER":
+                raise sqlite3.OperationalError("database is locked: simulated disk contention")
+            return real_update(request_id, state, **kwargs)
+
+        p_db.update_intent_state = failing_update_intent_state
+
+        # Resume approval
+        resume_res = gw.process_human_approval_resume(
+            approval_id=approval_id,
+            approver_id="SUPERVISOR-01",
+            provided_token=approval_token
+        )
+
+        # Downstream execution succeeded, but reconciliation status must be reported
+        assert resume_res["decision"] in ("ALLOWED", "COMPLETED", "ALLOWED_AFTER_APPROVAL")
+        assert resume_res.get("reconciliation_status") is not None
+        assert "INTENT_STATE_UPDATE_FAILED" in resume_res["reconciliation_status"]
+
+        # Verify emergency outbox entry was written with RECONCILIATION_REQUIRED
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT payload_json FROM reconciliation_queue WHERE request_id = ? AND status = 'RECONCILIATION_REQUIRED'", (req_id,))
+            rows = cur.fetchall()
+            assert len(rows) >= 1
+            payload_data = rows[0][0]
+            assert "database is locked" in payload_data
+        p_db.close()
+
+
+def test_fourth_pass_audit_approval_resume_concurrent_duplicate_attempts():
+    """
+    Fourth-Pass Review Finding 1.d:
+    Verify that concurrent approval resume requests for the same ticket execute atomically:
+    exactly one thread executes the protected action, while duplicate attempts fail closed
+    with REQUEST_ALREADY_APPROVED.
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = os.path.join(tmp, "test_concurrent_approval.db")
+        p_db = PersistentStorageEngine(db_path=db_path)
+        cert_mgr = CertificateManager(db_path=db_path)
+        registry = AgentRegistry(cert_manager=cert_mgr, store=IdentityStore(db_path=db_path))
+        approval_mgr = HumanApprovalManager()
+
+        reg = registry.register_agent(agent_id="CONCUR-AGENT", agent_name="Concur Agent", policy_id="CONCUR-POL")
+        priv_key = reg["private_key"]
+
+        from policy_engine.policy_models import PolicyRecord, WorkingHours
+        loader = PolicyLoader()
+        pol = PolicyRecord(
+            policy_id="CONCUR-POL",
+            agent_id="CONCUR-AGENT",
+            version="1.0",
+            allowed_actions=["TRANSFER_FUNDS"],
+            allowed_resource="*",
+            maximum_amount=50000.0,
+            cumulative_maximum_amount=50000.0,
+            max_transactions_per_window=10,
+            velocity_window_seconds=86400,
+            human_approval_above=20000.0,
+            working_hours=WorkingHours(start="00:00", end="23:59")
+        )
+        loader.save_policy(pol)
+
+        gw = ActionGateway(
+            registry=registry,
+            cert_manager=cert_mgr,
+            policy_evaluator=PolicyEvaluator(loader),
+            replay_tracker=RequestTracker(300),
+            finance_api=ProtectedFinanceAPI(),
+            approval_manager=approval_mgr,
+            evidence_store=EvidenceStore(db_path=db_path),
+            fabric_client=FabricClient(),
+            persistent_db=p_db
+        )
+
+        req_id = f"REQ-CONCUR-{uuid.uuid4().hex[:6]}"
+        payload = {
+            "request_id": req_id,
+            "agent_id": "CONCUR-AGENT",
+            "action": "TRANSFER_FUNDS",
+            "resource": "SUPPLIER-101",
+            "parameters": {"amount": 25000.0},
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+            "nonce": uuid.uuid4().hex,
+            "idempotency_key": uuid.uuid4().hex
+        }
+        payload["signature"] = SignatureManager.sign_request(payload, priv_key)
+        res = gw.process_request(payload)
+        assert res["decision"] == "PENDING_HUMAN_APPROVAL"
+
+        app_ticket = approval_mgr.get_approval_by_request_id(req_id)
+        assert app_ticket is not None
+        approval_id = app_ticket["approval_id"]
+        approval_token = app_ticket["approval_token"]
+
+        results = []
+        barrier = threading.Barrier(2)
+
+        def worker():
+            barrier.wait()
+            r = gw.process_human_approval_resume(
+                approval_id=approval_id,
+                approver_id="SUPERVISOR-01",
+                provided_token=approval_token
+            )
+            results.append(r)
+
+        t1 = threading.Thread(target=worker)
+        t2 = threading.Thread(target=worker)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert len(results) == 2
+        successes = [r for r in results if r.get("decision") in ("ALLOWED", "COMPLETED", "ALLOWED_AFTER_APPROVAL")]
+        rejections = [r for r in results if r.get("decision") == "BLOCKED"]
+
+        assert len(successes) == 1, "Exactly one thread must succeed in executing approval resume"
+        assert len(rejections) == 1, "Duplicate resume must be rejected"
+        assert "REQUEST_ALREADY_APPROVED" in rejections[0]["reason"]
+        p_db.close()
+
+
+def test_fourth_pass_audit_genesis_evidence_tamper_detection():
+    """
+    Fourth-Pass Review Finding 2:
+    Verify that altering genesis evidence record stored in SQLite causes
+    cryptographic verification to fail (TAMPERING_DETECTED), and strict startup
+    fails closed.
+    """
+    from evidence_manager.evidence_store import EvidencePersistenceError
+    from evidence_manager.hash_manager import HashManager
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = os.path.join(tmp, "test_genesis_tamper.db")
+
+        # 1. Initialize EvidenceStore normally (creates anchored genesis record)
+        store = EvidenceStore(db_path=db_path, fail_closed=True)
+        genesis = store.get_evidence("REQ-GENESIS-000")
+        assert genesis is not None
+        original_hash = HashManager.calculate_evidence_hash(genesis)
+
+        # Verify initial cryptographic integrity
+        initial_check = HashManager.verify_integrity(genesis, original_hash)
+        assert initial_check["verified"] is True
+        assert initial_check["status"] == "VERIFIED"
+
+        # 2. Tamper directly with the SQLite database content
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE evidence_store
+                SET evidence_json = '{"evidence_id": "EVIDENCE-REQ-GENESIS-000", "tampered_field": "unauthorized_modification"}'
+                WHERE evidence_id = 'EVIDENCE-REQ-GENESIS-000'
+            """)
+            conn.commit()
+
+        # 3. Reload from DB and verify HashManager detects tampering
+        p_db = PersistentStorageEngine(db_path=db_path)
+        tampered_rec = p_db.get_evidence("EVIDENCE-REQ-GENESIS-000")
+        p_db.close()
+
+        tampered_clean = {k: v for k, v in tampered_rec.items() if k != "_stored_hash"}
+        tamper_check = HashManager.verify_integrity(tampered_clean, original_hash)
+        assert tamper_check["verified"] is False
+        assert tamper_check["status"] == "TAMPERING_DETECTED"
+
+        # 4. Strict mode boot must fail closed with EvidencePersistenceError
+        import pytest
+        with pytest.raises(EvidencePersistenceError) as exc_info:
+            EvidenceStore(db_path=db_path, fail_closed=True)
+        assert "CORRUPTED_OR_TAMPERED_GENESIS_EVIDENCE" in str(exc_info.value)
+

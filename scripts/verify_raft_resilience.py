@@ -10,13 +10,11 @@ Part of the AgentTrust release checklist:
 """
 
 import argparse
-import hashlib
-import json
 import os
 import subprocess
 import sys
 import tempfile
-from typing import Any
+
 import yaml
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -29,7 +27,7 @@ def check_configuration_alignment(root_dir: str) -> bool:
     try:
         # Check crypto-config.yaml
         crypto_file = os.path.join(root_dir, "fabric", "crypto-config.yaml")
-        with open(crypto_file, "r", encoding="utf-8") as f:
+        with open(crypto_file, encoding="utf-8") as f:
             crypto_cfg = yaml.safe_load(f)
         orderers = [s["Hostname"] for s in crypto_cfg["OrdererOrgs"][0]["Specs"]]
         if set(orderers) != {"orderer", "orderer2", "orderer3"}:
@@ -38,7 +36,7 @@ def check_configuration_alignment(root_dir: str) -> bool:
 
         # Check configtx.yaml
         configtx_file = os.path.join(root_dir, "fabric", "configtx.yaml")
-        with open(configtx_file, "r", encoding="utf-8") as f:
+        with open(configtx_file, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
         consen = [c["Host"] for c in cfg["Orderer"]["EtcdRaft"]["Consenters"]]
         if len(consen) < 3:
@@ -47,7 +45,7 @@ def check_configuration_alignment(root_dir: str) -> bool:
 
         # Check compose named volumes
         compose_file = os.path.join(root_dir, "fabric", "docker-compose-fabric.yaml")
-        with open(compose_file, "r", encoding="utf-8") as f:
+        with open(compose_file, encoding="utf-8") as f:
             compose_cfg = yaml.safe_load(f)
         vols = compose_cfg.get("volumes", {})
         for node in ("orderer.agenttrust.com-data", "orderer2.agenttrust.com-data", "orderer3.agenttrust.com-data"):
@@ -68,13 +66,13 @@ def run_raft_cft_state_machine_simulation() -> bool:
         from tests.test_raft_cluster_resilience import SimulatedRaftCluster
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             cluster = SimulatedRaftCluster(tmp)
-            
+
             # Phase 1: 3 alive nodes elect leader
             leader = cluster.elect_leader()
             if not leader or leader.state != "LEADER":
                 print("  [FAIL] Failed to elect initial leader with 3 alive nodes")
                 return False
-            
+
             # Phase 2: 1 node crash -> quorum 2/3 preserved
             cluster.nodes["orderer3"].crash()
             res_cft = cluster.submit_transaction_proposal({"tx": "CFT_VERIFY_1"})
@@ -116,7 +114,7 @@ def run_persistent_volume_recovery_simulation() -> bool:
 
             leader = next(n for n in cluster.alive_nodes if n.state == "LEADER")
             hashes = [b["block_hash"] for b in leader.log]
-            
+
             # Destroy cluster in memory
             del cluster
             del leader
@@ -160,7 +158,7 @@ def check_live_docker_network() -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="AgentTrust Raft Consensus Resilience & Release Verification")
-    args = parser.parse_args()
+    parser.parse_args()
 
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     print("=" * 70)
