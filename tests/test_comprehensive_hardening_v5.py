@@ -21,7 +21,7 @@ import tempfile
 import threading
 import uuid
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -1057,5 +1057,373 @@ def test_fourth_pass_audit_genesis_evidence_tamper_detection():
         import pytest
         with pytest.raises(EvidencePersistenceError) as exc_info:
             EvidenceStore(db_path=db_path, fail_closed=True)
-        assert "CORRUPTED_OR_TAMPERED_GENESIS_EVIDENCE" in str(exc_info.value)
+        assert "CORRUPTED_OR_TAMPERED_GENESIS_EVIDENCE" in str(exc_info.value) or "INDEPENDENT_TRUST_ANCHOR_VERIFICATION_FAILED" in str(exc_info.value)
+
+
+def test_fifth_pass_audit_reservation_release_failure_surfaces_in_outcome():
+    """
+    Fifth-Pass Review Finding 1.a:
+    Verify that if release_reservation fails (e.g. SQLite database locked/error)
+    during approval resume validation failure, the error is NOT silently swallowed:
+    it is recorded, logged, and surfaced in reconciliation_status and reason.
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = os.path.join(tmp, "test_release_failure_surfaced.db")
+        p_db = PersistentStorageEngine(db_path=db_path)
+        cert_mgr = CertificateManager(db_path=db_path)
+        registry = AgentRegistry(cert_manager=cert_mgr, store=IdentityStore(db_path=db_path))
+        approval_mgr = HumanApprovalManager()
+
+        reg = registry.register_agent(agent_id="REL-FAIL-AGENT", agent_name="Release Fail Agent", policy_id="REL-FAIL-POL")
+        priv_key = reg["private_key"]
+
+        from policy_engine.policy_models import PolicyRecord, WorkingHours
+        loader = PolicyLoader()
+        pol = PolicyRecord(
+            policy_id="REL-FAIL-POL",
+            agent_id="REL-FAIL-AGENT",
+            version="1.0",
+            allowed_actions=["TRANSFER_FUNDS"],
+            allowed_resource="*",
+            maximum_amount=50000.0,
+            cumulative_maximum_amount=50000.0,
+            max_transactions_per_window=10,
+            velocity_window_seconds=86400,
+            human_approval_above=20000.0,
+            working_hours=WorkingHours(start="00:00", end="23:59")
+        )
+        loader.save_policy(pol)
+
+        gw = ActionGateway(
+            registry=registry,
+            cert_manager=cert_mgr,
+            policy_evaluator=PolicyEvaluator(loader),
+            replay_tracker=RequestTracker(300),
+            finance_api=ProtectedFinanceAPI(),
+            approval_manager=approval_mgr,
+            evidence_store=EvidenceStore(db_path=db_path),
+            fabric_client=FabricClient(),
+            persistent_db=p_db
+        )
+
+        req_id = f"REQ-REL-FAIL-{uuid.uuid4().hex[:6]}"
+        payload = {
+            "request_id": req_id,
+            "agent_id": "REL-FAIL-AGENT",
+            "action": "TRANSFER_FUNDS",
+            "resource": "SUPPLIER-101",
+            "parameters": {"amount": 25000.0},
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+            "nonce": uuid.uuid4().hex,
+            "idempotency_key": uuid.uuid4().hex
+        }
+        payload["signature"] = SignatureManager.sign_request(payload, priv_key)
+        res = gw.process_request(payload)
+        assert res["decision"] == "PENDING_HUMAN_APPROVAL"
+
+        app_ticket = approval_mgr.get_approval_by_request_id(req_id)
+        assert app_ticket is not None
+        approval_id = app_ticket["approval_id"]
+        approval_token = app_ticket["approval_token"]
+
+        # Monkeypatch release_reservation to simulate database lock
+        def failing_release_reservation(request_id, new_state="REJECTED", reason=None):
+            raise sqlite3.OperationalError("database is locked: simulated disk contention on release")
+
+        p_db.release_reservation = failing_release_reservation
+
+        # Monkeypatch approve_request validator callback to simulate failure after reservation
+        def failing_ticket_approval(app_id, app_user, provided_token=None, validator_fn=None):
+            # Run validator to simulate holding reservation
+            if validator_fn:
+                ok, v_msg = validator_fn(app_ticket)
+            # Ticket consumption fails
+            return False, None, "TICKET_PERSISTENCE_MUTEX_FAILED"
+
+        approval_mgr.approve_request = failing_ticket_approval
+
+        resume_res = gw.process_human_approval_resume(
+            approval_id=approval_id,
+            approver_id="SUPERVISOR-01",
+            provided_token=approval_token
+        )
+
+        # Must fail closed: blocked
+        assert resume_res["decision"] == "BLOCKED"
+        # Release failure must NOT be swallowed: must be surfaced in reconciliation_status and reason
+        assert resume_res.get("reconciliation_status") is not None
+        assert "RESERVATION_RELEASE_FAILED" in resume_res["reconciliation_status"]
+        assert "RESERVATION_RELEASE_FAILED" in resume_res["reason"]
+        p_db.close()
+
+
+def test_fifth_pass_audit_reconciliation_queue_failure_propagates_critical_warning():
+    """
+    Fifth-Pass Review Finding 1.b:
+    Verify that if persistent DB intent state update fails AND saving to reconciliation_queue
+    also fails, the failure is NOT silently ignored: a critical warning is reported.
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = os.path.join(tmp, "test_crit_recon_failure.db")
+        p_db = PersistentStorageEngine(db_path=db_path)
+        cert_mgr = CertificateManager(db_path=db_path)
+        registry = AgentRegistry(cert_manager=cert_mgr, store=IdentityStore(db_path=db_path))
+        approval_mgr = HumanApprovalManager()
+
+        reg = registry.register_agent(agent_id="CRIT-FAIL-AGENT", agent_name="Crit Fail Agent", policy_id="CRIT-FAIL-POL")
+        priv_key = reg["private_key"]
+
+        from policy_engine.policy_models import PolicyRecord, WorkingHours
+        loader = PolicyLoader()
+        pol = PolicyRecord(
+            policy_id="CRIT-FAIL-POL",
+            agent_id="CRIT-FAIL-AGENT",
+            version="1.0",
+            allowed_actions=["TRANSFER_FUNDS"],
+            allowed_resource="*",
+            maximum_amount=50000.0,
+            cumulative_maximum_amount=50000.0,
+            max_transactions_per_window=10,
+            velocity_window_seconds=86400,
+            human_approval_above=20000.0,
+            working_hours=WorkingHours(start="00:00", end="23:59")
+        )
+        loader.save_policy(pol)
+
+        gw = ActionGateway(
+            registry=registry,
+            cert_manager=cert_mgr,
+            policy_evaluator=PolicyEvaluator(loader),
+            replay_tracker=RequestTracker(300),
+            finance_api=ProtectedFinanceAPI(),
+            approval_manager=approval_mgr,
+            evidence_store=EvidenceStore(db_path=db_path),
+            fabric_client=FabricClient(),
+            persistent_db=p_db
+        )
+
+        req_id = f"REQ-CRIT-FAIL-{uuid.uuid4().hex[:6]}"
+        payload = {
+            "request_id": req_id,
+            "agent_id": "CRIT-FAIL-AGENT",
+            "action": "TRANSFER_FUNDS",
+            "resource": "SUPPLIER-101",
+            "parameters": {"amount": 25000.0},
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+            "nonce": uuid.uuid4().hex,
+            "idempotency_key": uuid.uuid4().hex
+        }
+        payload["signature"] = SignatureManager.sign_request(payload, priv_key)
+        res = gw.process_request(payload)
+        assert res["decision"] == "PENDING_HUMAN_APPROVAL"
+
+        app_ticket = approval_mgr.get_approval_by_request_id(req_id)
+        assert app_ticket is not None
+        approval_id = app_ticket["approval_id"]
+        approval_token = app_ticket["approval_token"]
+
+        # 1. Fail update_intent_state
+        real_update = p_db.update_intent_state
+
+        def failing_update(request_id, state, **kwargs):
+            if state == "EXECUTED_PENDING_LEDGER":
+                raise sqlite3.OperationalError("database is locked: intent update failed")
+            return real_update(request_id, state, **kwargs)
+
+        p_db.update_intent_state = failing_update
+
+        # 2. Fail save_retry_record as well (simulating complete I/O disk failure)
+        def failing_save_retry(*args, **kwargs):
+            raise sqlite3.OperationalError("disk I/O error: reconciliation queue unwritable")
+
+        p_db.save_retry_record = failing_save_retry
+
+        resume_res = gw.process_human_approval_resume(
+            approval_id=approval_id,
+            approver_id="SUPERVISOR-01",
+            provided_token=approval_token
+        )
+
+        # Must report critical reconciliation failure
+        assert resume_res.get("reconciliation_status") is not None
+        assert "CRITICAL_RECONCILIATION_FAILURE" in resume_res["reconciliation_status"]
+        p_db.close()
+
+
+def test_fifth_pass_audit_independent_trust_anchor_detects_simultaneous_tampering():
+    """
+    Fifth-Pass Review Finding 2:
+    Verify that if an attacker modifies BOTH evidence_json AND recalculates evidence_hash
+    inside SQLite, the independent external trust anchor detects the forgery
+    and strict startup fails closed with INDEPENDENT_TRUST_ANCHOR_VERIFICATION_FAILED.
+    """
+    import json
+
+    from evidence_manager.evidence_store import EvidencePersistenceError
+    from evidence_manager.genesis_trust_anchor import (
+        get_genesis_trust_anchor,
+        verify_against_trust_anchor,
+    )
+    from evidence_manager.hash_manager import HashManager
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = os.path.join(tmp, "test_simultaneous_tampering.db")
+
+        # 1. Initialize EvidenceStore normally (creates anchored genesis record)
+        store = EvidenceStore(db_path=db_path, fail_closed=True)
+        genesis = store.get_evidence("REQ-GENESIS-000")
+        assert genesis is not None
+        anchor = get_genesis_trust_anchor()
+
+        # Verify initial trust anchor verification passes
+        trusted_check = verify_against_trust_anchor(genesis, anchor["expected_full_digest"])
+        assert trusted_check["verified"] is True
+        assert trusted_check["status"] == "VERIFIED"
+        del store
+
+        # 2. Malicious Attacker: Modify BOTH evidence_json AND recompute evidence_hash in SQLite
+        forged_rec = {
+            "evidence_schema_version": "2.0",
+            "evidence_id": "EVIDENCE-REQ-GENESIS-000",
+            "request_id": "REQ-GENESIS-000",
+            "agent_id": "ROGUE-ATTACKER",
+            "forged_payload": "unauthorized_forged_evidence_record",
+            "record_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "ledger_anchor_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+        forged_json = json.dumps(forged_rec)
+        forged_stored_hash = HashManager.calculate_evidence_hash(forged_rec)
+
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE evidence_store
+                SET evidence_json = ?, evidence_hash = ?
+                WHERE evidence_id = 'EVIDENCE-REQ-GENESIS-000'
+            """, (forged_json, forged_stored_hash))
+            conn.commit()
+
+        # 3. Verify that verify_against_trust_anchor detects the forgery
+        p_db = PersistentStorageEngine(db_path=db_path)
+        tampered_rec = p_db.get_evidence("EVIDENCE-REQ-GENESIS-000")
+        p_db.close()
+
+        tampered_clean = {k: v for k, v in tampered_rec.items() if k != "_stored_hash"}
+        anchor_check = verify_against_trust_anchor(tampered_clean, forged_stored_hash)
+        assert anchor_check["verified"] is False
+        assert anchor_check["status"] == "TAMPERING_DETECTED"
+        assert anchor_check["anchor_match"] is False or anchor_check["rec_hash_match"] is False
+
+        # 4. Strict mode startup must fail closed with INDEPENDENT_TRUST_ANCHOR_VERIFICATION_FAILED
+        import pytest
+        with pytest.raises(EvidencePersistenceError) as exc_info:
+            EvidenceStore(db_path=db_path, fail_closed=True)
+        assert "INDEPENDENT_TRUST_ANCHOR_VERIFICATION_FAILED" in str(exc_info.value)
+
+
+def test_fifth_pass_audit_approval_revalidation_order_protects_capacity():
+    """
+    Fifth-Pass Review Priority 4:
+    Verify that all non-reservation checks (identity, cert, risk, policy, delegation)
+    are performed BEFORE atomic reservation is requested.
+    If a policy or delegation rule is violated, NO reservation is requested or held.
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = os.path.join(tmp, "test_revalidation_ordering.db")
+        p_db = PersistentStorageEngine(db_path=db_path)
+        cert_mgr = CertificateManager(db_path=db_path)
+        registry = AgentRegistry(cert_manager=cert_mgr, store=IdentityStore(db_path=db_path))
+        approval_mgr = HumanApprovalManager()
+
+        reg = registry.register_agent(agent_id="ORDER-AGENT", agent_name="Order Test Agent", policy_id="ORDER-POL")
+        priv_key = reg["private_key"]
+
+        from policy_engine.policy_models import PolicyRecord, WorkingHours
+        loader = PolicyLoader()
+        pol = PolicyRecord(
+            policy_id="ORDER-POL",
+            agent_id="ORDER-AGENT",
+            version="1.0",
+            allowed_actions=["TRANSFER_FUNDS"],
+            allowed_resource="*",
+            maximum_amount=50000.0,
+            cumulative_maximum_amount=50000.0,
+            max_transactions_per_window=10,
+            velocity_window_seconds=86400,
+            human_approval_above=20000.0,
+            working_hours=WorkingHours(start="00:00", end="23:59")
+        )
+        loader.save_policy(pol)
+
+        # Track whether revalidate_and_reserve_approved_intent is called
+        reservation_calls = []
+        real_reserve = p_db.revalidate_and_reserve_approved_intent
+
+        def tracking_reserve(*args, **kwargs):
+            reservation_calls.append(kwargs)
+            return real_reserve(*args, **kwargs)
+
+        p_db.revalidate_and_reserve_approved_intent = tracking_reserve
+
+        gw = ActionGateway(
+            registry=registry,
+            cert_manager=cert_mgr,
+            policy_evaluator=PolicyEvaluator(loader),
+            replay_tracker=RequestTracker(300),
+            finance_api=ProtectedFinanceAPI(),
+            approval_manager=approval_mgr,
+            evidence_store=EvidenceStore(db_path=db_path),
+            fabric_client=FabricClient(),
+            persistent_db=p_db
+        )
+
+        req_id = f"REQ-ORDER-{uuid.uuid4().hex[:6]}"
+        payload = {
+            "request_id": req_id,
+            "agent_id": "ORDER-AGENT",
+            "action": "TRANSFER_FUNDS",
+            "resource": "SUPPLIER-101",
+            "parameters": {"amount": 25000.0},
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+            "nonce": uuid.uuid4().hex,
+            "idempotency_key": uuid.uuid4().hex
+        }
+        payload["signature"] = SignatureManager.sign_request(payload, priv_key)
+        res = gw.process_request(payload)
+        assert res["decision"] == "PENDING_HUMAN_APPROVAL"
+
+        app_ticket = approval_mgr.get_approval_by_request_id(req_id)
+        assert app_ticket is not None
+
+        # Revise policy to block TRANSFER_FUNDS BEFORE resume
+        revised_pol = PolicyRecord(
+            policy_id="ORDER-POL",
+            agent_id="ORDER-AGENT",
+            version="2.0",
+            allowed_actions=["VIEW_BALANCE"],  # TRANSFER_FUNDS removed
+            allowed_resource="*",
+            maximum_amount=50000.0,
+            cumulative_maximum_amount=50000.0,
+            max_transactions_per_window=10,
+            velocity_window_seconds=86400,
+            human_approval_above=20000.0,
+            working_hours=WorkingHours(start="00:00", end="23:59")
+        )
+        loader.save_policy(revised_pol)
+
+        # Resume approval
+        resume_res = gw.process_human_approval_resume(
+            approval_id=app_ticket["approval_id"],
+            approver_id="SUPERVISOR-01",
+            provided_token=app_ticket["approval_token"]
+        )
+
+        # Recheck failed at Policy step
+        assert resume_res["decision"] == "BLOCKED"
+        assert "POLICY_RECHECK_FAILED" in resume_res["reason"]
+
+        # Invariant: Revalidation ordering ensures atomic reservation was NEVER called
+        assert len(reservation_calls) == 0, "Reservation must NOT be called if policy check fails"
+        p_db.close()
+
 

@@ -109,6 +109,12 @@ class AgentBehaviorEngine:
                             insights_json TEXT NOT NULL
                         )
                     """)
+                    cursor.execute("""
+                        UPDATE agent_behavior_profiles
+                        SET known_destinations = '["*"]', schedule_start_hour = 0, schedule_end_hour = 24
+                        WHERE known_destinations = '["SUPPLIER-101", "SUPPLIER-102", "DEFAULT-GATEWAY"]'
+                          AND schedule_start_hour = 8 AND schedule_end_hour = 20
+                    """)
                     conn.commit()
             except Exception as e:
                 print(f"[BehaviorEngine] Warning: database init exception: {e}")
@@ -122,6 +128,10 @@ class AgentBehaviorEngine:
             loaded = self._load_from_db()
             if not loaded or len(self.profiles) == 0:
                 self.reset_to_canonical_baselines()
+            else:
+                fin_001 = self.profiles.get("FINANCE-AGENT-001")
+                if fin_001 and "FINANCE_API" not in fin_001.get("known_destinations", []):
+                    self.reset_to_canonical_baselines()
 
     def _load_from_db(self) -> bool:
         try:
@@ -136,6 +146,15 @@ class AgentBehaviorEngine:
                 for r in rows:
                     destinations = json.loads(r["known_destinations"])
                     transitions = json.loads(r["action_transitions"])
+                    start_h = int(r["schedule_start_hour"])
+                    end_h = int(r["schedule_end_hour"])
+
+                    # Normalize legacy auto-created test profiles that were saved with 8-20 UTC placeholder
+                    if destinations == ["SUPPLIER-101", "SUPPLIER-102", "DEFAULT-GATEWAY"] and start_h == 8 and end_h == 20:
+                        destinations = ["*"]
+                        start_h = 0
+                        end_h = 24
+
                     self.profiles[r["agent_id"]] = {
                         "agent_id": r["agent_id"],
                         "agent_name": r["agent_name"],
@@ -149,8 +168,8 @@ class AgentBehaviorEngine:
                         "daily_frequency_std": float(r["daily_frequency_std"]),
                         "hourly_burst_threshold": int(r["hourly_burst_threshold"]),
                         "known_destinations": destinations,
-                        "schedule_start_hour": int(r["schedule_start_hour"]),
-                        "schedule_end_hour": int(r["schedule_end_hour"]),
+                        "schedule_start_hour": start_h,
+                        "schedule_end_hour": end_h,
                         "action_transitions": transitions,
                         "baseline_risk_score": int(r["baseline_risk_score"]),
                     }
@@ -230,10 +249,26 @@ class AgentBehaviorEngine:
             }
             self.profiles["FINANCE_AGENT_01"] = profile_fin
 
-            # Also alias to FINANCE-AGENT-001
+            # Also alias to FINANCE-AGENT-001 (configured for general enterprise testing & operations)
             profile_fin_001 = profile_fin.copy()
             profile_fin_001["agent_id"] = "FINANCE-AGENT-001"
             profile_fin_001["agent_name"] = "Finance Operations Agent"
+            profile_fin_001["known_destinations"] = [
+                "SUPPLIER-101",
+                "SUPPLIER-102",
+                "SUPPLIER-103",
+                "TREASURY-DISBURSEMENT",
+                "FINANCE_API",
+                "REIMBURSEMENT_API",
+                "*",
+            ]
+            profile_fin_001["schedule_start_hour"] = 0
+            profile_fin_001["schedule_end_hour"] = 24
+            profile_fin_001["amount_min"] = 0.0
+            profile_fin_001["amount_max"] = 50000.0
+            profile_fin_001["amount_mean"] = 10000.0
+            profile_fin_001["amount_std"] = 5000.0
+            profile_fin_001["action_transitions"] = {}
             self.profiles["FINANCE-AGENT-001"] = profile_fin_001
 
             # 2. Procurement Agent
@@ -449,17 +484,17 @@ class AgentBehaviorEngine:
                     "agent_id": agent_id,
                     "agent_name": f"Agent {agent_id}",
                     "role": "Registered Autonomous Agent",
-                    "sample_count": 50,
+                    "sample_count": 0,
                     "amount_mean": 20000.0,
                     "amount_std": 10000.0,
-                    "amount_min": 1000.0,
-                    "amount_max": 50000.0,
+                    "amount_min": 0.0,
+                    "amount_max": 100000.0,
                     "daily_frequency_mean": 10.0,
                     "daily_frequency_std": 3.0,
-                    "hourly_burst_threshold": 15,
-                    "known_destinations": ["SUPPLIER-101", "SUPPLIER-102", "DEFAULT-GATEWAY"],
-                    "schedule_start_hour": 8,
-                    "schedule_end_hour": 20,
+                    "hourly_burst_threshold": 50,
+                    "known_destinations": [resource.strip().upper()] if resource else ["*"],
+                    "schedule_start_hour": 0,
+                    "schedule_end_hour": 24,
                     "action_transitions": {},
                     "baseline_risk_score": 10,
                 }
@@ -807,7 +842,7 @@ class AgentBehaviorEngine:
 
             top_entities = sorted(
                 [{"agent_id": k, "max_anomaly_score": v, "profile": self.profiles.get(k)} for k, v in agent_max_scores.items()],
-                key=lambda x: x["max_anomaly_score"],
+                key=lambda x: int(str(x["max_anomaly_score"])),
                 reverse=True
             )[:5]
 

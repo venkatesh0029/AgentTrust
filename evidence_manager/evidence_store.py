@@ -73,10 +73,14 @@ class EvidenceStore:
                 "previous_record_hash": "0000000000000000000000000000000000000000000000000000000000000000",
                 "record_hash": ""
             }
-            # Compute canonical SHA-256 digest of genesis record
+            from evidence_manager.genesis_trust_anchor import (
+                get_genesis_trust_anchor,
+                verify_against_trust_anchor,
+            )
+            anchor = get_genesis_trust_anchor()
+            genesis_rec["ledger_anchor_hash"] = anchor["ledger_anchor_hash"]
             rec_hash = HashManager.calculate_evidence_hash(genesis_rec)
             genesis_rec["record_hash"] = rec_hash
-            genesis_rec["ledger_anchor_hash"] = rec_hash
             full_digest = HashManager.calculate_evidence_hash(genesis_rec)
             self._store["EVIDENCE-REQ-GENESIS-000"] = genesis_rec
 
@@ -95,6 +99,8 @@ class EvidenceStore:
                 else:
                     existing_clean = {k: v for k, v in existing.items() if k != "_stored_hash"}
                     expected_hash = existing.get("_stored_hash") or existing.get("record_hash") or ""
+
+                    # 1. Local SQLite integrity check (detects single-field corruption)
                     check = HashManager.verify_integrity(existing_clean, expected_hash)
                     if not check.get("verified"):
                         logger.error(
@@ -102,8 +108,20 @@ class EvidenceStore:
                         )
                         if is_strict:
                             raise EvidencePersistenceError("CORRUPTED_OR_TAMPERED_GENESIS_EVIDENCE: Stored genesis record does not match trusted digest")
-                    else:
-                        self._store["EVIDENCE-REQ-GENESIS-000"] = existing_clean
+
+                    # 2. Independent External Trust Anchor Check (detects attackers with write access to both JSON and hash)
+                    anchor_check = verify_against_trust_anchor(existing_clean, expected_hash)
+                    if not anchor_check.get("verified"):
+                        logger.error(
+                            f"INDEPENDENT_TRUST_ANCHOR_VERIFICATION_FAILED: "
+                            f"Anchor match={anchor_check['anchor_match']}, RecHash match={anchor_check['rec_hash_match']}, FullDigest match={anchor_check['full_digest_match']}"
+                        )
+                        if is_strict:
+                            raise EvidencePersistenceError(
+                                "INDEPENDENT_TRUST_ANCHOR_VERIFICATION_FAILED: stored genesis record or hash does not match independent external trust anchor"
+                            )
+
+                    self._store["EVIDENCE-REQ-GENESIS-000"] = existing_clean
             except Exception as exc:
                 logger.error(f"Failed to persist or verify genesis evidence record in store ({self.db_path}): {exc}")
                 if is_strict:

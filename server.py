@@ -221,8 +221,10 @@ def _load_demo_keys_from_disk() -> None:
     except Exception:
         pass
 
+DEMO_AGENT_IDS: set[str] = set()
+
 def seed_41_demo_agents():
-    global default_agent_reg
+    global default_agent_reg, DEMO_AGENT_IDS
     _load_demo_keys_from_disk()
     agents_def = [
         # --- 1 to 25: ACTIVE Valid Agents (Will pass all 13 stages for amounts < approval threshold) ---
@@ -335,6 +337,8 @@ def seed_41_demo_agents():
             if "private_key" not in default_agent_reg and aid in _DEMO_CLIENT_TEST_KEYS:
                 default_agent_reg["private_key"] = _DEMO_CLIENT_TEST_KEYS[aid]
 
+    DEMO_AGENT_IDS = {a["id"] for a in agents_def}
+
 seed_41_demo_agents()
 
 def sync_all_agent_keys():
@@ -343,7 +347,7 @@ def sync_all_agent_keys():
     matching certificates, and policy records so that all 13 stages succeed for valid agents.
     """
     _load_demo_keys_from_disk()
-    all_agents = agent_registry.list_agents()
+    all_agents = [ag for ag in agent_registry.list_agents() if ag.get("agent_id") in DEMO_AGENT_IDS or ag.get("agent_id") == "FINANCE-AGENT-001"]
     for ag in all_agents:
         aid = ag.get("agent_id")
         if not aid:
@@ -369,7 +373,18 @@ def sync_all_agent_keys():
             except Exception:
                 pass
 
-        if aid not in _DEMO_CLIENT_TEST_KEYS or not ag.get("certificate") or not ag.get("public_key"):
+        key_matches = False
+        if aid in _DEMO_CLIENT_TEST_KEYS and ag.get("public_key"):
+            try:
+                from identity_manager.key_manager import KeyManager
+                priv = KeyManager.pem_to_private_key(_DEMO_CLIENT_TEST_KEYS[aid])
+                pub_pem = KeyManager.public_key_to_pem(priv.public_key()).strip()
+                if pub_pem == ag.get("public_key", "").strip():
+                    key_matches = True
+            except Exception:
+                key_matches = False
+
+        if not key_matches or not ag.get("certificate") or not ag.get("public_key"):
             status = ag.get("status", "ACTIVE")
             cert_pem, priv_key_pem, fingerprint = cert_manager.issue_agent_certificate(
                 agent_id=aid,
@@ -382,6 +397,9 @@ def sync_all_agent_keys():
             _DEMO_CLIENT_TEST_KEYS[aid] = priv_key_pem
             AGENT_PRIVATE_KEYS[aid] = priv_key_pem
             identity_store.save_agent(ag)
+            if aid == "FINANCE-AGENT-001":
+                default_agent_reg = ag.copy()
+                default_agent_reg["private_key"] = priv_key_pem
 
             try:
                 fabric_client.chaincode.RegisterAgent(aid, ag.get("owner", "FinanceOrg"), fingerprint)
@@ -2599,5 +2617,21 @@ def index_page():
     return HTMLResponse(content="<h1>AgentTrust Framework Dashboard</h1>")
 
 if __name__ == "__main__":
+    import argparse
+
     import uvicorn
-    uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=True)
+
+    parser = argparse.ArgumentParser(description="AgentTrust Enterprise Gateway Server")
+    parser.add_argument("--production", action="store_true", help="Enable strict production enforcement mode")
+    parser.add_argument("--host", default="127.0.0.1", help="Host address to bind")
+    parser.add_argument("--port", type=int, default=8000, help="Port to listen on")
+    parser.add_argument("--reload", action="store_true", default=False, help="Enable auto-reload (dev only)")
+    args, _ = parser.parse_known_args()
+
+    if args.production or os.environ.get("AGENTTRUST_PRODUCTION", "false").lower() in ("true", "1"):
+        os.environ["AGENTTRUST_PRODUCTION"] = "true"
+        os.environ["STRICT_PERSISTENCE"] = "true"
+        os.environ["AGENTTRUST_DEMO_MODE"] = "false"
+        print("[AgentTrust Server] Production profile active: STRICT_PERSISTENCE=true, DEMO_MODE=false")
+
+    uvicorn.run("server:app", host=args.host, port=args.port, reload=args.reload)

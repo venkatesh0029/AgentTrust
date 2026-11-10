@@ -715,10 +715,15 @@ class ActionGateway:
                     request_fingerprint=request_fingerprint
                 )
                 if not allowed:
+                    canonical_reason = res_reason
+                    if "CUMULATIVE_LIMIT_EXCEEDED" in res_reason:
+                        canonical_reason = DecisionReason.CUMULATIVE_LIMIT_EXCEEDED.value
+                    elif "VELOCITY_LIMIT_EXCEEDED" in res_reason:
+                        canonical_reason = DecisionReason.VELOCITY_LIMIT_EXCEEDED.value
                     return self._finalize_gateway_outcome(
                         request_id=request_id, agent_id=agent_id, action=action, resource=resource,
                         parameters=parameters, decision=PolicyDecision.BLOCKED.value,
-                        reason=res_reason,
+                        reason=canonical_reason,
                         policy_id=policy_id,
                         policy_version=getattr(p_record, "version", "1.0") if p_record else "1.0",
                         agent_version=agent_record.get("agent_version", "1.0"),
@@ -749,7 +754,7 @@ class ActionGateway:
                     api_result="NOT_EXECUTED", nonce=nonce, idempotency_key=idempotency_key
                 )
 
-        decision, reason, policy_version, matched_rules = self.policy_evaluator.evaluate(
+        decision, raw_reason, policy_version, matched_rules = self.policy_evaluator.evaluate(
             policy_id=policy_id,
             action=action,
             resource=resource,
@@ -760,6 +765,7 @@ class ActionGateway:
             cumulative_amount=cumulative_amount,
             transaction_count_in_window=tx_count_in_window
         )
+        reason: DecisionReason | str = raw_reason
 
         # Step 8.5: AI Agent Behavioral Intelligence Engine (UEBA) Evaluation
         behavior_eval: dict[str, Any] | None = None
@@ -888,10 +894,10 @@ class ActionGateway:
                             delegation_context["token_id"], amount
                         )
                         if spent_ok:
-                            edge = delegation_graph_manager.edges.get(delegation_context["token_id"])
-                            if edge:
-                                delegation_context["spent_budget"] = edge["spent_budget"]
-                                delegation_context["remaining_budget"] = max(0.0, edge["delegated_budget"] - edge["spent_budget"])
+                            spend_edge = delegation_graph_manager.edges.get(delegation_context["token_id"])
+                            if spend_edge:
+                                delegation_context["spent_budget"] = spend_edge["spent_budget"]
+                                delegation_context["remaining_budget"] = max(0.0, spend_edge["delegated_budget"] - spend_edge["spent_budget"])
                     except Exception as e:
                         print(f"[Gateway] Delegation budget spend warning: {e}")
                 if self.persistent_db:
@@ -999,10 +1005,11 @@ class ActionGateway:
                 "message": f"Approval ticket '{approval_id}' not found or not pending (status: {st})."
             }
 
+        is_demo = os.environ.get("AGENTTRUST_DEMO_MODE", "false").lower() in ("true", "1", "yes")
+        is_testing = "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("TESTING", "").lower() in ("true", "1")
+
         token_to_pass = provided_token
         if not token_to_pass:
-            is_demo = os.environ.get("AGENTTRUST_DEMO_MODE", "false").lower() in ("true", "1", "yes")
-            is_testing = "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("TESTING", "").lower() in ("true", "1")
             if is_demo or is_testing:
                 token_to_pass = app_record.get("approval_token")
             else:
@@ -1058,14 +1065,45 @@ class ActionGateway:
             )
             validation_context["risk_result"] = risk_res
 
-
-            # 4. Re-evaluate Policy against active policy rules & risk and ATOMICALLY re-reserve capacity
+            # 4. Re-evaluate Policy against active rules (NON-RESERVATION CHECKS FIRST)
             p_rec = self.policy_evaluator.loader.get_policy(policy_id) if hasattr(self.policy_evaluator, "loader") else None
             w_sec = getattr(p_rec, "velocity_window_seconds", 86400) if p_rec else 86400
             max_cum = getattr(p_rec, "cumulative_maximum_amount", None) if p_rec else None
             max_vel = getattr(p_rec, "max_transactions_per_window", None) if p_rec else None
 
-            # Enforce atomic re-reservation on approval resume (eliminates TOCTOU race where intermediate txs consume budget)
+            dec, rsn, pver, rules = self.policy_evaluator.evaluate(
+                policy_id=policy_id,
+                action=action,
+                resource=resource,
+                amount=amount,
+                request_timestamp_iso=now_iso,
+                risk_score=risk_res.get("risk_score", 0.0),
+                risk_level=risk_res.get("risk_level", "LOW"),
+                cumulative_amount=0.0,
+                transaction_count_in_window=0
+            )
+            validation_context["policy_version"] = pver
+            validation_context["matched_rules"] = rules
+
+            if dec == PolicyDecision.BLOCKED:
+                return False, f"POLICY_RECHECK_FAILED: {rsn.value if hasattr(rsn, 'value') else str(rsn)}"
+
+            # 5. Re-check Delegation Token (NON-RESERVATION CHECKS FIRST)
+            del_token = record.get("delegation_token") or parameters.get("delegation_token") or auth_ctx.get("delegation_token")
+            if del_token and isinstance(del_token, dict):
+                issuer_pub = ag_rec.get("public_key", "")
+                del_res = DelegationTokenManager.verify_delegation_chain(
+                    del_token, action, amount, issuer_pub, requesting_agent_id=agent_id
+                )
+                if not del_res.get("valid"):
+                    return False, f"DELEGATION_RECHECK_FAILED: {del_res.get('reason')}"
+
+            # 6. FINAL AUTHORIZATION GATE: Atomic Volume Reservation immediately before ticket consumption
+            is_prod = not is_demo and (
+                os.environ.get("AGENTTRUST_PRODUCTION", "false").lower() in ("true", "1")
+                or os.environ.get("STRICT_PERSISTENCE", "false").lower() in ("true", "1")
+            )
+
             if self.persistent_db and hasattr(self.persistent_db, "revalidate_and_reserve_approved_intent"):
                 try:
                     res_ok, new_total, new_cnt, res_msg = self.persistent_db.revalidate_and_reserve_approved_intent(
@@ -1083,49 +1121,14 @@ class ActionGateway:
                 except Exception as ex:
                     return False, f"PERSISTENT_VOLUME_RECHECK_FAILED: {str(ex)}"
             elif self.persistent_db and hasattr(self.persistent_db, "get_cumulative_volume"):
+                if is_prod:
+                    return False, "ATOMIC_RESERVATION_UNSUPPORTED: atomic reservation engine required in production"
                 try:
                     c_amt, c_cnt = self.persistent_db.get_cumulative_volume(agent_id, window_seconds=w_sec)
                     if max_cum is not None and (c_amt + amount) > max_cum:
                         return False, f"CUMULATIVE_LIMIT_EXCEEDED_ON_RESUME: rolling total ₹{c_amt + amount:,.2f} exceeds cap ₹{max_cum:,.2f}"
                 except Exception as ex:
                     return False, f"PERSISTENT_VOLUME_RECHECK_FAILED: {str(ex)}"
-
-            dec, rsn, pver, rules = self.policy_evaluator.evaluate(
-                policy_id=policy_id,
-                action=action,
-                resource=resource,
-                amount=amount,
-                request_timestamp_iso=now_iso,
-                risk_score=risk_res.get("risk_score", 0.0),
-                risk_level=risk_res.get("risk_level", "LOW"),
-                cumulative_amount=0.0,
-                transaction_count_in_window=0
-            )
-            validation_context["policy_version"] = pver
-            validation_context["matched_rules"] = rules
-
-            if dec == PolicyDecision.BLOCKED:
-                if validation_context.get("reservation_held") and self.persistent_db and hasattr(self.persistent_db, "release_reservation"):
-                    try:
-                        self.persistent_db.release_reservation(request_id, new_state="REJECTED", reason=f"POLICY_RECHECK_FAILED: {rsn.value if hasattr(rsn, 'value') else str(rsn)}")
-                    except Exception:
-                        pass
-                return False, f"POLICY_RECHECK_FAILED: {rsn.value if hasattr(rsn, 'value') else str(rsn)}"
-
-            # 5. Re-check Delegation Token (using stored delegation token or parameters)
-            del_token = record.get("delegation_token") or parameters.get("delegation_token") or auth_ctx.get("delegation_token")
-            if del_token and isinstance(del_token, dict):
-                issuer_pub = ag_rec.get("public_key", "")
-                del_res = DelegationTokenManager.verify_delegation_chain(
-                    del_token, action, amount, issuer_pub, requesting_agent_id=agent_id
-                )
-                if not del_res.get("valid"):
-                    if validation_context.get("reservation_held") and self.persistent_db and hasattr(self.persistent_db, "release_reservation"):
-                        try:
-                            self.persistent_db.release_reservation(request_id, new_state="REJECTED", reason=f"DELEGATION_RECHECK_FAILED: {del_res.get('reason')}")
-                        except Exception:
-                            pass
-                    return False, f"DELEGATION_RECHECK_FAILED: {del_res.get('reason')}"
 
             validation_context["agent_record"] = ag_rec
             return True, "VALID"
@@ -1135,11 +1138,18 @@ class ActionGateway:
             approval_id, approver_id, provided_token=token_to_pass, validator_fn=_atomic_validator
         )
         if not ok or not updated_record:
-            if self.persistent_db and hasattr(self.persistent_db, "release_reservation"):
+            release_failure: str | None = None
+            if (validation_context.get("reservation_held") or "ATOMIC_VALIDATION_FAILED" in str(msg)) and self.persistent_db and hasattr(self.persistent_db, "release_reservation"):
                 try:
                     self.persistent_db.release_reservation(request_id, new_state="REJECTED", reason=f"RESUME_VALIDATION_FAILED: {msg}")
-                except Exception:
-                    pass
+                except Exception as ex:
+                    logger.critical(f"FATAL: Database error releasing reservation for request {request_id}: {ex}")
+                    release_failure = f"RESERVATION_RELEASE_FAILED: {str(ex)}"
+
+            rejection_reason = f"RESUME_VALIDATION_FAILED: {msg}"
+            if release_failure:
+                rejection_reason = f"{rejection_reason}; {release_failure}"
+
             # Ticket was not consumed; finalize rejection outcome safely
             return self._finalize_gateway_outcome(
                 request_id=request_id,
@@ -1148,11 +1158,12 @@ class ActionGateway:
                 resource=resource,
                 parameters=parameters,
                 decision=PolicyDecision.BLOCKED.value,
-                reason=f"RESUME_VALIDATION_FAILED: {msg}",
+                reason=rejection_reason,
                 policy_id=policy_id,
                 policy_version="1.0",
                 agent_version="1.0",
-                api_result="NOT_EXECUTED"
+                api_result="NOT_EXECUTED",
+                reconciliation_status=release_failure
             )
 
         agent_record = validation_context.get("agent_record") or self.registry.get_agent(agent_id) or {}
@@ -1232,8 +1243,9 @@ class ActionGateway:
                                 error_msg=f"INTENT_STATE_UPDATE_FAILED: {str(ex)}",
                                 status="RECONCILIATION_REQUIRED"
                             )
-                        except Exception:
-                            pass
+                        except Exception as retry_ex:
+                            logger.critical(f"CRITICAL: Failed to save durable retry record for {request_id}: {retry_ex}")
+                            reconciliation_warning = f"CRITICAL_RECONCILIATION_FAILURE: intent update failed ({ex}) AND retry record save failed ({retry_ex})"
         else:
             if self.persistent_db:
                 try:

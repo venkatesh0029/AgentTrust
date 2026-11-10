@@ -1,0 +1,11 @@
+{
+  "ledger_channel": "agenttrust-channel",
+  "genesis_block_index": 0,
+  "genesis_orderer_consensus": "etcdraft",
+  "ledger_anchor_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "expected_record_hash": "dd996d38df8c75052872ad17bbe16559da20869751dd42872ef1ca316b865e8e",
+  "expected_full_digest": "ef2ab549cf094e9b1315feca5d798b9527aa86a22d0f420234ac86c0f3a37495",
+  "anchor_authority": "AgentTrust-Root-CA",
+  "created_at": "2026-01-01T00:00:00Z"
+}
+
