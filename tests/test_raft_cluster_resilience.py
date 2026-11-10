@@ -338,10 +338,12 @@ def test_live_docker_raft_resilience_or_skip():
     Integration test against live Docker cluster if running.
     Validates:
     1. Records initial container states to guarantee safe restoration.
-    2. Submits actual transaction proposal under 3 active orderers (all in quorum).
-    3. Stops/pauses orderer2 (2/3 quorum preserved); submits proposal, verifies block index advances.
-    4. Stops/pauses orderer3 (1/3 quorum lost -> fail closed / broadcast rejected).
-    5. Restores orderers; submits transaction, verifies ledger height advances and logs sync.
+    2. Sets FABRIC_GATEWAY_MODE=live and rejects any simulator fallback.
+    3. Submits real transaction proposal under 3 active orderers (all in quorum).
+       Asserts explicit integer block height and 64-character block hash.
+    4. Pauses orderer2 (2/3 quorum preserved); submits proposal, verifies block index strictly advances (h2 > h1).
+    5. Pauses orderer3 (1/3 quorum lost -> fail closed / submission rejected).
+    6. Restores orderers; submits transaction, verifies ledger height advances (h3 > h2).
     Gracefully skips if Docker is offline or containers are not started.
     """
     import uuid
@@ -368,20 +370,38 @@ def test_live_docker_raft_resilience_or_skip():
         except Exception:
             initial_states[o] = "running"
 
+    import time
+
     from fabric.fabric_client import FabricClient
 
-    fc = FabricClient()
+    orig_gateway_mode = os.environ.get("FABRIC_GATEWAY_MODE")
+    os.environ["FABRIC_GATEWAY_MODE"] = "live"
 
     try:
-        # Phase 1: 3-of-3 Quorum - Submit actual transaction and verify block index
-        tx1 = fc.record_evidence(
-            request_id=f"REQ-LIVE-RAFT-1-{uuid.uuid4().hex[:6]}",
-            agent_id="AGENT-PROD-01",
-            evidence_hash="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            decision="ALLOWED"
+        fc = FabricClient()
+
+        # Phase 1: 3-of-3 Quorum - Submit actual transaction and verify live block index & hash
+        tx1 = fc.record_action_event(
+            event_id=f"EVT-LIVE-RAFT-1-{uuid.uuid4().hex[:8]}",
+            request_id=f"REQ-LIVE-RAFT-1-{uuid.uuid4().hex[:8]}",
+            agent_id="FINANCE-AGENT-001",
+            action="TRANSFER_FUNDS",
+            resource="TREASURY_LEDGER",
+            decision="ALLOWED",
+            reason="RAFT_QUORUM_VERIFICATION_PHASE_1",
+            policy_id="FIN-POL-001",
+            policy_version="1.0",
+            evidence_reference=f"REF-LIVE-RAFT-1-{uuid.uuid4().hex[:8]}",
+            evidence_hash="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         )
-        assert tx1.get("status") in ("COMMITTED", "LOCAL_SIMULATOR_COMMITTED", "SUCCESS")
-        h1 = tx1.get("block_index", 1)
+        assert tx1.get("mode") != "simulator" and tx1.get("source") != "fabric_simulator", (
+            f"Expected live Fabric Gateway execution, got simulator: {tx1}"
+        )
+        assert tx1.get("status") == "COMMITTED"
+        h1 = tx1.get("block_index")
+        assert isinstance(h1, int), f"Block index must be an explicit integer from live ledger, got {h1!r}"
+        b_hash1 = tx1.get("block_hash")
+        assert isinstance(b_hash1, str) and len(b_hash1) == 64, f"Block hash must be 64-char string, got {b_hash1!r}"
 
         # Phase 2: Pause orderer2 -> 2/3 remain alive (majority quorum preserved)
         subprocess.run(["docker", "pause", "orderer2.agenttrust.com"], check=True, capture_output=True)
@@ -389,38 +409,91 @@ def test_live_docker_raft_resilience_or_skip():
         assert "orderer.agenttrust.com" in ps_after
         assert "orderer3.agenttrust.com" in ps_after
 
-        tx2 = fc.record_evidence(
-            request_id=f"REQ-LIVE-RAFT-2-{uuid.uuid4().hex[:6]}",
-            agent_id="AGENT-PROD-01",
-            evidence_hash="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
-            decision="ALLOWED"
+        tx2 = fc.record_action_event(
+            event_id=f"EVT-LIVE-RAFT-2-{uuid.uuid4().hex[:8]}",
+            request_id=f"REQ-LIVE-RAFT-2-{uuid.uuid4().hex[:8]}",
+            agent_id="FINANCE-AGENT-001",
+            action="TRANSFER_FUNDS",
+            resource="TREASURY_LEDGER",
+            decision="ALLOWED",
+            reason="RAFT_QUORUM_VERIFICATION_PHASE_2",
+            policy_id="FIN-POL-001",
+            policy_version="1.0",
+            evidence_reference=f"REF-LIVE-RAFT-2-{uuid.uuid4().hex[:8]}",
+            evidence_hash="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
         )
-        assert tx2.get("status") in ("COMMITTED", "LOCAL_SIMULATOR_COMMITTED", "SUCCESS")
-        h2 = tx2.get("block_index", h1 + 1)
-        assert h2 >= h1, "Block index must progress under 2-of-3 Raft quorum"
+        assert tx2.get("mode") != "simulator" and tx2.get("source") != "fabric_simulator", (
+            f"Expected live Fabric Gateway execution, got simulator: {tx2}"
+        )
+        assert tx2.get("status") == "COMMITTED"
+        h2 = tx2.get("block_index")
+        assert isinstance(h2, int) and h2 > h1, f"Block height must strictly increase under 2-of-3 Raft quorum: {h2} > {h1}"
+        b_hash2 = tx2.get("block_hash")
+        assert isinstance(b_hash2, str) and len(b_hash2) == 64
 
-        # Phase 3: Pause orderer3 -> only 1 alive (quorum lost, majority < 2)
+        # Phase 3: Pause orderer3 -> only 1 of 3 alive (majority quorum lost: 1 < 2)
         subprocess.run(["docker", "pause", "orderer3.agenttrust.com"], check=True, capture_output=True)
+
+        quorum_loss_rejected = False
+        try:
+            tx_fail = fc.record_action_event(
+                event_id=f"EVT-LIVE-RAFT-FAIL-{uuid.uuid4().hex[:8]}",
+                request_id=f"REQ-LIVE-RAFT-FAIL-{uuid.uuid4().hex[:8]}",
+                agent_id="FINANCE-AGENT-001",
+                action="TRANSFER_FUNDS",
+                resource="TREASURY_LEDGER",
+                decision="ALLOWED",
+                reason="RAFT_QUORUM_LOSS_FAIL_CLOSED",
+                policy_id="FIN-POL-001",
+                policy_version="1.0",
+                evidence_reference=f"REF-LIVE-RAFT-FAIL-{uuid.uuid4().hex[:8]}",
+                evidence_hash="1111222233334444555566667777888811112222333344445555666677778888"
+            )
+            if tx_fail.get("status") != "COMMITTED":
+                quorum_loss_rejected = True
+        except Exception:
+            # Expected fail-closed behavior (timeout, 502, uncertainty, or connection rejection)
+            quorum_loss_rejected = True
+
+        assert quorum_loss_rejected, "Transaction proposal during 1-of-3 quorum loss must fail closed and NOT commit"
 
         # Phase 4: Unpause orderer2 and orderer3 to restore cluster quorum
         subprocess.run(["docker", "unpause", "orderer3.agenttrust.com"], check=True, capture_output=True)
         subprocess.run(["docker", "unpause", "orderer2.agenttrust.com"], check=True, capture_output=True)
+        time.sleep(2)  # Give Raft cluster time to resynchronize logs and stabilize leadership
 
         # Verify all 3 unpaused and cluster accepts new transaction
         ps_final = subprocess.run(["docker", "ps", "--format", "{{.Names}}"], capture_output=True, text=True).stdout
         assert all(o in ps_final for o in required_orderers)
 
-        tx3 = fc.record_evidence(
-            request_id=f"REQ-LIVE-RAFT-3-{uuid.uuid4().hex[:6]}",
-            agent_id="AGENT-PROD-01",
-            evidence_hash="fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
-            decision="ALLOWED"
+        tx3 = fc.record_action_event(
+            event_id=f"EVT-LIVE-RAFT-3-{uuid.uuid4().hex[:8]}",
+            request_id=f"REQ-LIVE-RAFT-3-{uuid.uuid4().hex[:8]}",
+            agent_id="FINANCE-AGENT-001",
+            action="TRANSFER_FUNDS",
+            resource="TREASURY_LEDGER",
+            decision="ALLOWED",
+            reason="RAFT_QUORUM_VERIFICATION_PHASE_3",
+            policy_id="FIN-POL-001",
+            policy_version="1.0",
+            evidence_reference=f"REF-LIVE-RAFT-3-{uuid.uuid4().hex[:8]}",
+            evidence_hash="fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
         )
-        assert tx3.get("status") in ("COMMITTED", "LOCAL_SIMULATOR_COMMITTED", "SUCCESS")
-        h3 = tx3.get("block_index", h2 + 1)
-        assert h3 >= h2, "Block index must advance following quorum recovery"
+        assert tx3.get("mode") != "simulator" and tx3.get("source") != "fabric_simulator", (
+            f"Expected live Fabric Gateway execution, got simulator: {tx3}"
+        )
+        assert tx3.get("status") == "COMMITTED"
+        h3 = tx3.get("block_index")
+        assert isinstance(h3, int) and h3 > h2, f"Block height must strictly advance following quorum recovery: {h3} > {h2}"
+        b_hash3 = tx3.get("block_hash")
+        assert isinstance(b_hash3, str) and len(b_hash3) == 64
 
     finally:
+        if orig_gateway_mode is not None:
+            os.environ["FABRIC_GATEWAY_MODE"] = orig_gateway_mode
+        else:
+            os.environ.pop("FABRIC_GATEWAY_MODE", None)
+
         # State restoration guarantee: restore each container to its original recorded state
         for o, orig_status in initial_states.items():
             if orig_status == "running":

@@ -1104,6 +1104,9 @@ class ActionGateway:
                 or os.environ.get("STRICT_PERSISTENCE", "false").lower() in ("true", "1")
             )
 
+            if is_prod and (not self.persistent_db or not hasattr(self.persistent_db, "revalidate_and_reserve_approved_intent")):
+                return False, "ATOMIC_RESERVATION_UNAVAILABLE: atomic reservation engine required in production"
+
             if self.persistent_db and hasattr(self.persistent_db, "revalidate_and_reserve_approved_intent"):
                 try:
                     res_ok, new_total, new_cnt, res_msg = self.persistent_db.revalidate_and_reserve_approved_intent(
@@ -1421,13 +1424,12 @@ class ActionGateway:
                 evidence_hash=evidence_hash
             )
             # Transactional Outbox: Ledger commit succeeded
-            # Drain outbox entry and update intent to COMMITTED
-            if self.persistent_db:
+            # Drain outbox entry and update intent to COMMITTED ONLY when reconciliation_status is inactive
+            if self.persistent_db and not reconciliation_status:
                 try:
-                    if not reconciliation_status:
-                        self.persistent_db.delete_retry_record(event_id)
-                        if hasattr(self.retry_queue, "_pending_queue"):
-                            self.retry_queue._pending_queue.pop(event_id, None)
+                    self.persistent_db.delete_retry_record(event_id)
+                    if hasattr(self.retry_queue, "_pending_queue"):
+                        self.retry_queue._pending_queue.pop(event_id, None)
                     self.persistent_db.update_intent_state(
                         request_id=request_id,
                         state="COMMITTED",
@@ -1517,7 +1519,7 @@ class ActionGateway:
         if reconciliation_status:
             outcome["reconciliation_status"] = reconciliation_status
 
-        if self.persistent_db and decision == PolicyDecision.ALLOWED.value:
+        if self.persistent_db and decision == PolicyDecision.ALLOWED.value and not reconciliation_status:
             try:
                 final_intent_state = "COMMITTED" if ledger_status == "COMMITTED" else "LEDGER_PENDING_RETRY"
                 self.persistent_db.update_intent_state(

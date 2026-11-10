@@ -146,6 +146,16 @@ def validate_production_configuration(env_profile: str, current_mode: str) -> No
             )
         AdminAuthManager.initialize_default_users(force=True)
 
+        # Atomic Cumulative Volume Reservation Engine Precondition
+        from fabric.persistent_db import PersistentStorageEngine
+        p_engine = PersistentStorageEngine()
+        if not hasattr(p_engine, "revalidate_and_reserve_approved_intent") or not hasattr(p_engine, "check_and_reserve_cumulative_volume"):
+            raise RuntimeError(
+                "SECURITY VIOLATION: Production environment requires persistent storage engine with atomic "
+                "cumulative volume reservation (revalidate_and_reserve_approved_intent and check_and_reserve_cumulative_volume). "
+                "Refusing to initialize without atomic reservation engine."
+            )
+
 
 validate_production_configuration(ENV_PROFILE, CURRENT_MODE)
 

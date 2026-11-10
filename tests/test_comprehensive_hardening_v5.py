@@ -1427,3 +1427,257 @@ def test_fifth_pass_audit_approval_revalidation_order_protects_capacity():
         p_db.close()
 
 
+# -----------------------------------------------------------------------------
+# Sixth-Pass Security Audit Hardening Verification Tests
+# -----------------------------------------------------------------------------
+def test_sixth_pass_production_mode_missing_persistent_db_blocks_approval_resume():
+    """
+    Verify Finding 1 (Sixth Pass):
+    In production mode (AGENTTRUST_PRODUCTION=true), an approval resume attempt
+    where persistent_db is None or lacks revalidate_and_reserve_approved_intent
+    MUST fail closed with ATOMIC_RESERVATION_UNAVAILABLE before consuming the ticket.
+    """
+    cert_mgr = CertificateManager()
+    registry = AgentRegistry(cert_manager=cert_mgr, store=IdentityStore())
+    approval_mgr = HumanApprovalManager()
+    loader = PolicyLoader()
+    evaluator = PolicyEvaluator(loader)
+
+    reg = registry.register_agent(agent_id="PROD-TEST-AGENT", agent_name="Prod Agent", policy_id="PROD-POL")
+    priv_key = reg["private_key"]
+
+    from policy_engine.policy_models import PolicyRecord, WorkingHours
+    pol = PolicyRecord(
+        policy_id="PROD-POL",
+        agent_id="PROD-TEST-AGENT",
+        version="1.0",
+        allowed_actions=["TRANSFER_FUNDS"],
+        allowed_resource="*",
+        maximum_amount=50000.0,
+        cumulative_maximum_amount=50000.0,
+        max_transactions_per_window=10,
+        velocity_window_seconds=86400,
+        human_approval_above=20000.0,
+        working_hours=WorkingHours(start="00:00", end="23:59")
+    )
+    loader.save_policy(pol)
+
+    # Instantiate gateway with persistent_db=None
+    gw = ActionGateway(
+        registry=registry,
+        cert_manager=cert_mgr,
+        policy_evaluator=evaluator,
+        replay_tracker=RequestTracker(300),
+        finance_api=ProtectedFinanceAPI(),
+        approval_manager=approval_mgr,
+        evidence_store=EvidenceStore(),
+        fabric_client=FabricClient(),
+        persistent_db=None
+    )
+
+    req_id = f"REQ-PROD-RESUME-{uuid.uuid4().hex[:6]}"
+    payload = {
+        "request_id": req_id,
+        "agent_id": "PROD-TEST-AGENT",
+        "action": "TRANSFER_FUNDS",
+        "resource": "SUPPLIER-101",
+        "parameters": {"amount": 25000.0},
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+        "nonce": uuid.uuid4().hex,
+        "idempotency_key": uuid.uuid4().hex
+    }
+    payload["signature"] = SignatureManager.sign_request(payload, priv_key)
+    res = gw.process_request(payload)
+    assert res["decision"] == "PENDING_HUMAN_APPROVAL"
+
+    app_ticket = approval_mgr.get_approval_by_request_id(req_id)
+    assert app_ticket is not None
+
+    orig_prod = os.environ.get("AGENTTRUST_PRODUCTION")
+    os.environ["AGENTTRUST_PRODUCTION"] = "true"
+    try:
+        resume_res = gw.process_human_approval_resume(
+            approval_id=app_ticket["approval_id"],
+            approver_id="SUPERVISOR-01",
+            provided_token=app_ticket["approval_token"]
+        )
+        assert resume_res["decision"] == "BLOCKED"
+        assert "ATOMIC_RESERVATION_UNAVAILABLE" in resume_res["reason"]
+
+        # Ensure approval ticket remains unconsumed because validation failed closed
+        ticket_after = approval_mgr.get_approval_by_id(app_ticket["approval_id"])
+        assert ticket_after["status"] == "PENDING"
+    finally:
+        if orig_prod is not None:
+            os.environ["AGENTTRUST_PRODUCTION"] = orig_prod
+        else:
+            os.environ.pop("AGENTTRUST_PRODUCTION", None)
+
+
+def test_sixth_pass_reconciliation_status_preserves_intent_state():
+    """
+    Verify Finding 2 (Sixth Pass):
+    When reconciliation_status is active, _finalize_gateway_outcome() must NEVER
+    attempt normal intent finalization (update_intent_state to COMMITTED) or
+    delete retry outbox records. The unconfirmed state must be preserved for worker reconciliation.
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        db_path = os.path.join(tmp, "test_reconciliation_guard.db")
+        p_db = PersistentStorageEngine(db_path=db_path)
+        cert_mgr = CertificateManager(db_path=db_path)
+        registry = AgentRegistry(cert_manager=cert_mgr, store=IdentityStore(db_path=db_path))
+
+        gw = ActionGateway(
+            registry=registry,
+            cert_manager=cert_mgr,
+            policy_evaluator=PolicyEvaluator(PolicyLoader()),
+            replay_tracker=RequestTracker(300),
+            finance_api=ProtectedFinanceAPI(),
+            approval_manager=HumanApprovalManager(),
+            evidence_store=EvidenceStore(db_path=db_path),
+            fabric_client=FabricClient(),
+            persistent_db=p_db
+        )
+
+        req_id = f"REQ-RECON-{uuid.uuid4().hex[:6]}"
+        idemp_key = f"IDEMP-{uuid.uuid4().hex[:6]}"
+        event_id = f"EVENT-RECON-{uuid.uuid4().hex[:8]}"
+
+        # Reserve and record an intent
+        p_db.check_and_reserve_cumulative_volume(
+            agent_id="FINANCE-AGENT-001",
+            action="TRANSFER_FUNDS",
+            amount=1000.0,
+            window_seconds=86400,
+            max_cumulative_limit=50000.0,
+            request_id=req_id,
+            idempotency_key=idemp_key
+        )
+
+        # Save an emergency retry record in persistent_db
+        p_db.save_retry_record(
+            event_id=event_id,
+            request_id=req_id,
+            payload={
+                "request_id": req_id,
+                "status": "RECONCILIATION_REQUIRED",
+                "actual_execution": "SUCCESS",
+                "error": "simulated lock"
+            },
+            error_msg="INTENT_STATE_UPDATE_FAILED: simulated lock",
+            status="RECONCILIATION_REQUIRED"
+        )
+
+        # Call _finalize_gateway_outcome with active reconciliation_status
+        outcome = gw._finalize_gateway_outcome(
+            request_id=req_id,
+            agent_id="FINANCE-AGENT-001",
+            action="TRANSFER_FUNDS",
+            resource="TREASURY",
+            parameters={"amount": 1000.0},
+            decision="ALLOWED",
+            reason="POLICY_PASSED",
+            policy_id="FIN-POL-001",
+            policy_version="1.0",
+            agent_version="1.0",
+            api_result="EXECUTED",
+            event_id=event_id,
+            reconciliation_status="INTENT_STATE_UPDATE_FAILED: simulated lock"
+        )
+
+        # 1. Output must reflect reconciliation_status
+        assert outcome.get("reconciliation_status") == "INTENT_STATE_UPDATE_FAILED: simulated lock"
+
+        # 2. Intent must NOT have transitioned to COMMITTED
+        intent = p_db.get_intent(req_id)
+        assert intent is not None
+        assert intent["state"] == "AUTHORIZED_PENDING_EXECUTION", f"Intent state should remain uncommitted, got {intent['state']}"
+
+        # 3. Outbox retry record must NOT have been deleted
+        retry_rec = p_db.get_retry_record(event_id)
+        assert retry_rec is not None, "Retry outbox record must be preserved for worker reconciliation"
+        assert retry_rec["status"] == "RECONCILIATION_REQUIRED"
+
+        p_db.close()
+
+
+def test_sixth_pass_signed_genesis_manifest_tamper_detection():
+    """
+    Verify Finding 3 (Sixth Pass):
+    Enforces cryptographic RSA PSS signature verification over config/trusted_genesis_anchor.json
+    against the trusted Root Authority public key.
+    Tampering with the hash, metadata, or digital signature MUST cause
+    verify_manifest_authenticity() to fail closed with MANIFEST_SIGNATURE_INVALID or
+    MANIFEST_SIGNATURE_MISSING, and verify_against_trust_anchor() to return
+    status="MANIFEST_AUTHENTICATION_FAILED".
+    """
+    import json
+
+    from evidence_manager.genesis_trust_anchor import (
+        CANONICAL_FABRIC_BLOCK0_HASH,
+        get_genesis_trust_anchor,
+        verify_against_trust_anchor,
+        verify_manifest_authenticity,
+    )
+
+    # 1. Authentic manifest must verify successfully
+    manifest = get_genesis_trust_anchor()
+    assert manifest.get("_manifest_authenticated") is True
+    assert manifest.get("ledger_anchor_hash") == CANONICAL_FABRIC_BLOCK0_HASH
+
+    auth_ok, auth_reason = verify_manifest_authenticity(manifest)
+    assert auth_ok is True
+    assert auth_reason == "AUTHENTIC"
+
+    # 2. Tampered payload (altered ledger_anchor_hash) must fail signature verification
+    tampered_payload = dict(manifest)
+    tampered_payload["ledger_anchor_hash"] = "0" * 64
+    tampered_payload.pop("_manifest_authenticated", None)
+    tampered_payload.pop("_authentication_error", None)
+
+    ok, reason = verify_manifest_authenticity(tampered_payload)
+    assert ok is False
+    assert "MANIFEST_SIGNATURE_INVALID" in reason
+
+    # 3. Tampered signature must fail signature verification
+    tampered_sig = dict(manifest)
+    tampered_sig.pop("_manifest_authenticated", None)
+    tampered_sig.pop("_authentication_error", None)
+    tampered_sig["signature"] = "bad" + tampered_sig["signature"][3:]
+
+    ok2, reason2 = verify_manifest_authenticity(tampered_sig)
+    assert ok2 is False
+    assert "MANIFEST_SIGNATURE_INVALID" in reason2
+
+    # 4. Missing signature must fail signature verification
+    no_sig = dict(manifest)
+    no_sig.pop("_manifest_authenticated", None)
+    no_sig.pop("_authentication_error", None)
+    no_sig.pop("signature", None)
+
+    ok3, reason3 = verify_manifest_authenticity(no_sig)
+    assert ok3 is False
+    assert "MANIFEST_SIGNATURE_MISSING" in reason3
+
+    # 5. Injection of tampered manifest via environment variable must fail closed in verify_against_trust_anchor
+    orig_env = os.environ.get("AGENTTRUST_GENESIS_TRUST_ANCHOR")
+    os.environ["AGENTTRUST_GENESIS_TRUST_ANCHOR"] = json.dumps(tampered_payload)
+    try:
+        sample_record = {
+            "evidence_id": "EVIDENCE-REQ-GENESIS-000",
+            "request_id": "REQ-GENESIS-000",
+            "ledger_anchor_hash": CANONICAL_FABRIC_BLOCK0_HASH,
+            "record_hash": manifest.get("expected_record_hash", "")
+        }
+        res = verify_against_trust_anchor(sample_record, manifest.get("expected_full_digest", ""))
+        assert res["verified"] is False
+        assert res["status"] == "MANIFEST_AUTHENTICATION_FAILED"
+        assert "MANIFEST_SIGNATURE_INVALID" in res["reason"]
+    finally:
+        if orig_env is not None:
+            os.environ["AGENTTRUST_GENESIS_TRUST_ANCHOR"] = orig_env
+        else:
+            os.environ.pop("AGENTTRUST_GENESIS_TRUST_ANCHOR", None)
+
+
+
