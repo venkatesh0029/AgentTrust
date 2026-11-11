@@ -56,7 +56,7 @@ class CacheManager:
                 socket_connect_timeout=0.1,
                 socket_timeout=0.1,
                 retry_on_timeout=False,
-                retry=None,
+                retry=None,  # type: ignore[arg-type]
                 decode_responses=True
             )
             # Test ping

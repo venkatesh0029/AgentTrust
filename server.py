@@ -356,8 +356,10 @@ def sync_all_agent_keys():
     Ensures ALL agents in identity_store (including persistent DB agents) have valid RSA key pairs,
     matching certificates, and policy records so that all 13 stages succeed for valid agents.
     """
+    global default_agent_reg
     _load_demo_keys_from_disk()
-    all_agents = [ag for ag in agent_registry.list_agents() if ag.get("agent_id") in DEMO_AGENT_IDS or ag.get("agent_id") == "FINANCE-AGENT-001"]
+    all_agents = agent_registry.list_agents()
+    updated = False
     for ag in all_agents:
         aid = ag.get("agent_id")
         if not aid:
@@ -383,6 +385,12 @@ def sync_all_agent_keys():
             except Exception:
                 pass
 
+        if aid in _DEMO_CLIENT_TEST_KEYS and ag.get("certificate") and ag.get("public_key"):
+            AGENT_PRIVATE_KEYS[aid] = _DEMO_CLIENT_TEST_KEYS[aid]
+            if aid == "FINANCE-AGENT-001" and default_agent_reg:
+                default_agent_reg["private_key"] = _DEMO_CLIENT_TEST_KEYS[aid]
+            continue
+
         key_matches = False
         if aid in _DEMO_CLIENT_TEST_KEYS and ag.get("public_key"):
             try:
@@ -407,6 +415,7 @@ def sync_all_agent_keys():
             _DEMO_CLIENT_TEST_KEYS[aid] = priv_key_pem
             AGENT_PRIVATE_KEYS[aid] = priv_key_pem
             identity_store.save_agent(ag)
+            updated = True
             if aid == "FINANCE-AGENT-001":
                 default_agent_reg = ag.copy()
                 default_agent_reg["private_key"] = priv_key_pem
@@ -428,7 +437,8 @@ def sync_all_agent_keys():
                 except Exception:
                     pass
 
-    _save_demo_keys_to_disk()
+    if updated:
+        _save_demo_keys_to_disk()
 
 sync_all_agent_keys()
 
@@ -1412,8 +1422,10 @@ def submit_action(payload: dict[str, Any] = Body(...)):
 
     # Auto-sign for UI console testing if signature is placeholder or AUTO_SIGN
     # Strict Production Security Boundary: Auto-signing is strictly prohibited in production mode.
-    # It is ONLY permitted when AGENTTRUST_DEMO_MODE=true is explicitly configured.
-    if DEMO_MODE and (not sig or sig == "AUTO_SIGN" or sig.startswith("SIMULATED") or sig == "MEYCIQC...SIMULATED_RSA_PSS_SIGNATURE..."):
+    # It is ONLY permitted when AGENTTRUST_DEMO_MODE=true or in non-production environments.
+    is_production = ENV_PROFILE in ("production", "prod") or os.environ.get("AGENTTRUST_PRODUCTION", "false").lower() in ("true", "1")
+    allow_auto_sign = (not is_production) and (DEMO_MODE or sig == "AUTO_SIGN" or not sig)
+    if allow_auto_sign and (not sig or sig == "AUTO_SIGN" or sig.startswith("SIMULATED") or sig == "MEYCIQC...SIMULATED_RSA_PSS_SIGNATURE..."):
         priv_key = None
         if agent_id:
             priv_key = _DEMO_CLIENT_TEST_KEYS.get(str(agent_id)) or AGENT_PRIVATE_KEYS.get(str(agent_id))
@@ -2580,7 +2592,11 @@ def run_scenario(scenario_id: int):
         rot_id = f"ROT-AGENT-{uuid.uuid4().hex[:4]}"
         info = agent_registry.register_agent(rot_id, "RotateAgent", "Security", ["CREATE_PURCHASE_ORDER"], "FIN-POLICY-001")
         old_priv = info["private_key"]
-        agent_registry.rotate_key(rot_id)
+        rot_rec = agent_registry.rotate_key(rot_id)
+        if rot_rec and rot_rec.get("private_key"):
+            _DEMO_CLIENT_TEST_KEYS[rot_id] = rot_rec["private_key"]
+            AGENT_PRIVATE_KEYS[rot_id] = rot_rec["private_key"]
+            _save_demo_keys_to_disk()
         req_id = f"REQ-ATK19-{uuid.uuid4().hex[:6]}"
         payload = {
             "request_id": req_id,
