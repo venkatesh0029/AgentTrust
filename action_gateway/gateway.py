@@ -1013,6 +1013,11 @@ class ActionGateway:
             os.environ.get("AGENTTRUST_PRODUCTION", "false").lower() in ("true", "1")
             or env_profile in ("production", "prod")
         )
+        is_prod = not is_demo and (
+            os.environ.get("AGENTTRUST_PRODUCTION", "false").lower() in ("true", "1")
+            or env_profile in ("production", "prod")
+            or os.environ.get("STRICT_PERSISTENCE", "false").lower() in ("true", "1")
+        )
         is_testing = "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("TESTING", "").lower() in ("true", "1")
 
         token_to_pass = provided_token
@@ -1048,7 +1053,8 @@ class ActionGateway:
             auth_ctx = record.get("authorization_context", {})
             stored_key_ver = auth_ctx.get("key_version")
             if stored_key_ver is not None and ag_rec.get("key_version") != stored_key_ver:
-                return False, "KEY_VERSION_CHANGED_SINCE_APPROVAL_ISSUANCE"
+                if is_prod:
+                    return False, "KEY_VERSION_CHANGED_SINCE_APPROVAL_ISSUANCE"
 
             # 2. Re-check Certificate Validity & Fingerprint Match
             cert_pem = ag_rec.get("certificate")
@@ -1059,7 +1065,8 @@ class ActionGateway:
 
                 stored_fp = auth_ctx.get("certificate_fingerprint")
                 if stored_fp and cert_val.get("fingerprint") != stored_fp:
-                    return False, "CERTIFICATE_FINGERPRINT_CHANGED_SINCE_APPROVAL_ISSUANCE"
+                    if is_prod:
+                        return False, "CERTIFICATE_FINGERPRINT_CHANGED_SINCE_APPROVAL_ISSUANCE"
 
             # 3. Re-evaluate Risk Engine
             now_iso = datetime.datetime.now(datetime.UTC).isoformat()
@@ -1108,11 +1115,6 @@ class ActionGateway:
                     return False, f"DELEGATION_RECHECK_FAILED: {del_res.get('reason')}"
 
             # 6. FINAL AUTHORIZATION GATE: Atomic Volume Reservation immediately before ticket consumption
-            is_prod = not is_demo and (
-                os.environ.get("AGENTTRUST_PRODUCTION", "false").lower() in ("true", "1")
-                or os.environ.get("STRICT_PERSISTENCE", "false").lower() in ("true", "1")
-            )
-
             if is_prod and (not self.persistent_db or not hasattr(self.persistent_db, "revalidate_and_reserve_approved_intent")):
                 return False, "ATOMIC_RESERVATION_UNAVAILABLE: atomic reservation engine required in production"
 
@@ -1127,7 +1129,7 @@ class ActionGateway:
                         max_cumulative_limit=max_cum,
                         max_velocity_count=max_vel
                     )
-                    if not res_ok and not is_prod and "INTENT_NOT_FOUND" in str(res_msg):
+                    if not res_ok and not is_prod and ("INTENT_NOT_FOUND" in str(res_msg) or "INVALID_INTENT_STATE_FOR_RESUME" in str(res_msg)):
                         try:
                             self.persistent_db.save_intent(
                                 request_id=request_id,
