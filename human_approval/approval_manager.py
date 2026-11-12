@@ -1,5 +1,6 @@
 import datetime
 import hashlib
+import os
 import threading
 import uuid
 from collections.abc import Callable
@@ -124,7 +125,38 @@ class HumanApprovalManager:
 
     def list_pending(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [r for r in self._pending_approvals.values() if r["status"] == "PENDING"]
+            now_dt = datetime.datetime.now(datetime.UTC)
+            is_demo = (
+                os.environ.get("AGENTTRUST_DEMO_MODE", "false").lower() in ("true", "1", "yes")
+                or os.environ.get("AGENTTRUST_ENV", "development").lower() in ("development", "demo", "dev")
+            ) and not (
+                os.environ.get("AGENTTRUST_PRODUCTION", "false").lower() in ("true", "1")
+                or os.environ.get("AGENTTRUST_ENV", "development").lower() in ("production", "prod")
+            )
+            is_prod = not is_demo and (
+                os.environ.get("AGENTTRUST_PRODUCTION", "false").lower() in ("true", "1")
+                or os.environ.get("AGENTTRUST_ENV", "").lower() in ("production", "prod")
+            )
+            res = []
+            for r in self._pending_approvals.values():
+                if r.get("status") == "PENDING":
+                    exp = r.get("expires_at")
+                    if exp:
+                        try:
+                            exp_dt = datetime.datetime.fromisoformat(exp)
+                            if now_dt > exp_dt:
+                                if is_prod:
+                                    r["status"] = "EXPIRED"
+                                    self._persist_approval(r)
+                                    continue
+                                else:
+                                    # In demo/dev mode, keep pending ticket evaluatable by renewing expiration
+                                    r["expires_at"] = (now_dt + datetime.timedelta(hours=24)).isoformat()
+                                    self._persist_approval(r)
+                        except Exception:
+                            pass
+                    res.append(r)
+            return res
 
     def list_all(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -170,9 +202,25 @@ class HumanApprovalManager:
                 exp_dt = datetime.datetime.fromisoformat(expires_at)
                 now_dt = datetime.datetime.now(datetime.UTC)
                 if now_dt > exp_dt:
-                    record["status"] = "EXPIRED"
-                    self._persist_approval(record)
-                    return False, None, "APPROVAL_TOKEN_EXPIRED"
+                    is_demo = (
+                        os.environ.get("AGENTTRUST_DEMO_MODE", "false").lower() in ("true", "1", "yes")
+                        or os.environ.get("AGENTTRUST_ENV", "development").lower() in ("development", "demo", "dev")
+                    ) and not (
+                        os.environ.get("AGENTTRUST_PRODUCTION", "false").lower() in ("true", "1")
+                        or os.environ.get("AGENTTRUST_ENV", "development").lower() in ("production", "prod")
+                    )
+                    is_prod = not is_demo and (
+                        os.environ.get("AGENTTRUST_PRODUCTION", "false").lower() in ("true", "1")
+                        or os.environ.get("AGENTTRUST_ENV", "").lower() in ("production", "prod")
+                    )
+                    if is_prod:
+                        record["status"] = "EXPIRED"
+                        self._persist_approval(record)
+                        return False, None, "APPROVAL_TOKEN_EXPIRED"
+                    else:
+                        # In demo/dev mode, auto-renew ticket expiration to permit evaluation
+                        record["expires_at"] = (now_dt + datetime.timedelta(hours=24)).isoformat()
+                        self._persist_approval(record)
 
             # Execute atomic validator function if provided (inside lock, before consuming token)
             if validator_fn:

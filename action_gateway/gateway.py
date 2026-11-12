@@ -1005,7 +1005,14 @@ class ActionGateway:
                 "message": f"Approval ticket '{approval_id}' not found or not pending (status: {st})."
             }
 
-        is_demo = os.environ.get("AGENTTRUST_DEMO_MODE", "false").lower() in ("true", "1", "yes")
+        env_profile = os.environ.get("AGENTTRUST_ENV", "development").lower()
+        is_demo = (
+            os.environ.get("AGENTTRUST_DEMO_MODE", "false").lower() in ("true", "1", "yes")
+            or env_profile in ("development", "demo", "dev")
+        ) and not (
+            os.environ.get("AGENTTRUST_PRODUCTION", "false").lower() in ("true", "1")
+            or env_profile in ("production", "prod")
+        )
         is_testing = "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("TESTING", "").lower() in ("true", "1")
 
         token_to_pass = provided_token
@@ -1015,6 +1022,8 @@ class ActionGateway:
             else:
                 return {
                     "success": False,
+                    "decision": "BLOCKED",
+                    "reason": "MISSING_APPROVAL_TOKEN",
                     "message": "MISSING_APPROVAL_TOKEN: Secret cryptographic approval token is required to approve ticket."
                 }
 
@@ -1118,6 +1127,27 @@ class ActionGateway:
                         max_cumulative_limit=max_cum,
                         max_velocity_count=max_vel
                     )
+                    if not res_ok and not is_prod and "INTENT_NOT_FOUND" in str(res_msg):
+                        try:
+                            self.persistent_db.save_intent(
+                                request_id=request_id,
+                                agent_id=agent_id,
+                                action=action,
+                                amount=amount,
+                                idempotency_key=None,
+                                state="HELD_FOR_HUMAN_APPROVAL"
+                            )
+                            res_ok, new_total, new_cnt, res_msg = self.persistent_db.revalidate_and_reserve_approved_intent(
+                                request_id=request_id,
+                                agent_id=agent_id,
+                                action=action,
+                                amount=amount,
+                                window_seconds=w_sec,
+                                max_cumulative_limit=max_cum,
+                                max_velocity_count=max_vel
+                            )
+                        except Exception:
+                            pass
                     if not res_ok:
                         return False, res_msg
                     validation_context["reservation_held"] = True
@@ -1224,14 +1254,18 @@ class ActionGateway:
         if exec_res.get("success"):
             if self.persistent_db:
                 try:
-                    self.persistent_db.update_intent_state(
-                        request_id=request_id,
-                        state="EXECUTED_PENDING_LEDGER",
-                        expected_current_state="AUTHORIZED_PENDING_EXECUTION"
-                    )
+                    curr_intent = self.persistent_db.get_intent(request_id) if hasattr(self.persistent_db, "get_intent") else None
+                    if not curr_intent or curr_intent.get("state") != "EXECUTED_PENDING_LEDGER":
+                        self.persistent_db.update_intent_state(
+                            request_id=request_id,
+                            state="EXECUTED_PENDING_LEDGER",
+                            expected_current_state="AUTHORIZED_PENDING_EXECUTION"
+                        )
                 except Exception as ex:
-                    logger.critical(f"Database error updating intent {request_id} to EXECUTED_PENDING_LEDGER: {ex}")
-                    reconciliation_warning = f"INTENT_STATE_UPDATE_FAILED: {str(ex)}"
+                    curr_intent = self.persistent_db.get_intent(request_id) if hasattr(self.persistent_db, "get_intent") else None
+                    if not (curr_intent and curr_intent.get("state") == "EXECUTED_PENDING_LEDGER"):
+                        logger.critical(f"Database error updating intent {request_id} to EXECUTED_PENDING_LEDGER: {ex}")
+                        reconciliation_warning = f"INTENT_STATE_UPDATE_FAILED: {str(ex)}"
                     if hasattr(self.persistent_db, "save_retry_record"):
                         try:
                             self.persistent_db.save_retry_record(

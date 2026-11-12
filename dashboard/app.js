@@ -664,7 +664,7 @@ async function fetchPendingApprovals() {
         <td><span class="badge badge-warning">${a.reason}</span></td>
         <td class="text-muted text-xs font-mono">${formatTime(a.created_at)}</td>
         <td>
-          <button class="btn btn-outline btn-success btn-sm" onclick="approveRequest('${a.approval_id}')">APPROVE</button>
+          <button class="btn btn-outline btn-success btn-sm" onclick="approveRequest('${a.approval_id}', '${a.approval_token || ''}')">APPROVE</button>
           <button class="btn btn-outline btn-danger btn-sm" onclick="rejectRequest('${a.approval_id}')">REJECT</button>
         </td>
       </tr>
@@ -674,12 +674,14 @@ async function fetchPendingApprovals() {
   }
 }
 
-async function approveRequest(approvalId) {
+async function approveRequest(approvalId, token = null) {
   try {
     const headers = await getAuthHeaders('FINANCE_APPROVER');
+    headers['Content-Type'] = 'application/json';
     const res = await fetch(`/approvals/${approvalId}/approve`, {
       method: 'POST',
-      headers: headers
+      headers: headers,
+      body: JSON.stringify({ token: token || undefined })
     });
     if (!res.ok) {
       console.error('Approval failed:', await res.text());

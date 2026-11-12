@@ -15,6 +15,7 @@ class TicketActionRequest(BaseModel):
     ticket_id: str = Field(...)
     approver_id: str = Field("human-supervisor-01")
     reason: str = Field("Approved after manual risk inspection")
+    token: str | None = Field(None, description="Secret cryptographic approval token")
 
 
 class ResumeExecutionRequest(BaseModel):
@@ -85,7 +86,10 @@ def approve_ticket(
         x_csrf_token=x_csrf_token,
     )
     gateway = get_action_gateway()
-    res = gateway.process_human_approval_resume(req.ticket_id, approver_id=req.approver_id or role.value)
+    res = gateway.process_human_approval_resume(req.ticket_id, approver_id=req.approver_id or role.value, provided_token=req.token)
+    if not res.get("success", True) or res.get("decision") == "BLOCKED":
+        detail = res.get("message") or res.get("reason") or "Approval failed"
+        raise HTTPException(status_code=400, detail=detail)
     return res
 
 
@@ -93,6 +97,7 @@ def approve_ticket(
 def approve_ticket_by_id(
     approval_id: str,
     request: Request,
+    payload: dict[str, Any] | None = Body(default=None),
     x_admin_role: str | None = Header(None, alias="X-Admin-Role"),
     authorization: str | None = Header(None),
     cookie_token: str | None = Cookie(None, alias="agenttrust_session"),
@@ -106,8 +111,17 @@ def approve_ticket_by_id(
         request=request,
         x_csrf_token=x_csrf_token,
     )
+    token = None
+    approver_id = role.value
+    if isinstance(payload, dict):
+        token = payload.get("token") or payload.get("approval_token")
+        if payload.get("approver_id"):
+            approver_id = payload["approver_id"]
     gateway = get_action_gateway()
-    res = gateway.process_human_approval_resume(approval_id, approver_id=role.value)
+    res = gateway.process_human_approval_resume(approval_id, approver_id=approver_id, provided_token=token)
+    if not res.get("success", True) or res.get("decision") == "BLOCKED":
+        detail = res.get("message") or res.get("reason") or "Approval failed"
+        raise HTTPException(status_code=400, detail=detail)
     return res
 
 

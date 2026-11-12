@@ -642,19 +642,21 @@ export const api = {
     return parsed.pending_approvals;
   },
 
-  async approveTicket(approvalId: string, roleOrToken: string = "FINANCE_APPROVER"): Promise<GenericApiResponse> {
+  async approveTicket(approvalId: string, approvalToken?: string, roleOrToken: string = "FINANCE_APPROVER"): Promise<GenericApiResponse> {
     const token = await this.ensureAuth(roleOrToken);
     const authHeaders = this.getAuthHeaders(token || roleOrToken);
     const res = await fetch(`${API_BASE}/approvals/${approvalId}/approve`, {
       method: "POST",
       credentials: "include",
-      headers: { ...authHeaders },
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ token: approvalToken }),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: "Approve ticket failed" }));
-      throw new Error((err as { detail?: string }).detail || `Approve failed (${res.status})`);
+    const data = await res.json().catch(() => ({ detail: "Approve ticket failed" }));
+    if (!res.ok || data.success === false || data.decision === "BLOCKED") {
+      const errMsg = data.detail || data.message || data.reason || `Approve failed (${res.status})`;
+      throw new Error(typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg));
     }
-    return res.json();
+    return data;
   },
 
   async rejectTicket(approvalId: string, reason: string = "REJECTED_BY_HUMAN", roleOrToken: string = "FINANCE_APPROVER"): Promise<GenericApiResponse> {

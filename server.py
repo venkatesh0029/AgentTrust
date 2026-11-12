@@ -1,3 +1,9 @@
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 import copy
 import datetime
 import json
@@ -1476,13 +1482,29 @@ def list_pending_approvals():
     return {"pending_approvals": approval_manager.list_pending()}
 
 @app.post("/approvals/{approval_id}/approve")
-def approve_request(approval_id: str, role: AdminRole = Depends(check_admin_permission_dep("approve_transaction"))):
-    res = action_gateway.process_human_approval_resume(approval_id, approver_id=role.value)
+def approve_request(
+    approval_id: str,
+    payload: dict[str, Any] | None = Body(default=None),
+    role: AdminRole = Depends(check_admin_permission_dep("approve_transaction"))
+):
+    token = None
+    approver_id = role.value
+    if isinstance(payload, dict):
+        token = payload.get("token") or payload.get("approval_token")
+        if payload.get("approver_id"):
+            approver_id = payload["approver_id"]
+    res = action_gateway.process_human_approval_resume(approval_id, approver_id=approver_id, provided_token=token)
+    if not res.get("success", True) or res.get("decision") == "BLOCKED":
+        detail = res.get("message") or res.get("reason") or "Approval failed"
+        raise HTTPException(status_code=400, detail=detail)
     return res
 
 @app.post("/approvals/grant")
 def grant_approval(req: GrantApprovalRequest, role: AdminRole = Depends(check_admin_permission_dep("approve_transaction"))):
     res = action_gateway.process_human_approval_resume(req.approval_id, approver_id=req.approver_id or role.value, provided_token=req.token)
+    if not res.get("success", True) or res.get("decision") == "BLOCKED":
+        detail = res.get("message") or res.get("reason") or "Approval failed"
+        raise HTTPException(status_code=400, detail=detail)
     return res
 
 @app.post("/approvals/{approval_id}/reject")
@@ -2500,6 +2522,8 @@ def run_scenario(scenario_id: int):
         ticket1 = approval_manager.create_approval_request("REQ-APP-13A", "FINANCE-AGENT-001", "TRANSFER_FUNDS", "ACC-01", {"amount": 20000.0}, "HIGH_VAL", "FIN-POLICY-001")
         ticket2 = approval_manager.create_approval_request("REQ-APP-13B", "FINANCE-AGENT-001", "TRANSFER_FUNDS", "ACC-02", {"amount": 30000.0}, "HIGH_VAL", "FIN-POLICY-001")
         _ok, _rec, msg = approval_manager.approve_request(ticket1["approval_id"], "SUPERVISOR-01", provided_token=ticket2["approval_token"])
+        approval_manager.reject_request(ticket1["approval_id"], "ATTACK_TEST_CLEANUP", reason="SCENARIO_13_CLEANUP")
+        approval_manager.reject_request(ticket2["approval_id"], "ATTACK_TEST_CLEANUP", reason="SCENARIO_13_CLEANUP")
         res = {
             "decision": "BLOCKED",
             "reason": msg,

@@ -30,9 +30,11 @@ export default function ApprovalsPage() {
   });
 
   const approveMutation = useMutation({
-    mutationFn: (approvalId: string) => api.approveTicket(approvalId),
+    mutationFn: ({ approvalId, token }: { approvalId: string; token?: string | null }) =>
+      api.approveTicket(approvalId, token || undefined),
     onSuccess: (data) => {
-      setFeedback({ type: "success", text: `Ticket ${(data.approval_id as string) || "approved"} resumed and executed on chain.` });
+      const id = (data.approval_reference || data.request_id || "Ticket") as string;
+      setFeedback({ type: "success", text: `Ticket ${id} approved resumed and executed on chain.` });
       queryClient.invalidateQueries({ queryKey: ["pendingApprovals"] });
       queryClient.invalidateQueries({ queryKey: ["auditChain"] });
     },
@@ -256,7 +258,7 @@ export default function ApprovalsPage() {
                     <Button
                       variant="primary"
                       size="sm"
-                      onClick={() => approveMutation.mutate(ticket.approval_id)}
+                      onClick={() => approveMutation.mutate({ approvalId: ticket.approval_id, token: ticket.approval_token })}
                       disabled={approveMutation.isPending || rejectMutation.isPending}
                     >
                       <UserCheck className="w-4 h-4 mr-1.5" />

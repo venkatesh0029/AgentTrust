@@ -17,6 +17,7 @@ class TestFabricClientGetEvent(unittest.TestCase):
             {
                 "FABRIC_GATEWAY_MODE": "simulator",
                 "FABRIC_GATEWAY_TOKEN": TEST_GATEWAY_TOKEN,
+                "FABRIC_GATEWAY_URL": "http://127.0.0.1:8090",
             },
             clear=False,
         )
